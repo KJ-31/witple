@@ -18,7 +18,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 @router.post("/register", response_model=UserResponse)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
-    logger.info(f"Register request received: email={user.email}, full_name={user.full_name}")
+    logger.info(f"Register request received: email={user.email}, username={user.username}, full_name={user.full_name}")
     
     try:
         # 이메일 중복 확인
@@ -37,6 +37,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         
         db_user = User(
             email=user.email,
+            username=user.username,
             hashed_password=hashed_password,
             full_name=user.full_name
         )
