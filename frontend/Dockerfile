@@ -19,13 +19,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV CI=true
 
-# GitHub Actions 환경에서 안정적인 빌드를 위한 설정
-RUN npm config set registry https://registry.npmjs.org/ && \
-    npm config set loglevel verbose && \
-    npm list && \
-    ls -la && \
-    cat tsconfig.json && \
-    npm run build
+# 빌드 실행
+RUN npm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner

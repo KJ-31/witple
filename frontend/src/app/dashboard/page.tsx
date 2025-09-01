@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { getCurrentUser } from '@/lib/api'
+import { getCurrentUser } from '../../../lib/api'
 
 interface User {
   id: number
