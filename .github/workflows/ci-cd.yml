@@ -417,6 +417,9 @@ jobs:
         echo "Applying ConfigMap..."
         kubectl apply -f k8s/configmap-generated.yaml
         
+        # IMAGE_TAG 설정 (커밋 SHA 태그)
+        export IMAGE_TAG=${GITHUB_SHA}
+
         # 백엔드 배포
         echo "Deploying backend..."
         

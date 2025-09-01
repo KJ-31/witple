@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: witple-frontend
-        image: ECR_REGISTRY/witple-frontend:IMAGE_TAG
+        image: ${ECR_REGISTRY}/witple-frontend:${IMAGE_TAG}
         ports:
         - containerPort: 3000
         env:
