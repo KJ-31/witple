@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --only=production
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -17,9 +17,15 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV CI=true
 
-# TypeScript 설정 확인 및 빌드
-RUN npm run build
+# GitHub Actions 환경에서 안정적인 빌드를 위한 설정
+RUN npm config set registry https://registry.npmjs.org/ && \
+    npm config set loglevel verbose && \
+    npm list && \
+    ls -la && \
+    cat tsconfig.json && \
+    npm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner
