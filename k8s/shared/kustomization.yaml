@@ -6,5 +6,4 @@ namespace: witple
 resources:
 - ../namespace.yaml
 - ../configmap.yaml
-- ../secret.yaml
 - ../hpa.yaml
