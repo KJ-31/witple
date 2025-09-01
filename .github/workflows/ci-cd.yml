@@ -498,24 +498,30 @@ jobs:
         echo "Checking pods status..."
         kubectl get pods -n ${{ env.EKS_NAMESPACE }}
         
-        # 프론트엔드 ALB DNS 확인
-        echo "Waiting for frontend Ingress to be ready..."
-        FRONTEND_ALB_DNS=""
-        for i in {1..60}; do
-          echo "Attempt $i/60: Checking frontend Ingress status..."
-          FRONTEND_ALB_DNS=$(kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          if [ -n "$FRONTEND_ALB_DNS" ]; then
-            echo "✅ Frontend Ingress is ready! ALB DNS: $FRONTEND_ALB_DNS"
-            break
-          fi
-          if [ $i -eq 60 ]; then
-            echo "❌ Frontend Ingress failed to become ready after 10 minutes"
-            kubectl describe ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }}
-            exit 1
-          fi
-          echo "⏳ Frontend Ingress not ready yet, waiting 10 seconds..."
-          sleep 10
-        done
+        # 프론트엔드 ALB DNS 확인 (도메인 사용시만)
+        if [ "$USE_DOMAIN" = "true" ]; then
+          echo "Waiting for frontend Ingress to be ready..."
+          FRONTEND_ALB_DNS=""
+          for i in {1..60}; do
+            echo "Attempt $i/60: Checking frontend Ingress status..."
+            FRONTEND_ALB_DNS=$(kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$FRONTEND_ALB_DNS" ]; then
+              echo "✅ Frontend Ingress is ready! ALB DNS: $FRONTEND_ALB_DNS"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "❌ Frontend Ingress failed to become ready after 10 minutes"
+              kubectl describe ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }}
+              exit 1
+            fi
+            echo "⏳ Frontend Ingress not ready yet, waiting 10 seconds..."
+            sleep 10
+          done
+        else
+          echo "✅ Frontend Ingress check skipped (ALB DNS only mode)"
+          # 기존 백엔드 ALB를 통한 접근 사용
+          FRONTEND_ALB_DNS=$(kubectl get ingress witple-backend-ingress -n ${{ env.EKS_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+        fi
         
         # 도메인 설정에 따른 URL 출력
         echo "=== Deployment URLs ==="
