@@ -16,9 +16,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DEBUG=1
+ENV DEBUG=*
+ENV NODE_ENV=development
 
-RUN npm config set loglevel verbose && npm run build
+RUN npm config set loglevel verbose && \
+    npm list && \
+    npm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner

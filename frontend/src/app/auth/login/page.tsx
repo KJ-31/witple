@@ -19,7 +19,9 @@ export default function LoginPage() {
 
     try {
       const response = await login(email, password)
-      localStorage.setItem('token', response.access_token)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('token', response.access_token)
+      }
       router.push('/dashboard')
     } catch (err) {
       setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.')

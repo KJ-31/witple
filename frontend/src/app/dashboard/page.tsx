@@ -19,6 +19,8 @@ export default function DashboardPage() {
   const router = useRouter()
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    
     const token = localStorage.getItem('token')
     if (!token) {
       router.push('/auth/login')
@@ -32,7 +34,9 @@ export default function DashboardPage() {
       } catch (err) {
         console.error('Failed to fetch user:', err)
         setError('사용자 정보를 불러오는데 실패했습니다.')
-        localStorage.removeItem('token')
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('token')
+        }
         router.push('/auth/login')
       } finally {
         setLoading(false)
@@ -43,7 +47,9 @@ export default function DashboardPage() {
   }, [router])
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token')
+    }
     router.push('/')
   }
 

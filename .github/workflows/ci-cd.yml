@@ -18,31 +18,8 @@ permissions:
   contents: read    # 코드 읽기 권한
 
 jobs:
-  # 변경사항 확인
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.changes.outputs.backend }}
-      frontend: ${{ steps.changes.outputs.frontend }}
-      k8s: ${{ steps.changes.outputs.k8s }}
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dorny/paths-filter@v2
-      id: changes
-      with:
-        filters: |
-          backend:
-            - 'backend/**'
-          frontend:
-            - 'frontend/**'
-          k8s:
-            - 'k8s/**'
-            - '.github/workflows/**'
-
   # 백엔드 테스트
   test-backend:
-    needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' || needs.changes.outputs.k8s == 'true' }}
     runs-on: ubuntu-latest
     
     services:
@@ -102,8 +79,6 @@ jobs:
 
   # 프론트엔드 테스트
   test-frontend:
-    needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.k8s == 'true' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -133,8 +108,8 @@ jobs:
 
   # 백엔드 빌드 및 푸시
   build-backend:
-    needs: [changes, test-backend]
-    if: ${{ github.ref == 'refs/heads/main' && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.k8s == 'true') }}
+    needs: test-backend
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -166,8 +141,8 @@ jobs:
 
   # 프론트엔드 빌드 및 푸시
   build-frontend:
-    needs: [changes, test-frontend]
-    if: ${{ github.ref == 'refs/heads/main' && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.k8s == 'true') }}
+    needs: test-frontend
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -199,7 +174,7 @@ jobs:
 
   # 통합 배포
   deploy:
-    needs: [changes, build-backend, build-frontend]
+    needs: [build-backend, build-frontend]
     if: ${{ github.ref == 'refs/heads/main' && always() && !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     
@@ -443,144 +418,116 @@ jobs:
         echo "Applying ConfigMap..."
         kubectl apply -f k8s/configmap-generated.yaml
         
-        # 백엔드 배포 (변경이 있는 경우만)
-        if [[ "${{ needs.changes.outputs.backend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Deploying backend..."
-          
-          # 기존 백엔드 Pod들을 미리 정리
-          kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend --force --grace-period=0 || true
-          
-          # 백엔드 매니페스트 환경 변수 치환
-          envsubst < k8s/backend/deployment.yaml > k8s/backend/deployment-generated.yaml
-          envsubst < k8s/backend/service.yaml > k8s/backend/service-generated.yaml
-          
-          # 백엔드 배포 (내부 서비스만)
-          kubectl apply -f k8s/backend/deployment-generated.yaml
-          kubectl apply -f k8s/backend/service-generated.yaml
-        else
-          echo "⏭️ Backend deployment skipped (no changes)"
-        fi
+        # 백엔드 배포
+        echo "Deploying backend..."
         
-        # 프론트엔드 배포 (변경이 있는 경우만)
-        if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Deploying frontend..."
-          
-          # 기존 프론트엔드 Pod들을 미리 정리
-          kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend --force --grace-period=0 || true
-          
-          # 프론트엔드 매니페스트 환경 변수 치환
-          envsubst < k8s/frontend/deployment.yaml > k8s/frontend/deployment-generated.yaml
-          envsubst < k8s/frontend/service.yaml > k8s/frontend/service-generated.yaml
-          envsubst < k8s/frontend/ingress.yaml > k8s/frontend/ingress-generated.yaml
-          
-          # 프론트엔드 배포
-          kubectl apply -f k8s/frontend/deployment-generated.yaml
-          kubectl apply -f k8s/frontend/service-generated.yaml
-          kubectl apply -f k8s/frontend/ingress-generated.yaml
-        else
-          echo "⏭️ Frontend deployment skipped (no changes)"
-        fi
+        # 기존 백엔드 Pod들을 미리 정리
+        kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend --force --grace-period=0 || true
         
-        # Ingress 상태 확인 (프론트엔드만)
-        if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Checking frontend Ingress status..."
-          kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} || echo "Frontend Ingress not found"
-        fi
+        # 백엔드 매니페스트 환경 변수 치환
+        envsubst < k8s/backend/deployment.yaml > k8s/backend/deployment-generated.yaml
+        envsubst < k8s/backend/service.yaml > k8s/backend/service-generated.yaml
+        
+        # 백엔드 배포 (내부 서비스만)
+        kubectl apply -f k8s/backend/deployment-generated.yaml
+        kubectl apply -f k8s/backend/service-generated.yaml
+        
+        # 프론트엔드 배포
+        echo "Deploying frontend..."
+        
+        # 기존 프론트엔드 Pod들을 미리 정리
+        kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend --force --grace-period=0 || true
+        
+        # 프론트엔드 매니페스트 환경 변수 치환
+        envsubst < k8s/frontend/deployment.yaml > k8s/frontend/deployment-generated.yaml
+        envsubst < k8s/frontend/service.yaml > k8s/frontend/service-generated.yaml
+        envsubst < k8s/frontend/ingress.yaml > k8s/frontend/ingress-generated.yaml
+        
+        # 프론트엔드 배포
+        kubectl apply -f k8s/frontend/deployment-generated.yaml
+        kubectl apply -f k8s/frontend/service-generated.yaml
+        kubectl apply -f k8s/frontend/ingress-generated.yaml
+        
+        # Ingress 상태 확인
+        echo "Checking frontend Ingress status..."
+        kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} || echo "Frontend Ingress not found"
         
         # 배포 상태 확인 (병렬로 체크)
         echo "Waiting for deployments to be ready..."
         
-        # 백엔드 배포 상태 확인 (변경이 있는 경우만)
-        if [[ "${{ needs.changes.outputs.backend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Checking backend deployment..."
-          if ! kubectl rollout status deployment/witple-backend -n ${{ env.EKS_NAMESPACE }} --timeout=300s; then
-            echo "Backend deployment failed! Debugging..."
-            kubectl describe deployment witple-backend -n ${{ env.EKS_NAMESPACE }}
-            kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend
-            for pod in $(kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend -o jsonpath='{.items[*].metadata.name}'); do
-              echo "--- Pod: $pod ---"
-              kubectl logs $pod -n ${{ env.EKS_NAMESPACE }} --tail=100 || echo "No logs available for $pod"
-              kubectl describe pod $pod -n ${{ env.EKS_NAMESPACE }}
-            done
-            exit 1
-          fi
-          echo "✅ Backend deployment successful"
-        else
-          echo "⏭️ Backend deployment skipped (no changes)"
+        # 백엔드 배포 상태 확인
+        echo "Checking backend deployment..."
+        if ! kubectl rollout status deployment/witple-backend -n ${{ env.EKS_NAMESPACE }} --timeout=300s; then
+          echo "Backend deployment failed! Debugging..."
+          kubectl describe deployment witple-backend -n ${{ env.EKS_NAMESPACE }}
+          kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend
+          for pod in $(kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend -o jsonpath='{.items[*].metadata.name}'); do
+            echo "--- Pod: $pod ---"
+            kubectl logs $pod -n ${{ env.EKS_NAMESPACE }} --tail=100 || echo "No logs available for $pod"
+            kubectl describe pod $pod -n ${{ env.EKS_NAMESPACE }}
+          done
+          exit 1
         fi
+        echo "✅ Backend deployment successful"
         
-        # 프론트엔드 배포 상태 확인 (변경이 있는 경우만)
-        if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Checking frontend deployment..."
-          if ! kubectl rollout status deployment/witple-frontend -n ${{ env.EKS_NAMESPACE }} --timeout=300s; then
-            echo "Frontend deployment failed! Debugging..."
-            kubectl describe deployment witple-frontend -n ${{ env.EKS_NAMESPACE }}
-            kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend
-            for pod in $(kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend -o jsonpath='{.items[*].metadata.name}'); do
-              echo "--- Pod: $pod ---"
-              kubectl logs $pod -n ${{ env.EKS_NAMESPACE }} --tail=100 || echo "No logs available for $pod"
-              kubectl describe pod $pod -n ${{ env.EKS_NAMESPACE }}
-            done
-            exit 1
-          fi
-          echo "✅ Frontend deployment successful"
-        else
-          echo "⏭️ Frontend deployment skipped (no changes)"
+        # 프론트엔드 배포 상태 확인
+        echo "Checking frontend deployment..."
+        if ! kubectl rollout status deployment/witple-frontend -n ${{ env.EKS_NAMESPACE }} --timeout=300s; then
+          echo "Frontend deployment failed! Debugging..."
+          kubectl describe deployment witple-frontend -n ${{ env.EKS_NAMESPACE }}
+          kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend
+          for pod in $(kubectl get pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend -o jsonpath='{.items[*].metadata.name}'); do
+            echo "--- Pod: $pod ---"
+            kubectl logs $pod -n ${{ env.EKS_NAMESPACE }} --tail=100 || echo "No logs available for $pod"
+            kubectl describe pod $pod -n ${{ env.EKS_NAMESPACE }}
+          done
+          exit 1
         fi
+        echo "✅ Frontend deployment successful"
         
         echo "Checking pods status..."
         kubectl get pods -n ${{ env.EKS_NAMESPACE }}
         
         # 프론트엔드 ALB DNS 확인
+        echo "Waiting for frontend Ingress to be ready..."
         FRONTEND_ALB_DNS=""
-        if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "Waiting for frontend Ingress to be ready..."
-          for i in {1..60}; do
-            echo "Attempt $i/60: Checking frontend Ingress status..."
-            FRONTEND_ALB_DNS=$(kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            if [ -n "$FRONTEND_ALB_DNS" ]; then
-              echo "✅ Frontend Ingress is ready! ALB DNS: $FRONTEND_ALB_DNS"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "❌ Frontend Ingress failed to become ready after 10 minutes"
-              kubectl describe ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }}
-              exit 1
-            fi
-            echo "⏳ Frontend Ingress not ready yet, waiting 10 seconds..."
-            sleep 10
-          done
-        fi
+        for i in {1..60}; do
+          echo "Attempt $i/60: Checking frontend Ingress status..."
+          FRONTEND_ALB_DNS=$(kubectl get ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          if [ -n "$FRONTEND_ALB_DNS" ]; then
+            echo "✅ Frontend Ingress is ready! ALB DNS: $FRONTEND_ALB_DNS"
+            break
+          fi
+          if [ $i -eq 60 ]; then
+            echo "❌ Frontend Ingress failed to become ready after 10 minutes"
+            kubectl describe ingress witple-frontend-ingress -n ${{ env.EKS_NAMESPACE }}
+            exit 1
+          fi
+          echo "⏳ Frontend Ingress not ready yet, waiting 10 seconds..."
+          sleep 10
+        done
         
         # 도메인 설정에 따른 URL 출력
         echo "=== Deployment URLs ==="
         
         if [ "$USE_DOMAIN" = "true" ]; then
-          if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-            echo "🌐 Application URL: https://$DOMAIN_NAME"
-            echo "🔗 Backend API (via frontend): https://$DOMAIN_NAME/api"
-          fi
+          echo "🌐 Application URL: https://$DOMAIN_NAME"
+          echo "🔗 Backend API (via frontend): https://$DOMAIN_NAME/api"
         else
-          if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-            echo "🌐 Application URL: http://$FRONTEND_ALB_DNS"
-            echo "🔗 Backend API (via frontend): http://$FRONTEND_ALB_DNS/api"
-          fi
+          echo "🌐 Application URL: http://$FRONTEND_ALB_DNS"
+          echo "🔗 Backend API (via frontend): http://$FRONTEND_ALB_DNS/api"
           echo "📝 Note: No custom domain configured. Access via ALB DNS only."
         fi
         
         # 내부 서비스 정보
         echo ""
         echo "🏗️ Internal Services:"
-        if [[ "${{ needs.changes.outputs.backend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "🔧 Backend Service: witple-backend-service:80 (ClusterIP)"
-        fi
-        if [[ "${{ needs.changes.outputs.frontend }}" == "true" || "${{ needs.changes.outputs.k8s }}" == "true" ]]; then
-          echo "🔧 Frontend Service: witple-frontend-service:80 (ClusterIP)"
-        fi
+        echo "🔧 Backend Service: witple-backend-service:80 (ClusterIP)"
+        echo "🔧 Frontend Service: witple-frontend-service:80 (ClusterIP)"
         
         echo ""
         echo "🎉 Deployment completed successfully!"
         echo "📊 Summary:"
-        echo "- Backend changes: ${{ needs.changes.outputs.backend }}"
-        echo "- Frontend changes: ${{ needs.changes.outputs.frontend }}"
-        echo "- K8s changes: ${{ needs.changes.outputs.k8s }}"
+        echo "- Backend: Deployed"
+        echo "- Frontend: Deployed"
+        echo "- K8s: Updated"
