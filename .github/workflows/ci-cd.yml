@@ -448,7 +448,33 @@ jobs:
           envsubst < k8s/frontend/ingress.yaml > k8s/frontend/ingress-generated.yaml
         else
           echo "Creating frontend Ingress with HTTP only (no domain mode)"
-          envsubst < k8s/frontend/ingress-http.yaml > k8s/frontend/ingress-generated.yaml
+          # HTTP 전용 Ingress 생성 (도메인 없음)
+          {
+            echo "apiVersion: networking.k8s.io/v1"
+            echo "kind: Ingress"
+            echo "metadata:"
+            echo "  name: witple-frontend-ingress"
+            echo "  namespace: witple"
+            echo "  annotations:"
+            echo "    kubernetes.io/ingress.class: \"alb\""
+            echo "    alb.ingress.kubernetes.io/scheme: \"internet-facing\""
+            echo "    alb.ingress.kubernetes.io/target-type: \"ip\""
+            echo "    alb.ingress.kubernetes.io/listen-ports: '[{\"HTTP\": 80}]'"
+            echo "    alb.ingress.kubernetes.io/subnets: \"${PUBLIC_SUBNET_IDS}\""
+            echo "    alb.ingress.kubernetes.io/security-groups: \"${ALB_SECURITY_GROUP_ID}\""
+            echo "spec:"
+            echo "  ingressClassName: alb"
+            echo "  rules:"
+            echo "  - http:"
+            echo "      paths:"
+            echo "      - path: /"
+            echo "        pathType: Prefix"
+            echo "        backend:"
+            echo "          service:"
+            echo "            name: witple-frontend-service"
+            echo "            port:"
+            echo "              number: 80"
+          } > k8s/frontend/ingress-generated.yaml
         fi
         
         # 프론트엔드 배포
