@@ -363,7 +363,6 @@ jobs:
         echo "Applying shared resources..."
         kubectl apply -f k8s/namespace.yaml
         kubectl apply -f k8s/configmap-generated.yaml
-        kubectl apply -f k8s/secret.yaml
         kubectl apply -f k8s/hpa.yaml
         
         # Ingress 생성 (도메인 사용 여부에 따라 다르게 처리)
