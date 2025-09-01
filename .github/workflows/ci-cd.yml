@@ -237,7 +237,7 @@ jobs:
         
         # Get current AWS identity
         CURRENT_ARN=$(aws sts get-caller-identity --query 'Arn' --output text)
-        echo "Current AWS ARN: $CURRENT_ARN"
+        echo "Current AWS identity: $CURRENT_ARN"
         
         # Create EKS Access Entry for GitHub Actions role (if not exists)
         echo "Creating EKS Access Entry for GitHub Actions role..."
