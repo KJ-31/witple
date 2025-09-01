@@ -443,12 +443,20 @@ jobs:
         # 프론트엔드 매니페스트 환경 변수 치환
         envsubst < k8s/frontend/deployment.yaml > k8s/frontend/deployment-generated.yaml
         envsubst < k8s/frontend/service.yaml > k8s/frontend/service-generated.yaml
-        envsubst < k8s/frontend/ingress.yaml > k8s/frontend/ingress-generated.yaml
+        if [ "$USE_DOMAIN" = "true" ]; then
+          envsubst < k8s/frontend/ingress.yaml > k8s/frontend/ingress-generated.yaml
+        else
+          echo "Skipping frontend ingress generation (no domain)"
+        fi
         
         # 프론트엔드 배포
         kubectl apply -f k8s/frontend/deployment-generated.yaml
         kubectl apply -f k8s/frontend/service-generated.yaml
-        kubectl apply -f k8s/frontend/ingress-generated.yaml
+        if [ "$USE_DOMAIN" = "true" ]; then
+          kubectl apply -f k8s/frontend/ingress-generated.yaml
+        else
+          echo "Frontend ingress apply skipped (ALB DNS only mode)"
+        fi
         
         # Ingress 상태 확인
         echo "Checking frontend Ingress status..."
