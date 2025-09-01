@@ -14,8 +14,8 @@ env:
   EKS_NAMESPACE: witple
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # OIDC 토큰 생성 권한
+  contents: read    # 코드 읽기 권한
 
 jobs:
   # 변경사항 확인
