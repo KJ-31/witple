@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: witple
+data:
+  ENVIRONMENT: "production"
+  # 프론트엔드에서 백엔드 내부 호출용 (서버사이드)
+  API_INTERNAL_URL: "http://witple-backend-service:80"
+  # 클라이언트에서 프론트엔드 접근용 (브라우저)
+  NEXT_PUBLIC_API_BASE: "/api"
