@@ -56,6 +56,7 @@ export const register = async (email: string, password: string, full_name: strin
   const response = await apiClient.post('/api/v1/auth/register', {
     email,
     password,
+    username: email, // email을 username으로 사용
     full_name,
   })
   return response.data
