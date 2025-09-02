@@ -70,6 +70,7 @@ volumes:
   postgres_data:
   redis_data:
 
+
 networks:
   witple_network:
     driver: bridge
