@@ -1,27 +1,61 @@
 'use client'
 
-import React, { useState, FormEvent } from 'react'
+import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { fetchRecommendedCities, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState('')
+  const [citySections, setCitySections] = useState<CitySection[]>([])
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [page, setPage] = useState(0)
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const loadingRef = useRef(false)
 
-  const imageSets = [
-    {
-      title: '과거와 현재가 공존하는, 서울',
-      images: [
-        { src: '/images/seoul-modern.jpg', alt: '서울 현대적 건물' },
-        { src: '/images/seoul-traditional.jpg', alt: '서울 전통 건물' }
-      ]
-    },
-    {
-      title: '영화의 도시, 부산',
-      images: [
-        { src: '/images/busan-market.jpg', alt: '부산 전통시장' },
-        { src: '/images/busan-food.jpg', alt: '부산 음식' }
-      ]
+  // 추천 도시 데이터 로드 함수
+  const loadRecommendedCities = useCallback(async (pageNum: number) => {
+    if (loadingRef.current) return
+    
+    loadingRef.current = true
+    setLoading(true)
+    try {
+      const { data, hasMore: moreData } = await fetchRecommendedCities(pageNum, 3)
+
+      if (pageNum === 0) {
+        setCitySections(data)
+      } else {
+        setCitySections(prev => [...prev, ...data])
+      }
+
+      setHasMore(moreData)
+      setPage(pageNum)
+    } catch (error) {
+      console.error('데이터 로드 오류:', error)
+    } finally {
+      setLoading(false)
+      loadingRef.current = false
     }
-  ]
+  }, [])
+
+  // 초기 데이터 로드
+  useEffect(() => {
+    loadRecommendedCities(0)
+  }, [])
+
+  // 무한 스크롤 감지
+  const lastElementRef = useCallback((node: HTMLDivElement | null) => {
+    if (loadingRef.current) return
+    if (observerRef.current) observerRef.current.disconnect()
+
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+        loadRecommendedCities(page + 1)
+      }
+    })
+
+    if (node) observerRef.current.observe(node)
+  }, [hasMore, page])
 
   const handleSearch = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -104,29 +138,80 @@ export default function Home() {
         </form>
       </div>
 
-      {/* 세로로 섹션이 쌓이고, 섹션 안의 이미지들은 가로 스와이프 */}
+      {/* 추천 도시별 명소 섹션 (무한 스크롤) */}
       <main className="px-4 pb-16 space-y-12">
-        {imageSets.map((set, i) => (
-          <SectionCarousel key={i} title={set.title} images={set.images} />
+        {citySections.map((citySection, index) => (
+          <div
+            key={citySection.id}
+            ref={index === citySections.length - 1 ? lastElementRef : null}
+          >
+            <SectionCarousel
+              title={`${citySection.description}`}
+              cityName={citySection.cityName}
+              attractions={citySection.attractions}
+              recommendationScore={citySection.recommendationScore}
+            />
+          </div>
         ))}
+
+        {/* 로딩 인디케이터 */}
+        {loading && (
+          <div className="flex justify-center items-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+            <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
+          </div>
+        )}
+
+        {/* 더 이상 데이터가 없을 때 */}
+        {!hasMore && citySections.length > 0 && (
+          <div className="text-center py-8">
+            <p className="text-[#6FA0E6] text-lg">모든 추천 여행지를 확인했습니다 ✨</p>
+            <p className="text-[#94A9C9] text-sm mt-2">새로운 여행지가 추가되면 알려드릴게요!</p>
+          </div>
+        )}
+
+        {/* 데이터가 없을 때 */}
+        {!loading && citySections.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
+          </div>
+        )}
       </main>
     </div>
   )
 }
 
-/** 섹션 하나: 제목 + (가로 스와이프) 카드들 */
+/** 추천 도시별 명소 섹션 컴포넌트 */
 function SectionCarousel({
   title,
-  images,
+  cityName,
+  attractions,
+  recommendationScore,
 }: {
   title: string
-  images: { src: string; alt: string }[]
+  cityName: string
+  attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
+  recommendationScore: number
 }) {
   return (
-    <section aria-label={title} className="w-full">
-      <h2 className="text-2xl md:text-3xl font-semibold text-[#94A9C9] mb-5">
-        {title}
-      </h2>
+    <section aria-label={`${cityName} ${title}`} className="w-full">
+      {/* 도시 제목과 추천 점수 */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-semibold text-[#94A9C9]">
+            {title}
+          </h2>
+          <div className="flex items-center mt-2 space-x-2">
+            <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
+            <div className="flex items-center">
+              <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
+              <span className="text-sm text-[#6FA0E6]">{recommendationScore}% 추천</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 가로 캐러셀 트랙 */}
       <div className="relative -mx-4 px-4">
@@ -139,29 +224,58 @@ function SectionCarousel({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
-          {images.map((img, idx) => (
+          {attractions.map((attraction) => (
             <figure
-              key={idx}
+              key={attraction.id}
               className="
                 snap-start shrink-0
                 rounded-[28px] overflow-hidden
                 bg-[#0F1A31] ring-1 ring-white/5
-                aspect-[4/3]
                 w-[78%] xs:w-[70%] sm:w-[320px]
+                cursor-pointer hover:ring-[#3E68FF]/50 transition-all duration-300
+                group
               "
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={img.src}
-                alt={img.alt}
-                loading="lazy"
-                className="w-full h-full object-cover"
-              />
+              {/* 이미지 영역 */}
+              <div className="aspect-[4/3] relative overflow-hidden">
+                {/* 실제 프로덕션에서는 Next.js Image 컴포넌트 사용 권장 */}
+                <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                  <span className="text-white text-lg opacity-70">
+                    {attraction.name}
+                  </span>
+                </div>
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300"></div>
+
+                {/* 카테고리 배지 */}
+                <div className="absolute top-3 left-3">
+                  <span className="px-2 py-1 text-xs bg-black/50 text-white rounded-full backdrop-blur-sm">
+                    {getCategoryName(attraction.category)}
+                  </span>
+                </div>
+
+                {/* 평점 */}
+                <div className="absolute top-3 right-3 flex items-center bg-black/50 rounded-full px-2 py-1 backdrop-blur-sm">
+                  <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                  <span className="text-white text-xs font-medium">{attraction.rating}</span>
+                </div>
+              </div>
+
+              {/* 명소 정보 */}
+              <div className="p-4">
+                <h3 className="font-semibold text-white text-lg mb-2 group-hover:text-[#3E68FF] transition-colors">
+                  {attraction.name}
+                </h3>
+                <p className="text-[#94A9C9] text-sm line-clamp-2">
+                  {attraction.description}
+                </p>
+              </div>
             </figure>
           ))}
         </div>
 
-        {/* 좌/우 가장자리 페이드(선택사항) */}
+        {/* 좌/우 가장자리 페이드 */}
         <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
         <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#0B1220] to-transparent" />
       </div>
@@ -169,7 +283,14 @@ function SectionCarousel({
   )
 }
 
-/* 전역 CSS(globals.css) 권장 추가
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-*/
+// 카테고리 한국어 변환 함수
+function getCategoryName(category: string): string {
+  const categoryMap: { [key: string]: string } = {
+    tourist: '관광',
+    food: '맛집',
+    culture: '문화',
+    nature: '자연',
+    shopping: '쇼핑'
+  }
+  return categoryMap[category] || category
+}
