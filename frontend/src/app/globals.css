@@ -27,3 +27,11 @@ body {
   /* 혹시라도 트랙 공간 차지 방지 */
   height: 0 !important;
 }
+
+/* 텍스트 2줄 제한 */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
