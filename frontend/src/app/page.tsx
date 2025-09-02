@@ -2,9 +2,11 @@
 
 import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { fetchRecommendedCities, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [loading, setLoading] = useState(false)
@@ -16,7 +18,7 @@ export default function Home() {
   // 추천 도시 데이터 로드 함수
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
     if (loadingRef.current) return
-    
+
     loadingRef.current = true
     setLoading(true)
     try {
@@ -150,6 +152,7 @@ export default function Home() {
               cityName={citySection.cityName}
               attractions={citySection.attractions}
               recommendationScore={citySection.recommendationScore}
+              onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
             />
           </div>
         ))}
@@ -187,11 +190,13 @@ function SectionCarousel({
   cityName,
   attractions,
   recommendationScore,
+  onAttractionClick,
 }: {
   title: string
   cityName: string
   attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
   recommendationScore: number
+  onAttractionClick: (attractionId: string) => void
 }) {
   return (
     <section aria-label={`${cityName} ${title}`} className="w-full">
@@ -235,6 +240,7 @@ function SectionCarousel({
                 cursor-pointer hover:ring-[#3E68FF]/50 transition-all duration-300
                 group
               "
+              onClick={() => onAttractionClick(attraction.id)}
             >
               {/* 이미지 영역 */}
               <div className="aspect-[4/3] relative overflow-hidden">
