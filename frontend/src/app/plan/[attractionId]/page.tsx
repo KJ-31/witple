@@ -89,9 +89,11 @@ export default function PlanCalendar({ params }: PlanCalendarProps) {
   const handleSelectComplete = () => {
     if (selectedDates.length === 0) return
     
-    // 여행 계획 페이지로 이동 (추후 구현)
-    console.log('Selected dates:', selectedDates)
-    alert(`${selectedDates.length}일간의 여행이 선택되었습니다!`)
+    // 선택된 날짜들을 query parameter로 전달하며 세부 일정 페이지로 이동
+    const startDate = selectedDates[0].toISOString().split('T')[0]
+    const endDate = selectedDates[selectedDates.length - 1].toISOString().split('T')[0]
+    
+    router.push(`/itinerary/${params.attractionId}?startDate=${startDate}&endDate=${endDate}&days=${selectedDates.length}`)
   }
 
   // 캘린더 날짜 생성
