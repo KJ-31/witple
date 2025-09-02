@@ -14,6 +14,7 @@ interface SelectedPlace {
   category: string
   rating: number
   description: string
+  dayNumber?: number // 선택된 날짜 (1, 2, 3...)
 }
 
 type CategoryKey = 'all' | 'tourist' | 'food' | 'culture' | 'nature' | 'shopping'
@@ -30,6 +31,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 상태 관리
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
   const [selectedPlaces, setSelectedPlaces] = useState<SelectedPlace[]>([])
+  const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 장소 추가할 날짜
   
   // 선택된 날짜 범위 생성
   const generateDateRange = () => {
@@ -122,7 +124,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       name: place.name,
       category: place.category,
       rating: place.rating,
-      description: place.description
+      description: place.description,
+      dayNumber: selectedDayForAdding
     }
 
     setSelectedPlaces(prev => {
@@ -132,7 +135,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         // 이미 선택된 장소라면 제거
         return prev.filter(p => p.id !== place.id)
       } else {
-        // 새로운 장소 추가
+        // 새로운 장소를 선택된 날짜에 추가
         return [...prev, selectedPlace]
       }
     })
@@ -148,13 +151,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       return
     }
     
-    // 선택된 장소와 날짜 정보를 query parameter로 전달하며 지도 페이지로 이동
+    // 선택된 장소와 날짜별 정보를 query parameter로 전달하며 지도 페이지로 이동
     const selectedPlaceIds = selectedPlaces.map(place => place.id).join(',')
+    const dayNumbers = selectedPlaces.map(place => place.dayNumber || 1).join(',')
     const startDate = dateRange[0].toISOString().split('T')[0]
     const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
     
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
+      dayNumbers: dayNumbers,
       startDate,
       endDate,
       days: dateRange.length.toString(),
@@ -200,6 +205,44 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         <p className="text-[#94A9C9] text-xs">
           {dateRange.length}일간의 여행 • 선택된 장소: {selectedPlaces.length}개
         </p>
+      </div>
+
+      {/* Day Selection Tabs */}
+      <div className="px-4 mb-6">
+        <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p>
+        <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
+          {dateRange.map((date, index) => {
+            const dayNumber = index + 1
+            const isSelected = selectedDayForAdding === dayNumber
+            const placesForDay = selectedPlaces.filter(p => p.dayNumber === dayNumber).length
+            
+            return (
+              <button
+                key={dayNumber}
+                onClick={() => setSelectedDayForAdding(dayNumber)}
+                className={`
+                  flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-w-[70px]
+                  ${isSelected 
+                    ? 'bg-[#3E68FF] text-white shadow-lg' 
+                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
+                  }
+                `}
+              >
+                <div className="text-center">
+                  <div className="font-semibold">Day {dayNumber}</div>
+                  <div className="text-xs opacity-80">
+                    {date.getMonth() + 1}/{date.getDate()}
+                  </div>
+                  {placesForDay > 0 && (
+                    <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
+                      {placesForDay}개
+                    </div>
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Category Tabs */}
@@ -297,22 +340,34 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       {selectedPlaces.length > 0 && (
         <div className="px-4 py-6">
           <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-4">
               <h4 className="text-white font-semibold">선택된 장소</h4>
               <span className="text-[#3E68FF] font-semibold">{selectedPlaces.length}개</span>
             </div>
             
-            <div className="flex flex-wrap gap-2">
-              {selectedPlaces.slice(0, 3).map(place => (
-                <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
-                  {place.name}
-                </span>
-              ))}
-              {selectedPlaces.length > 3 && (
-                <span className="text-xs bg-[#1F3C7A]/50 text-[#94A9C9] px-2 py-1 rounded-full">
-                  +{selectedPlaces.length - 3}개 더
-                </span>
-              )}
+            {/* 날짜별로 그룹화해서 표시 */}
+            <div className="space-y-3">
+              {dateRange.map((date, index) => {
+                const dayNumber = index + 1
+                const placesForDay = selectedPlaces.filter(p => p.dayNumber === dayNumber)
+                
+                if (placesForDay.length === 0) return null
+                
+                return (
+                  <div key={dayNumber} className="border-l-2 border-[#3E68FF] pl-3">
+                    <div className="text-xs text-[#6FA0E6] font-semibold mb-2">
+                      Day {dayNumber} ({date.getMonth() + 1}/{date.getDate()})
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {placesForDay.map(place => (
+                        <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
+                          {place.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
