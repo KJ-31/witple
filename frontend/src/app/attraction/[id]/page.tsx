@@ -47,6 +47,10 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
     router.back()
   }
 
+  const handleSelectAttraction = () => {
+    router.push(`/plan/${params.id}`)
+  }
+
   return (
     <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
       {/* Header with back button */}
@@ -105,7 +109,10 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
 
         {/* Action button */}
         <div className="mb-8">
-          <button className="w-full bg-[#3E68FF] hover:bg-[#4C7DFF] text-white py-4 rounded-2xl text-lg font-semibold transition-colors">
+          <button 
+            onClick={handleSelectAttraction}
+            className="w-full bg-[#3E68FF] hover:bg-[#4C7DFF] text-white py-4 rounded-2xl text-lg font-semibold transition-colors"
+          >
             선택
           </button>
         </div>
