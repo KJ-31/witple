@@ -72,42 +72,9 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar">
-      {/* Top Navigation */}
-      <nav className="flex items-center justify-between px-4 pt-4">
-        <Link
-          href="/mypage"
-          className="p-2 rounded-full border border-[#1F3C7A] text-[#4C7DFF] hover:bg-[#14213B] transition-colors"
-          aria-label="마이페이지"
-        >
-          {/* user icon */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-        </Link>
-
-        <div className="flex items-center gap-4">
-          <Link href="/quest" className="p-2 rounded-full border border-[#1F3C7A] text-[#4C7DFF] hover:bg-[#14213B] transition-colors" aria-label="퀘스트">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-          </Link>
-          <Link href="/treasure" className="p-2 rounded-full border border-[#1F3C7A] text-[#4C7DFF] hover:bg-[#14213B] transition-colors" aria-label="보물찾기">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </Link>
-          <Link href="/feed" className="p-2 rounded-full border border-[#1F3C7A] text-[#4C7DFF] hover:bg-[#14213B] transition-colors" aria-label="피드">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
-            </svg>
-          </Link>
-        </div>
-      </nav>
-
+    <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
       {/* Logo */}
-      <div className="text-center mt-10 mb-8">
+      <div className="text-center mt-16 mb-8">
         <h1 className="text-6xl font-extrabold text-[#3E68FF] tracking-tight">witple</h1>
       </div>
 
@@ -141,7 +108,7 @@ export default function Home() {
       </div>
 
       {/* 추천 도시별 명소 섹션 (무한 스크롤) */}
-      <main className="px-4 pb-16 space-y-12">
+      <main className="px-4 pb-24 space-y-12">
         {citySections.map((citySection, index) => (
           <div
             key={citySection.id}
@@ -180,6 +147,67 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-[#0F1A31]/95 backdrop-blur-md border-t border-[#1F3C7A]/30">
+        <div className="flex items-center justify-around px-4 py-3 max-w-md mx-auto">
+          <Link
+            href="/"
+            className="flex flex-col items-center py-1 px-2 text-[#3E68FF]"
+            aria-label="홈"
+          >
+            <svg className="w-6 h-6 mb-1" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            <span className="text-xs">홈</span>
+          </Link>
+
+          <Link
+            href="/quest"
+            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
+            aria-label="퀘스트"
+          >
+            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            <span className="text-xs">퀘스트</span>
+          </Link>
+
+          <Link
+            href="/treasure"
+            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
+            aria-label="보물찾기"
+          >
+            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span className="text-xs">보물</span>
+          </Link>
+
+          <Link
+            href="/feed"
+            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
+            aria-label="피드"
+          >
+            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+            </svg>
+            <span className="text-xs">피드</span>
+          </Link>
+
+          <Link
+            href="/mypage"
+            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
+            aria-label="마이페이지"
+          >
+            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="text-xs">마이페이지</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   )
 }
