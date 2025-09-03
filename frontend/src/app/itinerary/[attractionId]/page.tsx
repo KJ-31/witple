@@ -30,8 +30,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   
   // 상태 관리
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
-  const [selectedPlaces, setSelectedPlaces] = useState<SelectedPlace[]>([])
-  const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 장소 추가할 날짜
+  const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 현재 선택된 날짜 탭
+  const [placesByDay, setPlacesByDay] = useState<{ [dayNumber: number]: SelectedPlace[] }>({}) // 날짜별로 장소 저장
   
   // 선택된 날짜 범위 생성
   const generateDateRange = () => {
@@ -61,6 +61,24 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   }
 
   const dateRange = generateDateRange()
+  
+  // 날짜별 장소 관리 헬퍼 함수들
+  const getAllSelectedPlaces = (): SelectedPlace[] => {
+    return Object.values(placesByDay).flat()
+  }
+  
+  const getPlacesForDay = (dayNumber: number): SelectedPlace[] => {
+    return placesByDay[dayNumber] || []
+  }
+  
+  const isPlaceSelectedOnDay = (placeId: string, dayNumber: number): boolean => {
+    const placesForDay = getPlacesForDay(dayNumber)
+    return placesForDay.some(p => p.id === placeId)
+  }
+  
+  const isPlaceSelectedOnAnyDay = (placeId: string): boolean => {
+    return getAllSelectedPlaces().some(p => p.id === placeId)
+  }
   
   // 명소 정보 찾기
   const findAttractionAndCity = (attractionId: string) => {
@@ -128,32 +146,53 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       dayNumber: selectedDayForAdding
     }
 
-    setSelectedPlaces(prev => {
-      const existingIndex = prev.findIndex(p => p.id === place.id)
+    setPlacesByDay(prev => {
+      const newState = { ...prev }
       
-      if (existingIndex >= 0) {
-        // 이미 선택된 장소라면 제거
-        return prev.filter(p => p.id !== place.id)
+      // 현재 선택된 날짜에서 해당 장소가 이미 있는지 확인
+      if (isPlaceSelectedOnDay(place.id, selectedDayForAdding)) {
+        // 해당 날짜에서 장소 제거
+        newState[selectedDayForAdding] = getPlacesForDay(selectedDayForAdding).filter(p => p.id !== place.id)
+        
+        // 빈 배열이면 키 삭제
+        if (newState[selectedDayForAdding].length === 0) {
+          delete newState[selectedDayForAdding]
+        }
       } else {
-        // 새로운 장소를 선택된 날짜에 추가
-        return [...prev, selectedPlace]
+        // 다른 날짜에 이미 있다면 먼저 제거
+        Object.keys(newState).forEach(dayKey => {
+          const dayNumber = parseInt(dayKey, 10)
+          newState[dayNumber] = newState[dayNumber].filter(p => p.id !== place.id)
+          if (newState[dayNumber].length === 0) {
+            delete newState[dayNumber]
+          }
+        })
+        
+        // 현재 날짜에 장소 추가
+        if (!newState[selectedDayForAdding]) {
+          newState[selectedDayForAdding] = []
+        }
+        newState[selectedDayForAdding].push(selectedPlace)
       }
+      
+      return newState
     })
   }
 
   const isPlaceSelected = (placeId: string) => {
-    return selectedPlaces.some(p => p.id === placeId)
+    return isPlaceSelectedOnAnyDay(placeId)
   }
 
   const handleCreateItinerary = () => {
-    if (selectedPlaces.length === 0) {
+    const allSelectedPlaces = getAllSelectedPlaces()
+    if (allSelectedPlaces.length === 0) {
       alert('최소 1개 이상의 장소를 선택해주세요!')
       return
     }
     
     // 선택된 장소와 날짜별 정보를 query parameter로 전달하며 지도 페이지로 이동
-    const selectedPlaceIds = selectedPlaces.map(place => place.id).join(',')
-    const dayNumbers = selectedPlaces.map(place => place.dayNumber || 1).join(',')
+    const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
+    const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
     const startDate = dateRange[0].toISOString().split('T')[0]
     const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
     
@@ -203,7 +242,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           {dateRange[0].getMonth() + 1}월 {dateRange[0].getDate()}일 - {dateRange[dateRange.length - 1].getMonth() + 1}월 {dateRange[dateRange.length - 1].getDate()}일
         </p>
         <p className="text-[#94A9C9] text-xs">
-          {dateRange.length}일간의 여행 • 선택된 장소: {selectedPlaces.length}개
+          {dateRange.length}일간의 여행 • 선택된 장소: {getAllSelectedPlaces().length}개
         </p>
       </div>
 
@@ -214,7 +253,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           {dateRange.map((date, index) => {
             const dayNumber = index + 1
             const isSelected = selectedDayForAdding === dayNumber
-            const placesForDay = selectedPlaces.filter(p => p.dayNumber === dayNumber).length
+            const placesForDay = getPlacesForDay(dayNumber).length
             
             return (
               <button
@@ -281,13 +320,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           </div>
         ) : (
           filteredPlaces.map(place => {
-            const isSelected = isPlaceSelected(place.id)
+            const isSelectedOnCurrentDay = isPlaceSelectedOnDay(place.id, selectedDayForAdding)
+            const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
             return (
               <div
                 key={place.id}
                 className={`
                   bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
-                  ${isSelected ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' : 'hover:bg-[#12345D]/50'}
+                  ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' : 
+                    isSelectedOnAnyOtherDay ? 'ring-2 ring-[#6FA0E6] bg-[#6FA0E6]/10' : 'hover:bg-[#12345D]/50'}
                 `}
               >
                 <div className="flex items-start justify-between">
@@ -321,13 +362,16 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                     onClick={() => handleAddToItinerary(place)}
                     className={`
                       ml-4 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex-shrink-0
-                      ${isSelected 
+                      ${isSelectedOnCurrentDay 
                         ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]' 
+                        : isSelectedOnAnyOtherDay
+                        ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
                         : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
                       }
                     `}
                   >
-                    {isSelected ? '선택됨' : '+ 추가'}
+                    {isSelectedOnCurrentDay ? '선택됨' : 
+                     isSelectedOnAnyOtherDay ? '다른 날' : '+ 추가'}
                   </button>
                 </div>
               </div>
@@ -337,19 +381,19 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Selected Places Summary & Create Button */}
-      {selectedPlaces.length > 0 && (
+      {getAllSelectedPlaces().length > 0 && (
         <div className="px-4 py-6">
           <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-white font-semibold">선택된 장소</h4>
-              <span className="text-[#3E68FF] font-semibold">{selectedPlaces.length}개</span>
+              <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
             </div>
             
             {/* 날짜별로 그룹화해서 표시 */}
             <div className="space-y-3">
               {dateRange.map((date, index) => {
                 const dayNumber = index + 1
-                const placesForDay = selectedPlaces.filter(p => p.dayNumber === dayNumber)
+                const placesForDay = getPlacesForDay(dayNumber)
                 
                 if (placesForDay.length === 0) return null
                 
@@ -377,10 +421,10 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       <div className="px-4 pb-8">
         <button
           onClick={handleCreateItinerary}
-          disabled={selectedPlaces.length === 0}
+          disabled={getAllSelectedPlaces().length === 0}
           className={`
             w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
-            ${selectedPlaces.length > 0 
+            ${getAllSelectedPlaces().length > 0 
               ? 'bg-[#3E68FF] hover:bg-[#4C7DFF] text-white shadow-lg' 
               : 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
             }
