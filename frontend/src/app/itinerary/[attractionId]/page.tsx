@@ -248,7 +248,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
       {/* Day Selection Tabs */}
       <div className="px-4 mb-6">
-        <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p>
+        {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
         <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
           {dateRange.map((date, index) => {
             const dayNumber = index + 1
