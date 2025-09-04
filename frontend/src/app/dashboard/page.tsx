@@ -1,74 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { getCurrentUser } from './api'
-
-interface User {
-  id: number
-  email: string
-  full_name: string
-  is_active: boolean
-  created_at: string
-}
+import { useEffect } from 'react'
 
 export default function DashboardPage() {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const { data: session, status } = useSession()
   const router = useRouter()
 
+  // 인증되지 않은 사용자는 로그인 페이지로 리다이렉트
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    
-    const token = localStorage.getItem('token')
-    if (!token) {
+    if (status === 'unauthenticated') {
       router.push('/auth/login')
-      return
     }
+  }, [status, router])
 
-    const fetchUser = async () => {
-      try {
-        const userData = await getCurrentUser()
-        setUser(userData)
-      } catch (err) {
-        console.error('Failed to fetch user:', err)
-        setError('사용자 정보를 불러오는데 실패했습니다.')
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('token')
-        }
-        router.push('/auth/login')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchUser()
-  }, [router])
-
-  const handleLogout = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('token')
-    }
-    router.push('/')
+  const handleLogout = async () => {
+    await signOut({ callbackUrl: '/' })
   }
 
-  if (loading) {
+  // 로딩 중이거나 인증되지 않은 경우 로딩 표시
+  if (status === 'loading' || status === 'unauthenticated') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">로딩 중...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <p className="text-red-600">{error}</p>
         </div>
       </div>
     )
@@ -84,7 +41,7 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center">
               <span className="text-gray-700 mr-4">
-                안녕하세요, {user?.full_name || user?.email}님!
+                안녕하세요, {session?.user?.name || session?.user?.email}님!
               </span>
               <button
                 onClick={handleLogout}
@@ -113,18 +70,24 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   <div>
                     <span className="text-sm font-medium text-gray-500">이메일:</span>
-                    <p className="text-gray-900">{user?.email}</p>
+                    <p className="text-gray-900">{session?.user?.email}</p>
                   </div>
                   <div>
                     <span className="text-sm font-medium text-gray-500">이름:</span>
-                    <p className="text-gray-900">{user?.full_name}</p>
+                    <p className="text-gray-900">{session?.user?.name}</p>
                   </div>
-                  <div>
-                    <span className="text-sm font-medium text-gray-500">가입일:</span>
-                    <p className="text-gray-900">
-                      {user?.created_at ? new Date(user.created_at).toLocaleDateString('ko-KR') : 'N/A'}
-                    </p>
-                  </div>
+                  {session?.user?.image && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-500">프로필 이미지:</span>
+                      <div className="mt-2">
+                        <img
+                          src={session.user.image}
+                          alt="Profile"
+                          className="w-12 h-12 rounded-full"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -2,73 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 기본 텍스트 색상 강제 설정 - 가장 높은 우선순위 */
-html * {
-  color: #000000 !important;
-}
-
 body {
-  color: #000000 !important;
-  background: #f9fafb !important;
-}
-
-/* 모든 텍스트 요소에 기본 색상 적용 */
-h1, h2, h3, h4, h5, h6, p, span, div, a, button, input, textarea, label {
-  color: #000000 !important;
-}
-
-/* Tailwind 클래스들을 명시적으로 덮어쓰기 */
-.text-gray-900,
-.text-gray-800,
-.text-gray-700,
-.text-gray-600,
-.text-gray-500,
-.text-gray-400,
-.text-gray-300,
-.text-gray-200,
-.text-gray-100,
-.text-black,
-.text-white,
-.text-blue-600,
-.text-blue-500,
-.text-blue-400,
-.text-blue-300,
-.text-blue-200,
-.text-blue-100 {
-  color: #000000 !important;
-}
-
-/* 특정 클래스에 대한 색상 강제 적용 */
-.text-gray-900 {
-  color: #111827 !important;
-}
-
-.text-gray-700 {
-  color: #374151 !important;
-}
-
-.text-blue-600 {
-  color: #2563eb !important;
-}
-
-/* 배경색 강제 적용 */
-.bg-gray-50 {
-  background-color: #f9fafb !important;
-}
-
-.bg-white {
-  background-color: #ffffff !important;
-}
-
-/* 링크와 버튼에 대한 추가 스타일 */
-a:hover,
-button:hover {
-  color: #2563eb !important;
-}
-
-/* 포커스 상태에서도 색상 유지 */
-*:focus {
-  color: #000000 !important;
+  /* 필요한 경우 여기에 기본 body 스타일을 추가합니다. */
+  /* 예: color: theme('colors.gray.900'); */
 }
 
 /* 선택된 텍스트 색상 */
@@ -77,24 +13,25 @@ button:hover {
   color: #ffffff;
 }
 
-/* 추가적인 강제 스타일 */
-div[class*="text-"] {
-  color: #000000 !important;
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  /* IE, Edge */
+  scrollbar-width: none !important;
+  /* Firefox */
 }
 
-span[class*="text-"] {
-  color: #000000 !important;
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  /* Chrome, Safari, Opera */
+  width: 0 !important;
+  /* 혹시라도 트랙 공간 차지 방지 */
+  height: 0 !important;
 }
 
-h1[class*="text-"],
-h2[class*="text-"],
-h3[class*="text-"],
-h4[class*="text-"],
-h5[class*="text-"],
-h6[class*="text-"] {
-  color: #000000 !important;
-}
-
-p[class*="text-"] {
-  color: #000000 !important;
+/* 텍스트 2줄 제한 */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
