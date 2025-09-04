@@ -1,0 +1,187 @@
+import os
+import base64
+import uuid
+from datetime import datetime
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc
+
+from database import get_db
+from models import Post, User
+from schemas import PostCreate, PostResponse, PostListResponse
+
+router = APIRouter(tags=["posts"])
+
+# 이미지 저장 디렉토리 설정
+UPLOAD_DIR = "uploads/posts"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def save_image_from_base64(base64_data: str, filename: str) -> str:
+    """Base64 데이터를 이미지 파일로 저장하고 파일 경로를 반환합니다."""
+    try:
+        # Base64 헤더 제거 (data:image/jpeg;base64, 등)
+        if ',' in base64_data:
+            base64_data = base64_data.split(',')[1]
+        
+        # Base64 디코딩
+        image_data = base64.b64decode(base64_data)
+        
+        # 파일 저장
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        with open(file_path, "wb") as f:
+            f.write(image_data)
+        
+        return f"/uploads/posts/{filename}"
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"이미지 저장 중 오류 발생: {str(e)}"
+        )
+
+
+@router.post("/", response_model=PostResponse)
+async def create_post(
+    post_data: PostCreate,
+    db: Session = Depends(get_db)
+):
+    """새 포스트를 생성합니다."""
+    try:
+        # 임시 사용자 (실제로는 JWT 토큰에서 사용자 정보 가져와야 함)
+        user = db.query(User).first()
+        if not user:
+            # 테스트용 사용자 생성 (기존 스키마에 맞춤)
+            user = User(
+                user_id=str(uuid.uuid4()),
+                email="kimquokka@example.com",
+                name="김쿼카",
+                pw="dummy_password"
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        
+        # 고유한 파일명 생성
+        file_extension = "jpg"  # 실제로는 이미지 데이터에서 확장자 추출해야 함
+        filename = f"{uuid.uuid4()}.{file_extension}"
+        
+        # 이미지 저장
+        image_url = save_image_from_base64(post_data.image_data, filename)
+        
+        # 포스트 생성
+        db_post = Post(
+            user_id=user.user_id,
+            caption=post_data.caption,
+            image_url=image_url,
+            location=post_data.location
+        )
+        
+        db.add(db_post)
+        db.commit()
+        db.refresh(db_post)
+        
+        # 사용자 정보와 함께 반환
+        post_with_user = db.query(Post).options(joinedload(Post.user)).filter(Post.id == db_post.id).first()
+        
+        return post_with_user
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"포스트 생성 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/", response_model=PostListResponse)
+async def get_posts(
+    skip: int = 0,
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    """포스트 목록을 가져옵니다."""
+    try:
+        # 최신 순으로 포스트 조회
+        posts = (
+            db.query(Post)
+            .options(joinedload(Post.user))
+            .order_by(desc(Post.created_at))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        
+        total = db.query(Post).count()
+        
+        return PostListResponse(posts=posts, total=total)
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"포스트 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/{post_id}", response_model=PostResponse)
+async def get_post(
+    post_id: int,
+    db: Session = Depends(get_db)
+):
+    """특정 포스트를 가져옵니다."""
+    post = (
+        db.query(Post)
+        .options(joinedload(Post.user))
+        .filter(Post.id == post_id)
+        .first()
+    )
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="포스트를 찾을 수 없습니다."
+        )
+    
+    return post
+
+
+@router.post("/{post_id}/like")
+async def like_post(
+    post_id: int,
+    db: Session = Depends(get_db)
+):
+    """포스트에 좋아요를 추가합니다."""
+    post = db.query(Post).filter(Post.id == post_id).first()
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="포스트를 찾을 수 없습니다."
+        )
+    
+    post.likes_count += 1
+    db.commit()
+    
+    return {"message": "좋아요가 추가되었습니다.", "likes_count": post.likes_count}
+
+
+@router.delete("/{post_id}/like")
+async def unlike_post(
+    post_id: int,
+    db: Session = Depends(get_db)
+):
+    """포스트에서 좋아요를 제거합니다."""
+    post = db.query(Post).filter(Post.id == post_id).first()
+    
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="포스트를 찾을 수 없습니다."
+        )
+    
+    if post.likes_count > 0:
+        post.likes_count -= 1
+        db.commit()
+    
+    return {"message": "좋아요가 제거되었습니다.", "likes_count": post.likes_count}

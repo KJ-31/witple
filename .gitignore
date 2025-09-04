@@ -78,3 +78,7 @@ docker-compose.override.yml
 
 # Kubernetes secrets (for local development)
 k8s/secrets/
+
+# Database configuration
+DB.conf
+backend/uploads/
