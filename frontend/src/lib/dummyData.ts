@@ -253,18 +253,28 @@ export const RECOMMENDED_CITY_SECTIONS: CitySection[] = [
   }
 ]
 
-// API 시뮬레이션: 페이지네이션으로 데이터 가져오기
+// 실제 백엔드 API에서 데이터 가져오기
 export const fetchRecommendedCities = async (
   page: number = 0,
   limit: number = 3
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
-  // 실제 API 호출을 시뮬레이션 (네트워크 지연)
-  await new Promise(resolve => setTimeout(resolve, 800))
-
-  const startIndex = page * limit
-  const endIndex = startIndex + limit
-  const data = RECOMMENDED_CITY_SECTIONS.slice(startIndex, endIndex)
-  const hasMore = endIndex < RECOMMENDED_CITY_SECTIONS.length
-
-  return { data, hasMore }
+  try {
+    const API_BASE_URL = 'http://localhost:8000'
+    const response = await fetch(`${API_BASE_URL}/api/v1/attractions/cities?page=${page}&limit=${limit}`)
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const result = await response.json()
+    
+    return {
+      data: result.data,
+      hasMore: result.hasMore
+    }
+  } catch (error) {
+    console.error('API 호출 오류:', error)
+    // API 오류 시 빈 데이터 반환
+    return { data: [], hasMore: false }
+  }
 }
