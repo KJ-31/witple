@@ -365,6 +365,10 @@ jobs:
         kubectl apply -f k8s/configmap-generated.yaml
         kubectl apply -f k8s/hpa.yaml
         
+        # ServiceAccount 배포
+        echo "Applying ServiceAccount..."
+        kubectl apply -f k8s/backend/serviceaccount.yaml
+        
         # Ingress 생성 (도메인 사용 여부에 따라 다르게 처리)
         echo "=== Ingress Generation ==="
         echo "USE_DOMAIN: $USE_DOMAIN"

@@ -3,6 +3,8 @@ import base64
 import uuid
 from datetime import datetime
 from typing import List
+import boto3
+from botocore.exceptions import ClientError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -11,16 +13,19 @@ from sqlalchemy import desc
 from database import get_db
 from models import Post, User
 from schemas import PostCreate, PostResponse, PostListResponse
+from config import settings
 
 router = APIRouter(tags=["posts"])
 
-# 이미지 저장 디렉토리 설정
-UPLOAD_DIR = "uploads/posts"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# S3 클라이언트 초기화
+s3_client = boto3.client(
+    's3',
+    region_name=settings.AWS_REGION
+)
 
 
-def save_image_from_base64(base64_data: str, filename: str) -> str:
-    """Base64 데이터를 이미지 파일로 저장하고 파일 경로를 반환합니다."""
+def save_image_to_s3(base64_data: str, filename: str) -> str:
+    """Base64 데이터를 S3에 업로드하고 URL을 반환합니다."""
     try:
         # Base64 헤더 제거 (data:image/jpeg;base64, 등)
         if ',' in base64_data:
@@ -29,16 +34,28 @@ def save_image_from_base64(base64_data: str, filename: str) -> str:
         # Base64 디코딩
         image_data = base64.b64decode(base64_data)
         
-        # 파일 저장
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        with open(file_path, "wb") as f:
-            f.write(image_data)
+        # S3에 업로드
+        s3_client.put_object(
+            Bucket=settings.S3_BUCKET_NAME,
+            Key=f"posts/{filename}",
+            Body=image_data,
+            ContentType='image/jpeg',
+            # ACL='public-read'  # 공개 읽기 권한
+        )
         
-        return f"/uploads/posts/{filename}"
+        # S3 URL 반환
+        s3_url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/posts/{filename}"
+        return s3_url
+        
+    except ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"S3 업로드 중 오류 발생: {str(e)}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"이미지 저장 중 오류 발생: {str(e)}"
+            detail=f"이미지 처리 중 오류 발생: {str(e)}"
         )
 
 
@@ -68,7 +85,7 @@ async def create_post(
         filename = f"{uuid.uuid4()}.{file_extension}"
         
         # 이미지 저장
-        image_url = save_image_from_base64(post_data.image_data, filename)
+        image_url = save_image_to_s3(post_data.image_data, filename)
         
         # 포스트 생성
         db_post = Post(
