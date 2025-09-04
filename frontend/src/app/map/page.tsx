@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-type CategoryKey = 'all' | 'tourist' | 'food' | 'culture' | 'nature' | 'shopping'
+type CategoryKey = 'all' | 'tourist' | 'restaurants' | 'humanities' | 'nature' | 'shopping'
 
 interface SelectedPlace {
   id: string
@@ -209,8 +209,8 @@ export default function MapPage() {
         const categorySearchMap: { [key in CategoryKey]: string } = {
           'all': '',
           'tourist': '관광지',
-          'food': '맛집',
-          'culture': '문화',
+          'restaurants': '맛집',
+          'humanities': '문화',
           'nature': '자연',
           'shopping': '쇼핑'
         }
@@ -252,8 +252,8 @@ export default function MapPage() {
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
     { key: 'tourist' as CategoryKey, name: '관광', icon: '🏛️' },
-    { key: 'food' as CategoryKey, name: '맛집', icon: '🍽️' },
-    { key: 'culture' as CategoryKey, name: '문화', icon: '🎭' },
+    { key: 'restaurants' as CategoryKey, name: '맛집', icon: '🍽️' },
+    { key: 'humanities' as CategoryKey, name: '문화', icon: '🎭' },
     { key: 'nature' as CategoryKey, name: '자연', icon: '🌿' },
     { key: 'shopping' as CategoryKey, name: '쇼핑', icon: '🛍️' }
   ]
@@ -351,8 +351,8 @@ export default function MapPage() {
   const getCategoryName = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
       tourist: '관광',
-      food: '맛집',
-      culture: '문화',
+      restaurants: '맛집',
+      humanities: '문화',
       nature: '자연',
       shopping: '쇼핑',
       accommodation: '숙박',

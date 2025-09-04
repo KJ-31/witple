@@ -5,7 +5,7 @@ export interface Attraction {
   description: string
   imageUrl: string
   rating: number
-  category: 'accommodation' | 'huanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping'
+  category: 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping'
 }
 
 export interface CitySection {

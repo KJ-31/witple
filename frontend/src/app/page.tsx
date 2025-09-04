@@ -335,10 +335,11 @@ function SectionCarousel({
 function getCategoryName(category: string): string {
   const categoryMap: { [key: string]: string } = {
     tourist: '관광',
-    food: '맛집',
-    culture: '문화',
+    restaurants: '맛집',
+    humanities: '문화',
     nature: '자연',
-    shopping: '쇼핑'
+    shopping: '쇼핑',
+    accommodation: '숙박'
   }
   return categoryMap[category] || category
 }
