@@ -38,6 +38,31 @@ spec:
               key: NEXT_PUBLIC_API_BASE
         - name: NODE_ENV
           value: "production"
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: NEXTAUTH_SECRET
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: GOOGLE_CLIENT_ID
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: GOOGLE_CLIENT_SECRET
+        - name: NEXTAUTH_URL
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: NEXTAUTH_URL
+        - name: NEXT_PUBLIC_API_URL
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: NEXT_PUBLIC_API_URL
         resources:
           requests:
             memory: "256Mi"
