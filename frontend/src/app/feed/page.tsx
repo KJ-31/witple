@@ -32,7 +32,7 @@ export default function FeedPage() {
   // 포스트 데이터를 API에서 가져오는 함수
   const fetchPosts = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/posts/')
+      const response = await fetch('/api/proxy/api/v1/posts/')
       if (response.ok) {
         const data = await response.json()
         // API 응답 형태에 맞게 데이터 변환
@@ -66,8 +66,8 @@ export default function FeedPage() {
       if (!currentPost) return
 
       const endpoint = currentPost.isLiked 
-        ? `http://localhost:8000/api/v1/posts/${postId}/like`  // DELETE 요청
-        : `http://localhost:8000/api/v1/posts/${postId}/like`  // POST 요청
+        ? `/api/proxy/api/v1/posts/${postId}/like`  // DELETE 요청
+        : `/api/proxy/api/v1/posts/${postId}/like`  // POST 요청
 
       const method = currentPost.isLiked ? 'DELETE' : 'POST'
 
@@ -175,7 +175,7 @@ export default function FeedPage() {
             {/* Post Image */}
             <div className="aspect-square relative">
               <img
-                src={`http://localhost:8000${post.image_url}`}
+                src={post.image_url}
                 alt="Post"
                 className="w-full h-full object-cover"
               />

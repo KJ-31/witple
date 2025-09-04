@@ -7,6 +7,11 @@ metadata:
     app: witple-backend
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: witple-backend
@@ -15,6 +20,7 @@ spec:
       labels:
         app: witple-backend
     spec:
+      serviceAccountName: witple-backend-sa
       containers:
       - name: witple-backend
         image: ${ECR_REGISTRY}/witple-backend:${IMAGE_TAG}

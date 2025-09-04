@@ -365,6 +365,10 @@ jobs:
         kubectl apply -f k8s/configmap-generated.yaml
         kubectl apply -f k8s/hpa.yaml
         
+        # ServiceAccount 배포
+        echo "Applying ServiceAccount..."
+        kubectl apply -f k8s/backend/serviceaccount.yaml
+        
         # Ingress 생성 (도메인 사용 여부에 따라 다르게 처리)
         echo "=== Ingress Generation ==="
         echo "USE_DOMAIN: $USE_DOMAIN"
@@ -420,25 +424,19 @@ jobs:
         # IMAGE_TAG 설정 (커밋 SHA 태그)
         export IMAGE_TAG=${GITHUB_SHA}
 
-        # 백엔드 배포 (내부 서비스만, Ingress 없음)
-        echo "Deploying backend (internal service only)..."
-        
-        # 기존 백엔드 Pod들을 미리 정리
-        kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-backend --force --grace-period=0 || true
+        # 백엔드 배포 (Rolling Update 사용)
+        echo "Deploying backend (rolling update)..."
         
         # 백엔드 매니페스트 환경 변수 치환
         envsubst < k8s/backend/deployment.yaml > k8s/backend/deployment-generated.yaml
         envsubst < k8s/backend/service.yaml > k8s/backend/service-generated.yaml
         
-        # 백엔드 배포 (ClusterIP 서비스만)
+        # 백엔드 배포 (Rolling Update)
         kubectl apply -f k8s/backend/deployment-generated.yaml
         kubectl apply -f k8s/backend/service-generated.yaml
         
         # 프론트엔드 배포
         echo "Deploying frontend..."
-        
-        # 기존 프론트엔드 Pod들을 미리 정리
-        kubectl delete pods -n ${{ env.EKS_NAMESPACE }} -l app=witple-frontend --force --grace-period=0 || true
         
         # 프론트엔드 매니페스트 환경 변수 치환
         envsubst < k8s/frontend/deployment.yaml > k8s/frontend/deployment-generated.yaml
