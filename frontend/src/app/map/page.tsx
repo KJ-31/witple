@@ -3,8 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-type CategoryKey = 'all' | 'tourist' | 'restaurants' | 'humanities' | 'nature' | 'shopping'
-
+type CategoryKey = 'all' | 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
   id: string
   name: string
@@ -208,11 +207,12 @@ export default function MapPage() {
         // 카테고리별 검색어 매핑
         const categorySearchMap: { [key in CategoryKey]: string } = {
           'all': '',
-          'tourist': '관광지',
-          'restaurants': '맛집',
-          'humanities': '문화',
           'nature': '자연',
-          'shopping': '쇼핑'
+          'restaurants': '맛집',
+          'shopping': '쇼핑',
+          'accommodation': '숙박',
+          'humanities': '인문',
+          'leisure_sports': '레저'
         }
         
         const searchTerm = categorySearchMap[category] || ''
