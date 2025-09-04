@@ -51,7 +51,7 @@ interface SelectedPlace {
   dayNumber?: number // 선택된 날짜 (1, 2, 3...)
 }
 
-type CategoryKey = 'all' | 'tourist' | 'food' | 'culture' | 'nature' | 'shopping'
+type CategoryKey = 'all' | 'accommodation' | 'huanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping'
 
 export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const router = useRouter()
@@ -158,10 +158,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 카테고리 정의
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
-    { key: 'tourist' as CategoryKey, name: '관광', icon: '🏛️' },
-    { key: 'food' as CategoryKey, name: '맛집', icon: '🍽️' },
-    { key: 'culture' as CategoryKey, name: '문화', icon: '🎭' },
+    { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
+    { key: 'huanities' as CategoryKey, name: '인문', icon: '🏛️' },
+    { key: 'leisure_sport' as CategoryKey, name: '레포츠', icon: '⚽' },
     { key: 'nature' as CategoryKey, name: '자연', icon: '🌿' },
+    { key: 'restaurants' as CategoryKey, name: '맛집', icon: '🍽️' },
     { key: 'shopping' as CategoryKey, name: '쇼핑', icon: '🛍️' }
   ]
 
@@ -509,10 +510,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 // 카테고리 한국어 변환 함수
 function getCategoryName(category: string): string {
   const categoryMap: { [key: string]: string } = {
-    tourist: '관광',
-    food: '맛집',
-    culture: '문화',
+    accommodation: '숙박',
+    huanities: '인문', 
+    leisure_sport: '레포츠',
     nature: '자연',
+    restaurants: '맛집',
     shopping: '쇼핑'
   }
   return categoryMap[category] || category
