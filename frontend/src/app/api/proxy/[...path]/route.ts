@@ -36,11 +36,19 @@ async function proxyRequest(
   method: string
 ) {
   try {
+    console.log('=== PROXY REQUEST START ===');
+    console.log('Request method:', method);
+    console.log('Request URL:', request.url);
+    console.log('Path segments:', pathSegments);
+    
     const path = pathSegments.join('/');
     const url = new URL(request.url);
     const queryString = url.search;
     
     const backendUrl = `${API_INTERNAL_URL}/${path}${queryString}`;
+    
+    console.log('API_INTERNAL_URL:', API_INTERNAL_URL);
+    console.log('Final backend URL:', backendUrl);
 
     const headers: HeadersInit = {};
 
@@ -63,7 +71,8 @@ async function proxyRequest(
 
     console.log(`Proxying ${method} request to: ${backendUrl}`);
     console.log(`Headers:`, headers);
-    console.log(`Body:`, body);
+    console.log(`Body length:`, body ? body.length : 0);
+    console.log('=== PROXY REQUEST END ===');
 
     const response = await fetch(backendUrl, {
       method,
@@ -71,7 +80,16 @@ async function proxyRequest(
       body,
     });
 
+    console.log('=== PROXY RESPONSE ===');
+    console.log('Response status:', response.status);
+    console.log('Response statusText:', response.statusText);
+    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
     const data = await response.text();
+    
+    console.log('Response data length:', data.length);
+    console.log('Response data preview:', data.substring(0, 200));
+    console.log('=== PROXY RESPONSE END ===');
     
     return new NextResponse(data, {
       status: response.status,
@@ -79,10 +97,19 @@ async function proxyRequest(
         'Content-Type': response.headers.get('Content-Type') || 'application/json',
       },
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error('=== PROXY ERROR ===');
     console.error('Proxy error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+      type: typeof error
+    });
+    console.error('=== PROXY ERROR END ===');
+    
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message },
       { status: 500 }
     );
   }

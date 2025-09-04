@@ -58,7 +58,14 @@ export default function CreatePostPage() {
 
       alert('포스트가 성공적으로 업로드되었습니다!')
       router.push('/feed')
-    } catch (error) {
+    } catch (error: any) {
+      console.error('=== UPLOAD ERROR ===');
+      console.error('Error type:', typeof error);
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      console.error('Full error object:', error);
+      
       alert(`업로드 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`)
       console.error('Upload error:', error)
     } finally {
