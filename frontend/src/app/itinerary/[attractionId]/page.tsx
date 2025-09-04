@@ -105,7 +105,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     const fetchAttractionData = async () => {
       try {
         setLoading(true)
-        const API_BASE_URL = 'http://localhost:8000'
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
         // 선택된 관광지 정보 가져오기
         const attractionResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.attractionId}`)
