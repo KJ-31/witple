@@ -6,9 +6,9 @@ services:
     image: postgres:15-alpine
     container_name: witple_postgres
     environment:
-      POSTGRES_DB: witple_db
-      POSTGRES_USER: witple_user
-      POSTGRES_PASSWORD: witple_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -37,7 +37,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://witple_user:witple_password@postgres:5432/witple_db
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
     depends_on:
