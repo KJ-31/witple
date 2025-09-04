@@ -203,7 +203,7 @@ export default function Home() {
               if (isLoggedIn) {
                 router.push('/profile')
               } else {
-                router.push('/auth/register')
+                router.push('/auth/login')
               }
             }}
             className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
