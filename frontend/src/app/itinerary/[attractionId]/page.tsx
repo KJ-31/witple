@@ -1,11 +1,45 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { RECOMMENDED_CITY_SECTIONS } from '../../../lib/dummyData'
 
 interface ItineraryBuilderProps {
   params: { attractionId: string }
+}
+
+interface AttractionData {
+  id: string
+  name: string
+  description: string
+  imageUrl: string
+  rating: number
+  category: string
+  address: string
+  region: string
+  city: {
+    id: string
+    name: string
+    region: string
+  }
+  latitude?: number
+  longitude?: number
+  phoneNumber?: string
+  parkingAvailable?: string
+  usageHours?: string
+  closedDays?: string
+  detailedInfo?: string
+  majorCategory?: string
+  middleCategory?: string
+  minorCategory?: string
+  imageUrls?: string[]
+  businessHours?: string
+  signatureMenu?: string
+  menu?: string
+  roomCount?: string
+  roomType?: string
+  checkIn?: string
+  checkOut?: string
+  cookingAvailable?: string
 }
 
 interface SelectedPlace {
@@ -29,6 +63,10 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const daysParam = searchParams.get('days')
 
   // 상태 관리
+  const [attraction, setAttraction] = useState<AttractionData | null>(null)
+  const [relatedAttractions, setRelatedAttractions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
   const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 현재 선택된 날짜 탭
   const [placesByDay, setPlacesByDay] = useState<{ [dayNumber: number]: SelectedPlace[] }>({}) // 날짜별로 장소 저장
@@ -62,6 +100,42 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   const dateRange = generateDateRange()
 
+  // API에서 관광지 상세 정보와 관련 관광지 가져오기
+  useEffect(() => {
+    const fetchAttractionData = async () => {
+      try {
+        setLoading(true)
+        const API_BASE_URL = 'http://localhost:8000'
+        
+        // 선택된 관광지 정보 가져오기
+        const attractionResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.attractionId}`)
+        if (!attractionResponse.ok) {
+          throw new Error(`HTTP error! status: ${attractionResponse.status}`)
+        }
+        const attractionData = await attractionResponse.json()
+        setAttraction(attractionData)
+
+        // 같은 도시의 다른 관광지들 검색으로 가져오기
+        const searchResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(attractionData.city.name)}&region=${encodeURIComponent(attractionData.region)}`)
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json()
+          // 현재 관광지 제외
+          const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
+          setRelatedAttractions(filtered.slice(0, 20)) // 최대 20개
+        }
+      } catch (error) {
+        console.error('관광지 정보 로드 오류:', error)
+        setError('관광지 정보를 불러올 수 없습니다.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (params.attractionId) {
+      fetchAttractionData()
+    }
+  }, [params.attractionId])
+
   // 날짜별 장소 관리 헬퍼 함수들
   const getAllSelectedPlaces = (): SelectedPlace[] => {
     return Object.values(placesByDay).flat()
@@ -80,18 +154,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     return getAllSelectedPlaces().some(p => p.id === placeId)
   }
 
-  // 명소 정보 찾기
-  const findAttractionAndCity = (attractionId: string) => {
-    for (const city of RECOMMENDED_CITY_SECTIONS) {
-      const attraction = city.attractions.find(attr => attr.id === attractionId)
-      if (attraction) {
-        return { attraction, city } // 명소, 도시
-      }
-    }
-    return null
-  }
-
-  const result = findAttractionAndCity(params.attractionId)
 
   // 카테고리 정의
   const categories = [
@@ -105,19 +167,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // 모든 장소 가져오기
   const getAllPlaces = () => {
-    if (!result) return []
-
-    const { city, attraction } = result
-    // 선택한 명소 제외하고 같은 도시의 다른 명소들과 전국의 관련 명소들 포함
-    const allCityPlaces = city.attractions.filter(place => place.id !== attraction.id)
-
-    // 다른 도시의 같은 카테고리 명소들도 추가 (추천 확장)
-    const otherCityPlaces = RECOMMENDED_CITY_SECTIONS
-      .filter(otherCity => otherCity.id !== city.id)
-      .flatMap(otherCity => otherCity.attractions)
-      .slice(0, 5) // 다른 도시에서 최대 5개만
-
-    return [...allCityPlaces, ...otherCityPlaces]
+    return relatedAttractions
   }
 
   const allPlaces = getAllPlaces()
@@ -208,10 +258,29 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     router.push(`/map?${queryParams.toString()}`)
   }
 
-  if (!result) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
-        <p className="text-[#94A9C9]">명소를 찾을 수 없습니다</p>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+          <p className="text-[#94A9C9]">일정을 준비하는 중...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !attraction) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-[#94A9C9] text-lg mb-4">{error || '명소를 찾을 수 없습니다'}</p>
+          <button 
+            onClick={() => router.back()}
+            className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
+          >
+            돌아가기
+          </button>
+        </div>
       </div>
     )
   }
