@@ -196,8 +196,16 @@ export default function Home() {
             {/* <span className="text-xs">피드</span> */}
           </Link>
 
-          <Link
-            href="/mypage"
+          <button
+            onClick={() => {
+              // 임시로 로그인 상태를 확인 (실제 구현에서는 인증 상태를 확인)
+              const isLoggedIn = false // 여기서 실제 로그인 상태 확인
+              if (isLoggedIn) {
+                router.push('/profile')
+              } else {
+                router.push('/auth/register')
+              }
+            }}
             className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
             aria-label="마이페이지"
           >
@@ -205,7 +213,7 @@ export default function Home() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
             {/* <span className="text-xs">마이페이지</span> */}
-          </Link>
+          </button>
         </div>
       </nav>
     </div>
