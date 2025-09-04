@@ -36,9 +36,7 @@ export default function CreatePostPage() {
 
     try {
       // API 호출로 포스트 생성
-      console.log('Making API call to:', '/api/proxy/v1/posts/');
-      
-      const response = await fetch('/api/proxy/v1/posts/', {
+      const response = await fetch('/api/proxy/api/proxy/v1/posts/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
