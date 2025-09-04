@@ -1,35 +1,106 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { RECOMMENDED_CITY_SECTIONS, type Attraction } from '../../../lib/dummyData'
 
 interface AttractionDetailProps {
   params: { id: string }
 }
 
+interface AttractionData {
+  id: string
+  name: string
+  description: string
+  imageUrl: string
+  rating: number
+  category: string
+  address: string
+  region: string
+  city: {
+    id: string
+    name: string
+    region: string
+  }
+  latitude?: number
+  longitude?: number
+  phoneNumber?: string
+  parkingAvailable?: string
+  usageHours?: string
+  closedDays?: string
+  detailedInfo?: string
+  majorCategory?: string
+  middleCategory?: string
+  minorCategory?: string
+  imageUrls?: string[]
+  businessHours?: string
+  signatureMenu?: string
+  menu?: string
+  roomCount?: string
+  roomType?: string
+  checkIn?: string
+  checkOut?: string
+  cookingAvailable?: string
+}
+
 export default function AttractionDetail({ params }: AttractionDetailProps) {
   const router = useRouter()
-  
-  // URL에서 attraction ID로 해당 명소와 도시 정보 찾기
-  const findAttractionAndCity = (attractionId: string) => {
-    for (const city of RECOMMENDED_CITY_SECTIONS) {
-      const attraction = city.attractions.find(attr => attr.id === attractionId)
-      if (attraction) {
-        return { attraction, city }
+  const [attraction, setAttraction] = useState<AttractionData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // API에서 관광지 상세 정보 가져오기
+  useEffect(() => {
+    const fetchAttractionDetail = async () => {
+      try {
+        setLoading(true)
+        const API_BASE_URL = 'http://localhost:8000'
+        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        setAttraction(data)
+      } catch (error) {
+        console.error('관광지 정보 로드 오류:', error)
+        setError('관광지 정보를 불러올 수 없습니다.')
+      } finally {
+        setLoading(false)
       }
     }
-    return null
+
+    if (params.id) {
+      fetchAttractionDetail()
+    }
+  }, [params.id])
+
+  const handleBack = () => {
+    router.back()
   }
 
-  const result = findAttractionAndCity(params.id)
-  
-  if (!result) {
+  const handleAddToItinerary = () => {
+    // 여행 계획 세우기 페이지로 이동
+    router.push(`/plan/${params.id}`)
+  }
+
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
         <div className="text-center">
-          <p className="text-xl text-[#94A9C9] mb-4">명소를 찾을 수 없습니다</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+          <p className="text-[#94A9C9]">상세 정보를 불러오는 중...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !attraction) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-xl text-[#94A9C9] mb-4">{error || '명소를 찾을 수 없습니다'}</p>
           <Link 
             href="/"
             className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
@@ -39,16 +110,6 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         </div>
       </div>
     )
-  }
-
-  const { attraction, city } = result
-
-  const handleBack = () => {
-    router.back()
-  }
-
-  const handleSelectAttraction = () => {
-    router.push(`/plan/${params.id}`)
   }
 
   return (
@@ -66,9 +127,24 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
 
         {/* Main image */}
         <div className="relative h-[60vh] bg-gradient-to-b from-blue-600 to-purple-700 flex items-center justify-center">
-          <div className="text-center">
+          {attraction.imageUrls && attraction.imageUrls.length > 0 ? (
+            <div className="absolute inset-0">
+              <img 
+                src={attraction.imageUrls[0]} 
+                alt={attraction.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                }}
+              />
+              <div className="absolute inset-0 bg-black/30"></div>
+            </div>
+          ) : null}
+          
+          <div className="text-center relative z-10">
             <h1 className="text-4xl font-bold text-white mb-2">{attraction.name}</h1>
-            <p className="text-lg text-blue-100 opacity-80">{city.cityName}</p>
+            <p className="text-lg text-blue-100 opacity-80">{attraction.city.name}</p>
           </div>
           
           {/* Gradient overlay at bottom */}
@@ -80,7 +156,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
       <div className="px-6 py-4">
         {/* City and attraction name */}
         <div className="mb-6">
-          <p className="text-[#6FA0E6] text-lg mb-1">{city.cityName}</p>
+          <p className="text-[#6FA0E6] text-lg mb-1">{attraction.city.name}</p>
           <h2 className="text-3xl font-bold text-[#3E68FF] mb-4">{attraction.name}</h2>
         </div>
 
@@ -101,51 +177,123 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         </div>
 
         {/* Description */}
-        <div className="mb-8">
-          <p className="text-[#94A9C9] leading-relaxed text-lg">
-            {getDetailedDescription(attraction.id, attraction.description)}
+        <div className="mb-6">
+          <p className="text-[#94A9C9] leading-relaxed text-lg mb-4">
+            {attraction.description}
           </p>
+          {attraction.detailedInfo && (
+            <div className="bg-[#0F1A31]/50 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">상세 정보</h4>
+              <p className="text-[#94A9C9] text-sm leading-relaxed"
+                 dangerouslySetInnerHTML={{ __html: attraction.detailedInfo.replace(/\n/g, '<br>') }}
+              ></p>
+            </div>
+          )}
+        </div>
+
+        {/* Location and Contact Info */}
+        {(attraction.address || attraction.phoneNumber) && (
+          <div className="mb-6 space-y-3">
+            {attraction.address && (
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <div>
+                  <p className="text-white font-medium text-sm">주소</p>
+                  <p className="text-[#94A9C9] text-sm">{attraction.address}</p>
+                </div>
+              </div>
+            )}
+            
+            {attraction.phoneNumber && (
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+                <div>
+                  <p className="text-white font-medium text-sm">전화번호</p>
+                  <p className="text-[#94A9C9] text-sm">{attraction.phoneNumber}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Operating Hours and Additional Info */}
+        <div className="mb-6 space-y-3">
+          {(attraction.businessHours || attraction.usageHours) && (
+            <div className="bg-[#0F1A31]/30 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2 flex items-center gap-2">
+                <svg className="w-4 h-4 text-[#6FA0E6]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                운영시간
+              </h4>
+              <p className="text-[#94A9C9] text-sm"
+                 dangerouslySetInnerHTML={{ 
+                   __html: (attraction.businessHours || attraction.usageHours || '').replace(/\n/g, '<br>').replace(/<br>/g, '<br>') 
+                 }}
+              ></p>
+            </div>
+          )}
+          
+          {attraction.closedDays && (
+            <div className="bg-[#0F1A31]/30 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">휴무일</h4>
+              <p className="text-[#94A9C9] text-sm">{attraction.closedDays}</p>
+            </div>
+          )}
+
+          {attraction.parkingAvailable && (
+            <div className="bg-[#0F1A31]/30 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">주차 정보</h4>
+              <p className="text-[#94A9C9] text-sm"
+                 dangerouslySetInnerHTML={{ __html: attraction.parkingAvailable.replace(/<br>/g, '<br>') }}
+              ></p>
+            </div>
+          )}
+
+          {/* Restaurant specific info */}
+          {attraction.signatureMenu && (
+            <div className="bg-[#0F1A31]/30 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">대표 메뉴</h4>
+              <p className="text-[#94A9C9] text-sm">{attraction.signatureMenu}</p>
+              {attraction.menu && (
+                <>
+                  <h4 className="text-white font-medium mb-1 mt-3">메뉴</h4>
+                  <p className="text-[#94A9C9] text-sm">{attraction.menu}</p>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Accommodation specific info */}
+          {attraction.checkIn && (
+            <div className="bg-[#0F1A31]/30 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">숙박 정보</h4>
+              <div className="space-y-1 text-sm">
+                <p className="text-[#94A9C9]">체크인: {attraction.checkIn}</p>
+                <p className="text-[#94A9C9]">체크아웃: {attraction.checkOut}</p>
+                {attraction.roomCount && <p className="text-[#94A9C9]">객실 수: {attraction.roomCount}</p>}
+                {attraction.cookingAvailable && <p className="text-[#94A9C9]">취사 가능: {attraction.cookingAvailable}</p>}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action button */}
         <div className="mb-8">
           <button 
-            onClick={handleSelectAttraction}
-            className="w-full bg-[#3E68FF] hover:bg-[#4C7DFF] text-white py-4 rounded-2xl text-lg font-semibold transition-colors"
+            onClick={handleAddToItinerary}
+            className="w-full bg-[#3E68FF] hover:bg-[#4C7DFF] text-white py-4 rounded-2xl text-lg font-semibold transition-colors flex items-center justify-center gap-2"
           >
-            선택
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a1 1 0 011-1h6a1 1 0 011 1v4M8 7h8M8 7H6a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-2m-6 4v4m-4-2h8" />
+            </svg>
+            여행 계획 세우기
           </button>
-        </div>
-
-        {/* Additional info or related attractions could go here */}
-        <div className="border-t border-[#1F3C7A]/30 pt-6">
-          <h3 className="text-xl font-semibold text-[#94A9C9] mb-4">
-            {city.cityName}의 다른 명소
-          </h3>
-          <div className="grid grid-cols-1 gap-3">
-            {city.attractions
-              .filter(attr => attr.id !== attraction.id)
-              .slice(0, 3)
-              .map(relatedAttr => (
-                <Link
-                  key={relatedAttr.id}
-                  href={`/attraction/${relatedAttr.id}`}
-                  className="flex items-center p-3 bg-[#0F1A31]/50 rounded-lg hover:bg-[#12345D]/50 transition-colors group"
-                >
-                  <div className="flex-1">
-                    <h4 className="text-white font-medium group-hover:text-[#3E68FF] transition-colors">
-                      {relatedAttr.name}
-                    </h4>
-                    <p className="text-[#6FA0E6] text-sm mt-1">
-                      ⭐ {relatedAttr.rating} • {getCategoryName(relatedAttr.category)}
-                    </p>
-                  </div>
-                  <svg className="w-5 h-5 text-[#6FA0E6] group-hover:text-[#3E68FF] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-              ))}
-          </div>
         </div>
       </div>
     </div>
@@ -159,19 +307,9 @@ function getCategoryName(category: string): string {
     food: '맛집',
     culture: '문화',
     nature: '자연',
-    shopping: '쇼핑'
+    shopping: '쇼핑',
+    accommodation: '숙박',
+    leisure: '레저'
   }
   return categoryMap[category] || category
-}
-
-// 상세 설명 생성 함수 (실제로는 데이터베이스에서 가져와야 함)
-function getDetailedDescription(attractionId: string, shortDescription: string): string {
-  const detailedDescriptions: { [key: string]: string } = {
-    'gyeongbokgung': '과거와 현재가 공존하며 하루가 다르게 변하는 서울을 여행하는 일은 매일이 새롭다. 도시 한복판에서 600년의 역사를 그대로 안고 있는 아름다운 고궁들과 더불어 대한민국의 트렌드를 이끌어나가는 예술과 문화의 크고 작은 동네들을 들러볼 수 있는 서울은 도시 여행에 최적화된 장소다.',
-    'myeongdong': '명동은 서울의 대표적인 쇼핑과 관광의 중심지입니다. 국내외 브랜드 매장과 다양한 맛집들이 밀집해 있어 쇼핑과 미식을 동시에 즐길 수 있는 곳입니다.',
-    'namsan-tower': '남산서울타워는 서울의 상징적인 랜드마크로, 서울 시내를 한눈에 내려다볼 수 있는 최고의 전망대입니다. 특히 야경이 아름다워 연인들에게 인기가 높습니다.',
-    'hongdae': '홍익대학교 주변의 홍대는 젊은 예술가들과 대학생들이 만들어내는 역동적인 문화 공간입니다. 클럽, 라이브 하우스, 독특한 카페들이 가득한 젊음의 거리입니다.',
-  }
-  
-  return detailedDescriptions[attractionId] || `${shortDescription}에 대한 더 자세한 정보를 제공합니다. 이곳은 ${shortDescription}로 유명한 곳으로, 방문객들에게 특별한 경험을 선사합니다.`
 }
