@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # API 설정
     API_V1_STR: str = "/api/v1"
     
+    # AWS S3 설정
+    AWS_REGION: str = "ap-northeast-2"
+    S3_BUCKET_NAME: str = "user-posts"
+    
     class Config:
         env_file = ".env"
         extra = "ignore"

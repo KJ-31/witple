@@ -5,9 +5,9 @@ services:
     image: postgres:15-alpine
     container_name: witple_postgres
     environment:
-      POSTGRES_DB: witple_db
-      POSTGRES_USER: witple_user
-      POSTGRES_PASSWORD: witple_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -34,13 +34,18 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:pRNsMniIC8BhqzPA@witple-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
+      - AWS_REGION=ap-northeast-2
+      - S3_BUCKET_NAME=user-posts
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
       - redis
     volumes:
       - ./backend:/app
+      - ~/.aws:/root/.aws:ro
     networks:
       - witple_network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
