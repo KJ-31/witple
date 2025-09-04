@@ -339,6 +339,8 @@ jobs:
           --namespace=${{ env.EKS_NAMESPACE }} \
           --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}"
         
+        kubectl delete secret oauth-secret -n ${{ env.EKS_NAMESPACE }} --ignore-not-found=true
+        
         kubectl create secret generic oauth-secret \
           --namespace=${{ env.EKS_NAMESPACE }} \
           --from-literal=NEXTAUTH_SECRET="${{ secrets.NEXTAUTH_SECRET }}" \
