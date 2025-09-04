@@ -1,8 +1,42 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { RECOMMENDED_CITY_SECTIONS } from '../../../lib/dummyData'
+
+interface AttractionData {
+  id: string
+  name: string
+  description: string
+  imageUrl: string
+  rating: number
+  category: string
+  address: string
+  region: string
+  city: {
+    id: string
+    name: string
+    region: string
+  }
+  latitude?: number
+  longitude?: number
+  phoneNumber?: string
+  parkingAvailable?: string
+  usageHours?: string
+  closedDays?: string
+  detailedInfo?: string
+  majorCategory?: string
+  middleCategory?: string
+  minorCategory?: string
+  imageUrls?: string[]
+  businessHours?: string
+  signatureMenu?: string
+  menu?: string
+  roomCount?: string
+  roomType?: string
+  checkIn?: string
+  checkOut?: string
+  cookingAvailable?: string
+}
 
 interface PlanCalendarProps {
   params: { attractionId: string }
@@ -13,19 +47,36 @@ export default function PlanCalendar({ params }: PlanCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDates, setSelectedDates] = useState<Date[]>([])
   const [isSelectingRange, setIsSelectingRange] = useState(false)
+  const [attraction, setAttraction] = useState<AttractionData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // 명소 정보 찾기
-  const findAttractionAndCity = (attractionId: string) => {
-    for (const city of RECOMMENDED_CITY_SECTIONS) {
-      const attraction = city.attractions.find(attr => attr.id === attractionId)
-      if (attraction) {
-        return { attraction, city }
+  // API에서 관광지 상세 정보 가져오기
+  useEffect(() => {
+    const fetchAttractionDetail = async () => {
+      try {
+        setLoading(true)
+        const API_BASE_URL = 'http://localhost:8000'
+        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.attractionId}`)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        setAttraction(data)
+      } catch (error) {
+        console.error('관광지 정보 로드 오류:', error)
+        setError('관광지 정보를 불러올 수 없습니다.')
+      } finally {
+        setLoading(false)
       }
     }
-    return null
-  }
 
-  const result = findAttractionAndCity(params.attractionId)
+    if (params.attractionId) {
+      fetchAttractionDetail()
+    }
+  }, [params.attractionId])
 
   const handleBack = () => {
     router.back()
@@ -125,15 +176,32 @@ export default function PlanCalendar({ params }: PlanCalendarProps) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  if (!result) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
-        <p className="text-[#94A9C9]">명소를 찾을 수 없습니다</p>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+          <p className="text-[#94A9C9]">여행 계획을 준비하는 중...</p>
+        </div>
       </div>
     )
   }
 
-  const { attraction } = result
+  if (error || !attraction) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-[#94A9C9] text-lg mb-4">{error || '명소를 찾을 수 없습니다'}</p>
+          <button 
+            onClick={() => router.back()}
+            className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
+          >
+            돌아가기
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
