@@ -54,7 +54,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
     const fetchAttractionDetail = async () => {
       try {
         setLoading(true)
-        const API_BASE_URL = 'http://localhost:8000'
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`)
         
         if (!response.ok) {
