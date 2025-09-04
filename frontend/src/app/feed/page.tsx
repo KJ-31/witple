@@ -59,18 +59,46 @@ export default function FeedPage() {
     fetchPosts()
   }, [])
 
-  const handleLike = (postId: number) => {
-    setPosts(prevPosts =>
-      prevPosts.map(post =>
-        post.id === postId
-          ? {
-            ...post,
-            isLiked: !post.isLiked,
-            likes_count: post.isLiked ? post.likes_count - 1 : post.likes_count + 1
-          }
-          : post
-      )
-    )
+  const handleLike = async (postId: number) => {
+    try {
+      // 현재 좋아요 상태 확인
+      const currentPost = posts.find(post => post.id === postId)
+      if (!currentPost) return
+
+      const endpoint = currentPost.isLiked 
+        ? `http://localhost:8000/api/v1/posts/${postId}/like`  // DELETE 요청
+        : `http://localhost:8000/api/v1/posts/${postId}/like`  // POST 요청
+
+      const method = currentPost.isLiked ? 'DELETE' : 'POST'
+
+      const response = await fetch(endpoint, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        
+        // UI 업데이트 - 서버 응답의 likes_count 사용
+        setPosts(prevPosts =>
+          prevPosts.map(post =>
+            post.id === postId
+              ? {
+                ...post,
+                isLiked: !post.isLiked,
+                likes_count: result.likes_count
+              }
+              : post
+          )
+        )
+      } else {
+        console.error('좋아요 처리 실패')
+      }
+    } catch (error) {
+      console.error('좋아요 처리 중 오류:', error)
+    }
   }
 
   const handleCreatePost = () => {
@@ -81,7 +109,7 @@ export default function FeedPage() {
     const now = new Date()
     const postDate = new Date(dateString)
     const diffInHours = Math.floor((now.getTime() - postDate.getTime()) / (1000 * 60 * 60))
-    
+
     if (diffInHours < 1) return '방금 전'
     if (diffInHours < 24) return `${diffInHours}시간 전`
     const diffInDays = Math.floor(diffInHours / 24)
@@ -117,7 +145,7 @@ export default function FeedPage() {
             <p className="text-gray-500 text-sm mt-2">첫 번째 포스트를 작성해보세요!</p>
           </div>
         )}
-        
+
         {posts.map((post) => (
           <div key={post.id} className="bg-gray-800 mb-4 border-b border-gray-700">
             {/* Post Header */}
@@ -137,11 +165,11 @@ export default function FeedPage() {
                   )}
                 </div>
               </div>
-              <button className="text-gray-400 hover:text-white transition-colors">
+              {/* <button className="text-gray-400 hover:text-white transition-colors">
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                 </svg>
-              </button>
+              </button> */}
             </div>
 
             {/* Post Image */}
@@ -159,14 +187,21 @@ export default function FeedPage() {
                 <div className="flex items-center space-x-4">
                   <button
                     onClick={() => handleLike(post.id)}
-                    className={`transition-colors ${post.isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-500'
-                      }`}
+                    className="transition-colors hover:scale-110 transform"
                   >
-                    <svg className="w-6 h-6" fill={post.isLiked ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                    <svg 
+                      className="w-6 h-6" 
+                      fill={post.isLiked ? '#ef4444' : 'none'} 
+                      stroke={post.isLiked ? '#ef4444' : '#ffffff'} 
+                      viewBox="0 0 24 24"
+                    >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                   </button>
-                  <button className="text-gray-400 hover:text-white transition-colors">
+                  <div className="mb-2 mt-2">
+                    <p className="font-semibold text-white">좋아요 {post.likes_count}개</p>
+                  </div>
+                  {/* <button className="text-gray-400 hover:text-white transition-colors">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
@@ -175,7 +210,7 @@ export default function FeedPage() {
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>
-                  </button>
+                  </button> */}
                 </div>
                 <button className="text-gray-400 hover:text-white transition-colors">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,9 +220,9 @@ export default function FeedPage() {
               </div>
 
               {/* Likes Count */}
-              <div className="mb-2">
+              {/* <div className="mb-2">
                 <p className="font-semibold text-white">좋아요 {post.likes_count}개</p>
-              </div>
+              </div> */}
 
               {/* Caption */}
               <div className="mb-2">
