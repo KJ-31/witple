@@ -64,7 +64,7 @@ export default function Home() {
     if (!searchQuery.trim()) return
     
     try {
-      const API_BASE_URL = 'http://localhost:8000'
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}`)
       
       if (!response.ok) {
