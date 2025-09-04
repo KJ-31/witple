@@ -1,0 +1,172 @@
+from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, JSON
+from sqlalchemy.sql import func
+from database import Base
+
+
+class Nature(Base):
+    __tablename__ = "nature"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    major_category = Column(String, nullable=True)
+    middle_category = Column(String, nullable=True)
+    minor_category = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    phone_number = Column(String, nullable=True)
+    closed_days = Column(Text, nullable=True)
+    usage_hours = Column(Text, nullable=True)
+    parking_available = Column(String, nullable=True)
+    detailed_info = Column(Text, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class Restaurant(Base):
+    __tablename__ = "restaurants"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    parking_available = Column(String, nullable=True)
+    business_hours = Column(Text, nullable=True)
+    closed_days = Column(Text, nullable=True)
+    signature_menu = Column(Text, nullable=True)
+    menu = Column(Text, nullable=True)
+    category = Column(String, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class Shopping(Base):
+    __tablename__ = "shopping"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    major_category = Column(String, nullable=True)
+    middle_category = Column(String, nullable=True)
+    minor_category = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    phone_number = Column(String, nullable=True)
+    business_hours = Column(Text, nullable=True)
+    closed_days = Column(Text, nullable=True)
+    parking_available = Column(String, nullable=True)
+    restroom = Column(String, nullable=True)
+    detailed_info = Column(Text, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class Accommodation(Base):
+    __tablename__ = "accommodation"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    room_count = Column(String, nullable=True)
+    room_type = Column(Text, nullable=True)
+    parking_available = Column(String, nullable=True)
+    cooking_available = Column(String, nullable=True)
+    check_in = Column(String, nullable=True)
+    check_out = Column(String, nullable=True)
+    reservation_info = Column(Text, nullable=True)
+    reservation_homepage = Column(Text, nullable=True)
+    pickup_service = Column(String, nullable=True)
+    restaurant = Column(String, nullable=True)
+    additional_facilities = Column(Text, nullable=True)
+    seminar = Column(String, nullable=True)
+    sports_facilities = Column(Text, nullable=True)
+    sauna = Column(String, nullable=True)
+    beauty_facilities = Column(Text, nullable=True)
+    karaoke = Column(String, nullable=True)
+    bbq_area = Column(String, nullable=True)
+    campfire = Column(String, nullable=True)
+    bike_rental = Column(String, nullable=True)
+    fitness_center = Column(String, nullable=True)
+    computer_room = Column(String, nullable=True)
+    public_shower = Column(String, nullable=True)
+    detailed_info = Column(Text, nullable=True)
+    refund_policy = Column(Text, nullable=True)
+    category = Column(String, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class Humanities(Base):
+    __tablename__ = "humanities"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    major_category = Column(String, nullable=True)
+    middle_category = Column(String, nullable=True)
+    minor_category = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    phone_number = Column(String, nullable=True)
+    closed_days = Column(Text, nullable=True)
+    experience_guide = Column(Text, nullable=True)
+    experience_age = Column(String, nullable=True)
+    capacity = Column(String, nullable=True)
+    usage_hours = Column(Text, nullable=True)
+    parking_available = Column(String, nullable=True)
+    detailed_info = Column(Text, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
+class LeisureSports(Base):
+    __tablename__ = "leisure_sports"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    major_category = Column(String, nullable=True)
+    middle_category = Column(String, nullable=True)
+    minor_category = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
+    region = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    latitude = Column(Numeric, nullable=True)
+    longitude = Column(Numeric, nullable=True)
+    overview = Column(Text, nullable=True)
+    phone_number = Column(String, nullable=True)
+    closed_days = Column(Text, nullable=True)
+    opening_period = Column(Text, nullable=True)
+    business_hours = Column(Text, nullable=True)
+    entrance_fee = Column(Text, nullable=True)
+    inquiry_info = Column(Text, nullable=True)
+    experience_age = Column(String, nullable=True)
+    parking_available = Column(String, nullable=True)
+    detailed_info = Column(Text, nullable=True)
+    image_urls = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)

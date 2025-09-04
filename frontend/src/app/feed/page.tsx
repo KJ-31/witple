@@ -175,7 +175,7 @@ export default function FeedPage() {
             {/* Post Image */}
             <div className="aspect-square relative">
               <img
-                src={`/api/proxy${post.image_url}`}
+                src={post.image_url}
                 alt="Post"
                 className="w-full h-full object-cover"
               />

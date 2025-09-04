@@ -339,6 +339,14 @@ jobs:
           --namespace=${{ env.EKS_NAMESPACE }} \
           --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}"
         
+        kubectl create secret generic oauth-secret \
+          --namespace=${{ env.EKS_NAMESPACE }} \
+          --from-literal=NEXTAUTH_SECRET="${{ secrets.NEXTAUTH_SECRET }}" \
+          --from-literal=GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+          --from-literal=GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+          --from-literal=NEXTAUTH_URL="${{ secrets.NEXTAUTH_URL }}" \
+          --from-literal=NEXT_PUBLIC_API_URL="${{ secrets.NEXT_PUBLIC_API_URL }}"
+        
         echo "Secrets created successfully"
         
         # ECR Pull Secret 생성 (이미지 Pull을 위해)
@@ -364,6 +372,10 @@ jobs:
         kubectl apply -f k8s/namespace.yaml
         kubectl apply -f k8s/configmap-generated.yaml
         kubectl apply -f k8s/hpa.yaml
+        
+        # ServiceAccount 배포
+        echo "Applying ServiceAccount..."
+        kubectl apply -f k8s/backend/serviceaccount.yaml
         
         # Ingress 생성 (도메인 사용 여부에 따라 다르게 처리)
         echo "=== Ingress Generation ==="
