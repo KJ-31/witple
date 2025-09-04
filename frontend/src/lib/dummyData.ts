@@ -259,7 +259,8 @@ export const fetchRecommendedCities = async (
   limit: number = 3
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
   try {
-    const API_BASE_URL = 'http://localhost:8000'
+    // 환경 변수에서 API URL을 가져오거나 기본값 사용
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
     const response = await fetch(`${API_BASE_URL}/api/v1/attractions/cities?page=${page}&limit=${limit}`)
     
     if (!response.ok) {
