@@ -33,23 +33,33 @@ export default function CreatePostPage() {
     }
 
     setIsUploading(true)
-    
+
     try {
-      // 여기서 실제 API 호출 구현
-      console.log('새 포스트 업로드:', {
-        image: selectedImage,
-        caption,
-        location,
-        timestamp: new Date().toISOString()
+      // API 호출로 포스트 생성
+      const response = await fetch('http://localhost:8000/api/v1/posts/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          caption: caption,
+          location: location || null,
+          image_data: selectedImage // Base64 이미지 데이터
+        })
       })
-      
-      // 업로드 시뮬레이션
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '업로드 실패')
+      }
+
+      const result = await response.json()
+      console.log('포스트 생성 성공:', result)
+
       alert('포스트가 성공적으로 업로드되었습니다!')
       router.push('/feed')
     } catch (error) {
-      alert('업로드 중 오류가 발생했습니다.')
+      alert(`업로드 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`)
       console.error('Upload error:', error)
     } finally {
       setIsUploading(false)
@@ -191,7 +201,7 @@ export default function CreatePostPage() {
             </svg>
           </div>
 
-          <div className="flex items-center justify-between p-4 bg-gray-800 rounded-2xl">
+          {/* <div className="flex items-center justify-between p-4 bg-gray-800 rounded-2xl">
             <div className="flex items-center space-x-3">
               <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -206,7 +216,7 @@ export default function CreatePostPage() {
               <div className="w-10 h-6 bg-gray-600 rounded-full shadow-inner"></div>
               <div className="absolute block w-4 h-4 mt-1 ml-1 bg-white rounded-full shadow"></div>
             </div>
-          </div>
+          </div> */}
         </div>
 
         {/* Upload Progress */}
