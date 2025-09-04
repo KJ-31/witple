@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import redis
 import logging
+import os
 from database import engine, Base
-from routers import auth, users
+from routers import auth, users, posts
 from config import settings
 
 # 로깅 설정
@@ -60,9 +62,14 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Response status: {response.status_code}")
     return response
 
+# 업로드된 파일을 위한 정적 파일 서빙 설정
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # 라우터 등록
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(posts.router, prefix="/api/v1/posts", tags=["posts"])
 
 
 @app.get("/")
