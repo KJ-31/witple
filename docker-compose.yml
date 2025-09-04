@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -16,7 +15,6 @@ services:
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - witple_network
-
   # Redis Cache
   redis:
     image: redis:7-alpine
@@ -27,7 +25,6 @@ services:
       - redis_data:/data
     networks:
       - witple_network
-
   # Backend (FastAPI)
   backend:
     build:
@@ -37,18 +34,16 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://witple_user:witple_password@postgres:5432/witple_db
+      - DATABASE_URL=postgresql://postgres:pRNsMniIC8BhqzPA@witple-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
     depends_on:
-      - postgres
       - redis
     volumes:
       - ./backend:/app
     networks:
       - witple_network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
   # Frontend (Next.js)
   frontend:
     build:
@@ -57,6 +52,8 @@ services:
     container_name: witple_frontend
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
       - API_INTERNAL_URL=http://backend:8000
       - NEXT_PUBLIC_API_BASE=/api
@@ -65,12 +62,9 @@ services:
       - backend
     networks:
       - witple_network
-
 volumes:
   postgres_data:
   redis_data:
-
-
 networks:
   witple_network:
     driver: bridge
