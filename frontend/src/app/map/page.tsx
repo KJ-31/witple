@@ -165,7 +165,7 @@ export default function MapPage() {
         const placeIds = placesParam.split(',')
         const dayNumbers = dayNumbersParam.split(',').map(Number)
         
-        const API_BASE_URL = 'http://localhost:8000'
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const places: SelectedPlace[] = []
         
         for (let i = 0; i < placeIds.length; i++) {
