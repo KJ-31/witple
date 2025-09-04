@@ -40,15 +40,7 @@ async function proxyRequest(
     const url = new URL(request.url);
     const queryString = url.search;
     
-    // 중복된 /api 제거하고 올바른 백엔드 URL 생성
-    const backendUrl = `${API_INTERNAL_URL}/api/v1/${path}${queryString}`;
-
-    console.log('=== PROXY DEBUG INFO ===');
-    console.log(`Request URL: ${request.url}`);
-    console.log(`Path segments:`, pathSegments);
-    console.log(`API_INTERNAL_URL: ${API_INTERNAL_URL}`);
-    console.log(`Final backend URL: ${backendUrl}`);
-    console.log(`Method: ${method}`);
+    const backendUrl = `${API_INTERNAL_URL}/${path}${queryString}`;
 
     const headers: HeadersInit = {};
 
@@ -71,8 +63,7 @@ async function proxyRequest(
 
     console.log(`Proxying ${method} request to: ${backendUrl}`);
     console.log(`Headers:`, headers);
-    console.log(`Body length:`, body ? body.length : 0);
-    console.log('=== END DEBUG INFO ===');
+    console.log(`Body:`, body);
 
     const response = await fetch(backendUrl, {
       method,
@@ -88,18 +79,10 @@ async function proxyRequest(
         'Content-Type': response.headers.get('Content-Type') || 'application/json',
       },
     });
-  } catch (error: any) {
-    console.error('=== PROXY ERROR ===');
+  } catch (error) {
     console.error('Proxy error:', error);
-    console.error('Error details:', {
-      message: error.message,
-      name: error.name,
-      stack: error.stack
-    });
-    console.error('=== END ERROR ===');
-    
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
