@@ -7,7 +7,7 @@ import redis
 import logging
 import os
 from database import engine, Base
-from routers import auth, users, posts
+from routers import auth, users, posts, attractions
 from config import settings
 
 # 로깅 설정
@@ -70,6 +70,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(posts.router, prefix="/api/v1/posts", tags=["posts"])
+app.include_router(attractions.router, prefix="/api/v1/attractions", tags=["attractions"])
 
 
 @app.get("/")
