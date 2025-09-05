@@ -97,7 +97,7 @@ async function proxyRequest(
       body,
     });
 
-    console.log('=== PROXY RESPONSE ===');
+    console.log('==== PROXY RESPONSE ====');
     console.log('Response status:', response.status);
     console.log('Response statusText:', response.statusText);
     console.log('Response headers:', Object.fromEntries(response.headers.entries()));
