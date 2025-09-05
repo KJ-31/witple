@@ -58,23 +58,6 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
             center,
             zoom,
             disableDefaultUI: true, // 모든 기본 UI 컨트롤 비활성화
-            styles: [
-              {
-                featureType: 'all',
-                elementType: 'geometry',
-                stylers: [{ color: '#f5f5f5' }]
-              },
-              {
-                featureType: 'water',
-                elementType: 'all',
-                stylers: [{ color: '#667eea' }]
-              },
-              {
-                featureType: 'road',
-                elementType: 'all',
-                stylers: [{ color: '#ffffff' }]
-              }
-            ]
           })
 
           setMap(mapInstance)
