@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List
 import boto3
 from botocore.exceptions import ClientError
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -14,6 +15,9 @@ from database import get_db
 from models import Post, User
 from schemas import PostCreate, PostResponse, PostListResponse
 from config import settings
+
+# 로깅 설정
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["posts"])
 
