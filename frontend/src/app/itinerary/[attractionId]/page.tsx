@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 interface ItineraryBuilderProps {
@@ -49,9 +49,10 @@ interface SelectedPlace {
   rating: number
   description: string
   dayNumber?: number // 선택된 날짜 (1, 2, 3...)
+  sourceTable?: string // 어떤 테이블에서 온 데이터인지 추적
 }
 
-type CategoryKey = 'all' | 'tourist' | 'food' | 'culture' | 'nature' | 'shopping'
+type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 
 export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const router = useRouter()
@@ -66,7 +67,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const [attraction, setAttraction] = useState<AttractionData | null>(null)
   const [relatedAttractions, setRelatedAttractions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [noMoreResults, setNoMoreResults] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
   const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 현재 선택된 날짜 탭
   const [placesByDay, setPlacesByDay] = useState<{ [dayNumber: number]: SelectedPlace[] }>({}) // 날짜별로 장소 저장
@@ -100,11 +105,63 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   const dateRange = generateDateRange()
 
+  // 더 많은 관광지 로드 함수
+  const loadMoreAttractions = async (cityName: string, region: string, page: number, isFirstLoad: boolean = false) => {
+    if (isFirstLoad) {
+      setLoading(true)
+    } else {
+      setLoadingMore(true)
+    }
+
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const searchResponse = await fetch(
+        `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(cityName)}&region=${encodeURIComponent(region)}&page=${page}&limit=50`
+      )
+      
+      if (searchResponse.ok) {
+        const searchData = await searchResponse.json()
+        // 현재 관광지 제외
+        const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
+        
+        if (isFirstLoad) {
+          setRelatedAttractions(filtered)
+          setCurrentPage(0)
+          setNoMoreResults(false)
+        } else {
+          if (filtered.length === 0) {
+            setNoMoreResults(true)
+            setHasMore(false)
+          } else {
+            setRelatedAttractions(prev => [...prev, ...filtered])
+            setCurrentPage(page)
+          }
+        }
+        
+        setHasMore(searchData.hasMore || false)
+      }
+    } catch (error) {
+      console.error('추가 관광지 로드 오류:', error)
+    } finally {
+      if (isFirstLoad) {
+        setLoading(false)
+      } else {
+        setLoadingMore(false)
+      }
+    }
+  }
+
   // API에서 관광지 상세 정보와 관련 관광지 가져오기
   useEffect(() => {
+    let isCancelled = false // cleanup을 위한 플래그
+    
     const fetchAttractionData = async () => {
       try {
+        if (isCancelled) return // 이미 취소된 경우 중단
+        
         setLoading(true)
+        setRelatedAttractions([]) // 새로 로드하기 전에 기존 데이터 초기화
+        
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
         // 선택된 관광지 정보 가져오기
@@ -113,26 +170,31 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           throw new Error(`HTTP error! status: ${attractionResponse.status}`)
         }
         const attractionData = await attractionResponse.json()
+        
+        if (isCancelled) return // 이미 취소된 경우 중단
+        
         setAttraction(attractionData)
 
-        // 같은 도시의 다른 관광지들 검색으로 가져오기
-        const searchResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(attractionData.city.name)}&region=${encodeURIComponent(attractionData.region)}`)
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json()
-          // 현재 관광지 제외
-          const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
-          setRelatedAttractions(filtered.slice(0, 20)) // 최대 20개
-        }
+        // 같은 도시의 다른 관광지들 검색으로 가져오기 (첫 페이지)
+        await loadMoreAttractions(attractionData.city.name, attractionData.region, 0, true)
       } catch (error) {
-        console.error('관광지 정보 로드 오류:', error)
-        setError('관광지 정보를 불러올 수 없습니다.')
+        if (!isCancelled) {
+          console.error('관광지 정보 로드 오류:', error)
+          setError('관광지 정보를 불러올 수 없습니다.')
+        }
       } finally {
-        setLoading(false)
+        if (!isCancelled) {
+          setLoading(false)
+        }
       }
     }
 
     if (params.attractionId) {
       fetchAttractionData()
+    }
+    
+    return () => {
+      isCancelled = true // cleanup 시 플래그 설정
     }
   }, [params.attractionId])
 
@@ -158,10 +220,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 카테고리 정의
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
-    { key: 'tourist' as CategoryKey, name: '관광', icon: '🏛️' },
-    { key: 'food' as CategoryKey, name: '맛집', icon: '🍽️' },
-    { key: 'culture' as CategoryKey, name: '문화', icon: '🎭' },
+    { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
+    { key: 'humanities' as CategoryKey, name: '인문', icon: '🏛️' },
+    { key: 'leisure_sports' as CategoryKey, name: '레포츠', icon: '⚽' },
     { key: 'nature' as CategoryKey, name: '자연', icon: '🌿' },
+    { key: 'restaurants' as CategoryKey, name: '맛집', icon: '🍽️' },
     { key: 'shopping' as CategoryKey, name: '쇼핑', icon: '🛍️' }
   ]
 
@@ -177,7 +240,18 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     if (selectedCategory === 'all') {
       return allPlaces
     }
-    return allPlaces.filter(place => place.category === selectedCategory)
+    
+    // sourceTable 기준으로 필터링 (더 정확함)
+    const filtered = allPlaces.filter(place => {
+      // sourceTable이 있으면 그것을 우선 사용
+      if (place.sourceTable) {
+        return place.sourceTable === selectedCategory
+      }
+      // 없으면 category 사용 (폴백)
+      return place.category === selectedCategory
+    })
+    
+    return filtered
   }
 
   const filteredPlaces = getFilteredPlaces()
@@ -193,7 +267,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       category: place.category,
       rating: place.rating,
       description: place.description,
-      dayNumber: selectedDayForAdding
+      dayNumber: selectedDayForAdding,
+      sourceTable: place.sourceTable // 테이블 정보 저장
     }
 
     setPlacesByDay(prev => {
@@ -243,12 +318,14 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     // 선택된 장소와 날짜별 정보를 query parameter로 전달하며 지도 페이지로 이동
     const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
     const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
+    const sourceTables = allSelectedPlaces.map(place => place.sourceTable || 'unknown').join(',')
     const startDate = dateRange[0].toISOString().split('T')[0]
     const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
 
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
       dayNumbers: dayNumbers,
+      sourceTables: sourceTables,
       startDate,
       endDate,
       days: dateRange.length.toString(),
@@ -286,24 +363,26 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4">
-        <button
-          onClick={handleBack}
-          className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
+    <div className="min-h-screen bg-[#0B1220] text-white relative">
+      {/* Scrollable Content */}
+      <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4">
+          <button
+            onClick={handleBack}
+            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
 
-        <h1 className="text-lg font-semibold text-[#94A9C9]">
-          여행 기간이 어떻게 되시나요?
-        </h1>
+          <h1 className="text-lg font-semibold text-[#94A9C9]">
+            여행 기간이 어떻게 되시나요?
+          </h1>
 
-        <div className="w-10 h-10" /> {/* Spacer */}
-      </div>
+          <div className="w-10 h-10" /> {/* Spacer */}
+        </div>
 
       {/* Travel Period Info */}
       <div className="px-4 mb-6 text-center">
@@ -381,7 +460,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Places List */}
-      <div className="px-4 space-y-3">
+      <div key={selectedCategory} className="px-4 space-y-3">
         {filteredPlaces.length === 0 ? (
           <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
             <p className="text-[#6FA0E6] text-lg mb-2">추천할 장소가 없습니다</p>
@@ -393,7 +472,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
             return (
               <div
-                key={place.id}
+                key={`${selectedCategory}-${place.id}-${place.sourceTable}`}
                 className={`
                   bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
                   ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' :
@@ -449,45 +528,84 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         )}
       </div>
 
-      {/* Selected Places Summary & Create Button */}
-      {getAllSelectedPlaces().length > 0 && (
-        <div className="px-4 py-6">
-          <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-white font-semibold">선택된 장소</h4>
-              <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
+      {/* Load More Button / No More Results Message */}
+      {!loading && (
+        <div className="px-4 mb-6">
+          {hasMore && !noMoreResults ? (
+            <button
+              onClick={() => {
+                if (attraction && !loadingMore) {
+                  loadMoreAttractions(attraction.city.name, attraction.region, currentPage + 1, false)
+                }
+              }}
+              disabled={loadingMore}
+              className={`
+                w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
+                ${loadingMore 
+                  ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed' 
+                  : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
+                }
+              `}
+            >
+              {loadingMore ? (
+                <div className="flex items-center justify-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#6FA0E6]"></div>
+                  더 많은 장소 로딩 중...
+                </div>
+              ) : (
+                '더 많은 장소 보기'
+              )}
+            </button>
+          ) : noMoreResults || !hasMore ? (
+            <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
+              <div className="text-[#6FA0E6] text-sm mb-1">🏁</div>
+              <p className="text-[#94A9C9] text-sm">더 이상 추천할 장소가 없습니다</p>
+              <p className="text-[#6FA0E6] text-xs mt-1">위의 장소들 중에서 선택해보세요!</p>
             </div>
-
-            {/* 날짜별로 그룹화해서 표시 */}
-            <div className="space-y-3">
-              {dateRange.map((date, index) => {
-                const dayNumber = index + 1
-                const placesForDay = getPlacesForDay(dayNumber)
-
-                if (placesForDay.length === 0) return null
-
-                return (
-                  <div key={dayNumber} className="border-l-2 border-[#3E68FF] pl-3">
-                    <div className="text-xs text-[#6FA0E6] font-semibold mb-2">
-                      Day {dayNumber} ({date.getMonth() + 1}/{date.getDate()})
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {placesForDay.map(place => (
-                        <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
-                          {place.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          ) : null}
         </div>
       )}
 
-      {/* Create Itinerary Button */}
-      <div className="px-4 pb-8">
+        {/* Selected Places Summary */}
+        {getAllSelectedPlaces().length > 0 && (
+          <div className="px-4 py-6">
+            <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-white font-semibold">선택된 장소</h4>
+                <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
+              </div>
+
+              {/* 날짜별로 그룹화해서 표시 */}
+              <div className="space-y-3">
+                {dateRange.map((date, index) => {
+                  const dayNumber = index + 1
+                  const placesForDay = getPlacesForDay(dayNumber)
+
+                  if (placesForDay.length === 0) return null
+
+                  return (
+                    <div key={dayNumber} className="border-l-2 border-[#3E68FF] pl-3">
+                      <div className="text-xs text-[#6FA0E6] font-semibold mb-2">
+                        Day {dayNumber} ({date.getMonth() + 1}/{date.getDate()})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {placesForDay.map(place => (
+                          <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
+                            {place.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fixed Bottom Button - Create Itinerary */}
+      <div className="absolute bottom-0 left-0 right-0 bg-[#0B1220] border-t border-[#1F3C7A]/30 p-4 z-10">
         <button
           onClick={handleCreateItinerary}
           disabled={getAllSelectedPlaces().length === 0}
@@ -499,7 +617,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             }
           `}
         >
-          선택
+          여행 일정 만들기
         </button>
       </div>
     </div>
@@ -509,11 +627,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 // 카테고리 한국어 변환 함수
 function getCategoryName(category: string): string {
   const categoryMap: { [key: string]: string } = {
-    tourist: '관광',
-    food: '맛집',
-    culture: '문화',
     nature: '자연',
-    shopping: '쇼핑'
+    restaurants: '맛집',
+    shopping: '쇼핑',
+    accommodation: '숙박',
+    humanities: '인문',
+    leisure_sports: '레저'
   }
   return categoryMap[category] || category
 }
