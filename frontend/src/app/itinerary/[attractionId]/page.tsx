@@ -153,9 +153,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // API에서 관광지 상세 정보와 관련 관광지 가져오기
   useEffect(() => {
+    let isCancelled = false // cleanup을 위한 플래그
+    
     const fetchAttractionData = async () => {
       try {
+        if (isCancelled) return // 이미 취소된 경우 중단
+        
         setLoading(true)
+        setRelatedAttractions([]) // 새로 로드하기 전에 기존 데이터 초기화
+        
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
         // 선택된 관광지 정보 가져오기
@@ -164,20 +170,31 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           throw new Error(`HTTP error! status: ${attractionResponse.status}`)
         }
         const attractionData = await attractionResponse.json()
+        
+        if (isCancelled) return // 이미 취소된 경우 중단
+        
         setAttraction(attractionData)
 
         // 같은 도시의 다른 관광지들 검색으로 가져오기 (첫 페이지)
         await loadMoreAttractions(attractionData.city.name, attractionData.region, 0, true)
       } catch (error) {
-        console.error('관광지 정보 로드 오류:', error)
-        setError('관광지 정보를 불러올 수 없습니다.')
+        if (!isCancelled) {
+          console.error('관광지 정보 로드 오류:', error)
+          setError('관광지 정보를 불러올 수 없습니다.')
+        }
       } finally {
-        setLoading(false)
+        if (!isCancelled) {
+          setLoading(false)
+        }
       }
     }
 
     if (params.attractionId) {
       fetchAttractionData()
+    }
+    
+    return () => {
+      isCancelled = true // cleanup 시 플래그 설정
     }
   }, [params.attractionId])
 
@@ -225,7 +242,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
     
     // sourceTable 기준으로 필터링 (더 정확함)
-    return allPlaces.filter(place => {
+    const filtered = allPlaces.filter(place => {
       // sourceTable이 있으면 그것을 우선 사용
       if (place.sourceTable) {
         return place.sourceTable === selectedCategory
@@ -233,9 +250,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       // 없으면 category 사용 (폴백)
       return place.category === selectedCategory
     })
+    
+    return filtered
   }
 
-  const filteredPlaces = useMemo(() => getFilteredPlaces(), [allPlaces, selectedCategory])
+  const filteredPlaces = getFilteredPlaces()
 
   const handleBack = () => {
     router.back()
@@ -439,7 +458,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Places List */}
-      <div className="px-4 space-y-3">
+      <div key={selectedCategory} className="px-4 space-y-3">
         {filteredPlaces.length === 0 ? (
           <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
             <p className="text-[#6FA0E6] text-lg mb-2">추천할 장소가 없습니다</p>
@@ -451,7 +470,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
             return (
               <div
-                key={place.id}
+                key={`${selectedCategory}-${place.id}-${place.sourceTable}`}
                 className={`
                   bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
                   ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' :
