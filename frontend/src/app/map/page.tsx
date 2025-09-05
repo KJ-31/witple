@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { GoogleMap } from '@/components'
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
@@ -21,6 +22,8 @@ interface SelectedPlace {
   }
   cityName?: string
   isPinned?: boolean
+  latitude?: number
+  longitude?: number
 }
 
 interface AttractionData {
@@ -210,7 +213,7 @@ export default function MapPage() {
   const fetchPlacesByCategory = async (category: CategoryKey) => {
     try {
       setCategoryLoading(true)
-      const API_BASE_URL = 'http://localhost:8000'
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       let url = `${API_BASE_URL}/api/v1/attractions/search?q=&limit=50`
       
       // category 매개변수 대신 검색어로 카테고리 처리
@@ -352,6 +355,28 @@ export default function MapPage() {
     })
   };
 
+  // 지도 마커 데이터 생성
+  const mapMarkers = useMemo(() => {
+    if (showItinerary && selectedItineraryPlaces.length > 0) {
+      return selectedItineraryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id
+        }))
+    } else if (!showItinerary && categoryPlaces.length > 0) {
+      return categoryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id
+        }))
+    }
+    return []
+  }, [showItinerary, selectedItineraryPlaces, categoryPlaces])
+
   // 유틸리티 함수
   const handleBack = () => router.back()
   const handleSearch = (e: React.FormEvent) => {
@@ -461,12 +486,13 @@ export default function MapPage() {
       </div>
 
       {/* Map Area */}
-      <div className="absolute top-0 left-0 right-0 bottom-0 bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-center text-white/70">
-          <div className="text-6xl mb-4">🗺️</div>
-          <p className="text-lg font-medium mb-2">지도 영역</p>
-          <p className="text-sm opacity-75">외부 지도 API 연동 예정</p>
-        </div>
+      <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
+        <GoogleMap
+          className="w-full h-full"
+          center={{ lat: 37.5665, lng: 126.9780 }}
+          zoom={13}
+          markers={mapMarkers}
+        />
       </div>
 
       {/* Bottom Sheet */}
