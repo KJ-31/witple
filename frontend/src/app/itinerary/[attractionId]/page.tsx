@@ -363,24 +363,26 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4">
-        <button
-          onClick={handleBack}
-          className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
+    <div className="min-h-screen bg-[#0B1220] text-white relative">
+      {/* Scrollable Content */}
+      <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4">
+          <button
+            onClick={handleBack}
+            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
 
-        <h1 className="text-lg font-semibold text-[#94A9C9]">
-          여행 기간이 어떻게 되시나요?
-        </h1>
+          <h1 className="text-lg font-semibold text-[#94A9C9]">
+            여행 기간이 어떻게 되시나요?
+          </h1>
 
-        <div className="w-10 h-10" /> {/* Spacer */}
-      </div>
+          <div className="w-10 h-10" /> {/* Spacer */}
+        </div>
 
       {/* Travel Period Info */}
       <div className="px-4 mb-6 text-center">
@@ -564,45 +566,46 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         </div>
       )}
 
-      {/* Selected Places Summary & Create Button */}
-      {getAllSelectedPlaces().length > 0 && (
-        <div className="px-4 py-6">
-          <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-white font-semibold">선택된 장소</h4>
-              <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
-            </div>
+        {/* Selected Places Summary */}
+        {getAllSelectedPlaces().length > 0 && (
+          <div className="px-4 py-6">
+            <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-white font-semibold">선택된 장소</h4>
+                <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
+              </div>
 
-            {/* 날짜별로 그룹화해서 표시 */}
-            <div className="space-y-3">
-              {dateRange.map((date, index) => {
-                const dayNumber = index + 1
-                const placesForDay = getPlacesForDay(dayNumber)
+              {/* 날짜별로 그룹화해서 표시 */}
+              <div className="space-y-3">
+                {dateRange.map((date, index) => {
+                  const dayNumber = index + 1
+                  const placesForDay = getPlacesForDay(dayNumber)
 
-                if (placesForDay.length === 0) return null
+                  if (placesForDay.length === 0) return null
 
-                return (
-                  <div key={dayNumber} className="border-l-2 border-[#3E68FF] pl-3">
-                    <div className="text-xs text-[#6FA0E6] font-semibold mb-2">
-                      Day {dayNumber} ({date.getMonth() + 1}/{date.getDate()})
+                  return (
+                    <div key={dayNumber} className="border-l-2 border-[#3E68FF] pl-3">
+                      <div className="text-xs text-[#6FA0E6] font-semibold mb-2">
+                        Day {dayNumber} ({date.getMonth() + 1}/{date.getDate()})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {placesForDay.map(place => (
+                          <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
+                            {place.name}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {placesForDay.map(place => (
-                        <span key={place.id} className="text-xs bg-[#3E68FF]/20 text-[#6FA0E6] px-2 py-1 rounded-full">
-                          {place.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Create Itinerary Button */}
-      <div className="px-4 pb-8">
+      {/* Fixed Bottom Button - Create Itinerary */}
+      <div className="absolute bottom-0 left-0 right-0 bg-[#0B1220] border-t border-[#1F3C7A]/30 p-4 z-10">
         <button
           onClick={handleCreateItinerary}
           disabled={getAllSelectedPlaces().length === 0}
