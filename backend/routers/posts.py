@@ -22,9 +22,9 @@ s3_client_config = {
     'region_name': settings.AWS_REGION
 }
 
-# VPC 엔드포인트가 설정되어 있으면 사용
-if os.getenv('AWS_S3_ENDPOINT_URL'):
-    s3_client_config['endpoint_url'] = os.getenv('AWS_S3_ENDPOINT_URL')
+# VPC 엔드포인트 설정 제거 - 직접 S3 연결 사용
+# if os.getenv('AWS_S3_ENDPOINT_URL'):
+#     s3_client_config['endpoint_url'] = os.getenv('AWS_S3_ENDPOINT_URL')
 
 s3_client = boto3.client('s3', **s3_client_config)
 
