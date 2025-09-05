@@ -54,6 +54,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        NEXT_PUBLIC_API_BASE: ""
     container_name: witple_frontend
     ports:
       - "3000:3000"
@@ -62,6 +65,7 @@ services:
     environment:
       - API_INTERNAL_URL=http://backend:8000
       - NEXT_PUBLIC_API_BASE=/api
+      - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
       - NODE_ENV=production
     depends_on:
       - backend
