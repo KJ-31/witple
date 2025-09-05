@@ -169,10 +169,6 @@ export default function MapPage() {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const places: SelectedPlace[] = []
         
-        console.log('=== 지도 페이지에서 받은 파라미터 ===')
-        console.log('placeIds:', placeIds)
-        console.log('dayNumbers:', dayNumbers)
-        console.log('sourceTables:', sourceTables)
 
         for (let i = 0; i < placeIds.length; i++) {
           try {
@@ -185,27 +181,22 @@ export default function MapPage() {
               apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`
             }
             
-            console.log(`API 호출: ${apiUrl}`)
             const response = await fetch(apiUrl)
             if (response.ok) {
               const attraction = await response.json()
-              console.log(`API 응답 - ID: ${attraction.id}, Name: ${attraction.name}, Category: ${attraction.category}`)
               places.push({
                 ...attraction,
                 dayNumber: dayNumbers[i] || 1,
                 isPinned: false
               })
             } else {
-              console.error(`API 호출 실패 - Status: ${response.status}, PlaceId: ${placeIds[i]}`)
             }
           } catch (error) {
-            console.error(`Failed to load place ${placeIds[i]}:`, error)
           }
         }
         
         setSelectedItineraryPlaces(places)
       } catch (error) {
-        console.error('선택된 장소들 로드 오류:', error)
         setError('선택된 장소들을 불러올 수 없습니다.')
       } finally {
         setLoading(false)
@@ -247,7 +238,6 @@ export default function MapPage() {
       const data = await response.json()
       setCategoryPlaces(data.attractions || [])
     } catch (error) {
-      console.error('카테고리 장소 로드 오류:', error)
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
