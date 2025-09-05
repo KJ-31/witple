@@ -376,7 +376,8 @@ export default function MapPage() {
       nature: '자연',
       shopping: '쇼핑',
       accommodation: '숙박',
-      leisure: '레저'
+      leisure: '레저',
+      leisure_sports: '레저'
     }
     return categoryMap[category] || category
   }
