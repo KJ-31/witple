@@ -63,6 +63,11 @@ spec:
             secretKeyRef:
               name: oauth-secret
               key: NEXT_PUBLIC_API_URL
+        - name: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oauth-secret
+              key: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
         resources:
           requests:
             memory: "256Mi"
