@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 interface ItineraryBuilderProps {
@@ -223,10 +223,19 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     if (selectedCategory === 'all') {
       return allPlaces
     }
-    return allPlaces.filter(place => place.category === selectedCategory)
+    
+    // sourceTable 기준으로 필터링 (더 정확함)
+    return allPlaces.filter(place => {
+      // sourceTable이 있으면 그것을 우선 사용
+      if (place.sourceTable) {
+        return place.sourceTable === selectedCategory
+      }
+      // 없으면 category 사용 (폴백)
+      return place.category === selectedCategory
+    })
   }
 
-  const filteredPlaces = getFilteredPlaces()
+  const filteredPlaces = useMemo(() => getFilteredPlaces(), [allPlaces, selectedCategory])
 
   const handleBack = () => {
     router.back()
@@ -287,23 +296,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       return
     }
 
-    // 디버깅: 선택된 장소들 정보 출력
-    console.log('=== 선택된 장소들 ===')
-    allSelectedPlaces.forEach((place, index) => {
-      console.log(`${index + 1}. ${place.name} (ID: ${place.id}, Category: ${place.category}, Table: ${place.sourceTable})`)
-    })
-
     // 선택된 장소와 날짜별 정보를 query parameter로 전달하며 지도 페이지로 이동
     const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
     const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
     const sourceTables = allSelectedPlaces.map(place => place.sourceTable || 'unknown').join(',')
     const startDate = dateRange[0].toISOString().split('T')[0]
     const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
-
-    console.log('=== URL 파라미터 ===')
-    console.log('places:', selectedPlaceIds)
-    console.log('dayNumbers:', dayNumbers)
-    console.log('sourceTables:', sourceTables)
 
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
