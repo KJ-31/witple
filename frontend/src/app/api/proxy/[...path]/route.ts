@@ -76,24 +76,20 @@ async function proxyRequest(
       headers['authorization'] = authHeader;
     }
 
-    let body: BodyInit | null = null;
+    let body: string | undefined;
     if (['POST', 'PUT'].includes(method)) {
-      // 본문을 스트림으로 처리하여 대용량 파일 업로드 지원
-      body = request.body;
+      body = await request.text();
     }
 
     console.log(`Proxying ${method} request to: ${backendUrl}`);
     console.log(`Headers:`, headers);
-    // 스트림을 사용할 때는 body 길이를 미리 알 수 없으므로 로그에서 제외
-    // console.log(`Body length:`, body ? body.length : 0);
+    console.log(`Body length:`, body ? body.length : 0);
     console.log('=== PROXY REQUEST END ===');
 
     const response = await fetch(backendUrl, {
       method,
       headers,
       body,
-      // @ts-ignore
-      duplex: 'half', // 서버가 응답을 보내는 동안 요청 스트림을 계속 보낼 수 있도록 허용
     });
 
     console.log('=== PROXY RESPONSE ===');
