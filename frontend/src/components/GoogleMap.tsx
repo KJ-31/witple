@@ -27,6 +27,10 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
 
   useEffect(() => {
     const initMap = async () => {
+      // 모바일 환경 감지
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      console.log('Mobile device detected:', isMobile)
+      
       console.log('All process.env NEXT_PUBLIC_* variables:')
       Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC_')).forEach(key => {
         console.log(`${key}:`, process.env[key])
@@ -58,6 +62,17 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
             center,
             zoom,
             disableDefaultUI: true, // 모든 기본 UI 컨트롤 비활성화
+            // 모바일 최적화 설정
+            gestureHandling: 'greedy', // 터치 제스처 허용
+            zoomControl: true, // 줌 컨트롤 활성화 (모바일에서 필요)
+            mapTypeControl: false,
+            scaleControl: false,
+            streetViewControl: false,
+            rotateControl: false,
+            fullscreenControl: false,
+            // 모바일 성능 최적화
+            clickableIcons: false,
+            keyboardShortcuts: false,
           })
 
           setMap(mapInstance)
@@ -65,6 +80,13 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         }
       } catch (error) {
         console.error('Google Maps 로드 실패:', error)
+        
+        // 모바일에서의 특별한 에러 처리
+        if (isMobile) {
+          console.error('모바일 환경에서 Google Maps 로드 실패:', error)
+          // 모바일에서 지도 로드 실패 시 대체 UI 표시
+          setIsLoaded(false)
+        }
       }
     }
 
