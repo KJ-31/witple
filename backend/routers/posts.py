@@ -22,6 +22,12 @@ s3_client_config = {
     'region_name': settings.AWS_REGION
 }
 
+# AWS 자격 증명이 환경변수에 있으면 사용 (Access Key 방식)
+if os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECRET_ACCESS_KEY'):
+    s3_client_config['aws_access_key_id'] = os.getenv('AWS_ACCESS_KEY_ID')
+    s3_client_config['aws_secret_access_key'] = os.getenv('AWS_SECRET_ACCESS_KEY')
+    logger.info("Using AWS Access Key credentials for S3")
+
 # VPC 엔드포인트 설정 제거 - 직접 S3 연결 사용
 # if os.getenv('AWS_S3_ENDPOINT_URL'):
 #     s3_client_config['endpoint_url'] = os.getenv('AWS_S3_ENDPOINT_URL')
