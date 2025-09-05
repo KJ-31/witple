@@ -297,7 +297,7 @@ function SectionCarousel({
                 {/* 카테고리 배지 */}
                 <div className="absolute top-3 left-3">
                   <span className="px-2 py-1 text-xs bg-black/50 text-white rounded-full backdrop-blur-sm">
-                    {getCategoryName(attraction.category)}
+                    {getCategoryName(attraction.category?.trim()) || attraction.category}
                   </span>
                 </div>
 
@@ -334,11 +334,12 @@ function SectionCarousel({
 // 카테고리 한국어 변환 함수
 function getCategoryName(category: string): string {
   const categoryMap: { [key: string]: string } = {
-    tourist: '관광',
-    food: '맛집',
-    culture: '문화',
     nature: '자연',
-    shopping: '쇼핑'
+    restaurants: '맛집',
+    shopping: '쇼핑',
+    accommodation: '숙박',
+    humanities: '인문',
+    leisure_sports: '레저'
   }
   return categoryMap[category] || category
 }
