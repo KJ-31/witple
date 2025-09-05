@@ -71,6 +71,7 @@ export default function MapPage() {
   // URL 파라미터 읽기
   const placesParam = searchParams.get('places')
   const dayNumbersParam = searchParams.get('dayNumbers')
+  const sourceTablesParam = searchParams.get('sourceTables')
   const startDateParam = searchParams.get('startDate')
   const endDateParam = searchParams.get('endDate')
   const daysParam = searchParams.get('days')
@@ -163,20 +164,39 @@ export default function MapPage() {
         setLoading(true)
         const placeIds = placesParam.split(',')
         const dayNumbers = dayNumbersParam.split(',').map(Number)
+        const sourceTables = sourceTablesParam ? sourceTablesParam.split(',') : []
         
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const places: SelectedPlace[] = []
         
+        console.log('=== 지도 페이지에서 받은 파라미터 ===')
+        console.log('placeIds:', placeIds)
+        console.log('dayNumbers:', dayNumbers)
+        console.log('sourceTables:', sourceTables)
+
         for (let i = 0; i < placeIds.length; i++) {
           try {
-            const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`)
+            let apiUrl
+            if (sourceTables[i] && sourceTables[i] !== 'unknown') {
+              // 새로운 API 사용: /attractions/{table}/{id}
+              apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${sourceTables[i]}/${placeIds[i]}`
+            } else {
+              // 기존 API 사용: /attractions/{id}
+              apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`
+            }
+            
+            console.log(`API 호출: ${apiUrl}`)
+            const response = await fetch(apiUrl)
             if (response.ok) {
               const attraction = await response.json()
+              console.log(`API 응답 - ID: ${attraction.id}, Name: ${attraction.name}, Category: ${attraction.category}`)
               places.push({
                 ...attraction,
                 dayNumber: dayNumbers[i] || 1,
                 isPinned: false
               })
+            } else {
+              console.error(`API 호출 실패 - Status: ${response.status}, PlaceId: ${placeIds[i]}`)
             }
           } catch (error) {
             console.error(`Failed to load place ${placeIds[i]}:`, error)
@@ -193,7 +213,7 @@ export default function MapPage() {
     }
 
     loadSelectedPlaces()
-  }, [placesParam, dayNumbersParam])
+  }, [placesParam, dayNumbersParam, sourceTablesParam])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = async (category: CategoryKey) => {

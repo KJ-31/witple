@@ -53,7 +53,8 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
         "latitude": float(attraction.latitude) if attraction.latitude else None,
         "longitude": float(attraction.longitude) if attraction.longitude else None,
         "phoneNumber": getattr(attraction, 'phone_number', None),
-        "parkingAvailable": getattr(attraction, 'parking_available', None)
+        "parkingAvailable": getattr(attraction, 'parking_available', None),
+        "sourceTable": table_name  # 원본 테이블 정보 추가
     }
     
     # 테이블별 특정 필드 추가
@@ -288,7 +289,7 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
                 
                 matching_attractions.append((table_name, formatted_attraction))
         
-        # 매칭된 결과가 있으면 첫 번째 결과 반환 (우선순위 없음)
+        # 매칭된 결과가 있으면 첫 번째 결과 반환 (원래 동작 복원)
         if matching_attractions:
             return matching_attractions[0][1]
         
@@ -296,6 +297,65 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
             status_code=status.HTTP_404_NOT_FOUND,
             detail="관광지를 찾을 수 없습니다."
         )
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="잘못된 관광지 ID입니다."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"관광지 상세 정보 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/attractions/{table_name}/{attraction_id}")
+async def get_attraction_details_by_table(table_name: str, attraction_id: str, db: Session = Depends(get_db)):
+    """특정 테이블에서 관광지 상세 정보를 가져옵니다."""
+    try:
+        # 테이블명 검증
+        if table_name not in CATEGORY_TABLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"잘못된 테이블명: {table_name}"
+            )
+        
+        table_model = CATEGORY_TABLES[table_name]
+        attraction = db.query(table_model).filter(
+            table_model.id == int(attraction_id)
+        ).first()
+        
+        if not attraction:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="관광지를 찾을 수 없습니다."
+            )
+        
+        category = get_category_from_table(table_name)
+        formatted_attraction = format_attraction_data(attraction, category, table_name)
+        
+        # 추가 상세 정보 포함
+        formatted_attraction.update({
+            "city": {
+                "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                "name": attraction.city or "알 수 없음",
+                "region": attraction.region or "알 수 없음"
+            },
+            "detailedInfo": getattr(attraction, 'detailed_info', None),
+            "closedDays": getattr(attraction, 'closed_days', None),
+            "majorCategory": getattr(attraction, 'major_category', None),
+            "middleCategory": getattr(attraction, 'middle_category', None),
+            "minorCategory": getattr(attraction, 'minor_category', None),
+            "imageUrls": attraction.image_urls if attraction.image_urls else [],
+            "createdAt": attraction.created_at.isoformat() if attraction.created_at else None,
+            "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None,
+            "sourceTable": table_name  # 원본 테이블 정보 추가
+        })
+        
+        return formatted_attraction
+        
     except HTTPException:
         raise
     except ValueError:

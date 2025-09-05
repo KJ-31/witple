@@ -49,6 +49,7 @@ interface SelectedPlace {
   rating: number
   description: string
   dayNumber?: number // 선택된 날짜 (1, 2, 3...)
+  sourceTable?: string // 어떤 테이블에서 온 데이터인지 추적
 }
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
@@ -238,7 +239,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       category: place.category,
       rating: place.rating,
       description: place.description,
-      dayNumber: selectedDayForAdding
+      dayNumber: selectedDayForAdding,
+      sourceTable: place.sourceTable // 테이블 정보 저장
     }
 
     setPlacesByDay(prev => {
@@ -285,15 +287,28 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       return
     }
 
+    // 디버깅: 선택된 장소들 정보 출력
+    console.log('=== 선택된 장소들 ===')
+    allSelectedPlaces.forEach((place, index) => {
+      console.log(`${index + 1}. ${place.name} (ID: ${place.id}, Category: ${place.category}, Table: ${place.sourceTable})`)
+    })
+
     // 선택된 장소와 날짜별 정보를 query parameter로 전달하며 지도 페이지로 이동
     const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
     const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
+    const sourceTables = allSelectedPlaces.map(place => place.sourceTable || 'unknown').join(',')
     const startDate = dateRange[0].toISOString().split('T')[0]
     const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
+
+    console.log('=== URL 파라미터 ===')
+    console.log('places:', selectedPlaceIds)
+    console.log('dayNumbers:', dayNumbers)
+    console.log('sourceTables:', sourceTables)
 
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
       dayNumbers: dayNumbers,
+      sourceTables: sourceTables,
       startDate,
       endDate,
       days: dateRange.length.toString(),
