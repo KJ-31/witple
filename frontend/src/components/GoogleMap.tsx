@@ -38,8 +38,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       
       const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
       
-      console.log('Google Maps API Key:', apiKey ? 'Key loaded' : 'Key missing')
-      console.log('Raw API Key:', apiKey)
+      console.log('Google Maps API Key1:', apiKey ? 'Key loaded' : 'Key missing')
       console.log('API Key type:', typeof apiKey)
       console.log('API Key length1:', apiKey?.length)
       
