@@ -80,5 +80,4 @@ docker-compose.override.yml
 k8s/secrets/
 
 # Database configuration
-DB.conf
 backend/uploads/
