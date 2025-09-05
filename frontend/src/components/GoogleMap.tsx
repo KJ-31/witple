@@ -37,7 +37,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       console.log('Google Maps API Key:', apiKey ? 'Key loaded' : 'Key missing')
       console.log('Raw API Key:', apiKey)
       console.log('API Key type:', typeof apiKey)
-      console.log('API Key length:', apiKey?.length)
+      console.log('API Key length1:', apiKey?.length)
       
       if (!apiKey || apiKey === '') {
         console.error('Google Maps API Key가 설정되지 않았습니다')
