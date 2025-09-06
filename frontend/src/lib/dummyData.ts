@@ -15,6 +15,14 @@ export interface CitySection {
   region: string
   attractions: Attraction[]
   recommendationScore: number // 추천 점수 (높을수록 상위 노출)
+  categorySections?: CategorySection[] // 카테고리별 섹션 (새로운 구조)
+}
+
+export interface CategorySection {
+  category: string
+  categoryName: string
+  attractions: Attraction[]
+  total: number
 }
 
 // 토큰을 가져오는 함수 (Next-auth에서 사용)
@@ -221,15 +229,27 @@ const fetchRecommendedCitiesFallback = async (
   }
 }
 
-// 기존 함수 유지 (하위 호환성) - page 매개변수를 무시하고 limit만 사용
-export const fetchRecommendedCities = async (page: number = 0, limit: number = 30) => {
+// 지역별 카테고리별 구분된 데이터 가져오기
+export const fetchCitiesByCategory = async (
+  page: number = 0,
+  limit: number = 3
+): Promise<{ data: CitySection[], hasMore: boolean }> => {
   try {
-    // page는 무시하고 limit만 사용 (새로운 추천 API는 페이지네이션을 지원하지 않음)
-    const result = await fetchRecommendations(limit)
-    return result
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+    const response = await fetch(`${API_BASE_URL}/api/v1/attractions/cities-by-category?page=${page}&limit=${limit}`)
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const result = await response.json()
+    
+    return {
+      data: result.data,
+      hasMore: result.hasMore
+    }
   } catch (error) {
-    console.error('새로운 추천 API 실패:', error)
-    // 에러 발생시 fallback 호출
-    return await fetchRecommendedCitiesFallback(page, 3)
+    console.error('API 호출 오류:', error)
+    return { data: [], hasMore: false }
   }
 }
