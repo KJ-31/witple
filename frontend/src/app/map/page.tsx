@@ -92,7 +92,7 @@ export default function MapPage() {
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
 
   // 화면 높이 측정
@@ -328,10 +328,10 @@ export default function MapPage() {
   const handleDragOver = (e: React.DragEvent, index: number, dayNumber: number) => {
     e.preventDefault();
     
-    // 같은 날짜 내에서만 드래그 오버 허용
-    if (draggedItem && draggedItem.dayNumber === dayNumber) {
+    // 모든 일차에서 드래그 오버 허용
+    if (draggedItem) {
       e.dataTransfer.dropEffect = 'move';
-      setDragOverIndex(index);
+      setDragOverIndex({ day: dayNumber, index: index });
     } else {
       e.dataTransfer.dropEffect = 'none';
       setDragOverIndex(null);
@@ -351,40 +351,40 @@ export default function MapPage() {
       return;
     }
     
-    // 같은 날짜 내에서만 재배열 허용
-    if (draggedItem.dayNumber !== targetDayNumber) {
-      console.log('다른 날짜로 이동 시도, 무시');
-      return;
-    }
-    
-    if (draggedItem.index === targetIndex) {
+    // 같은 위치로 이동하는 경우 무시
+    if (draggedItem.dayNumber === targetDayNumber && draggedItem.index === targetIndex) {
       console.log('같은 위치로 이동, 무시');
       return;
     }
 
-    console.log('순서 변경 실행:', draggedItem.index, '->', targetIndex);
+    console.log('장소 이동 실행:', `day${draggedItem.dayNumber}[${draggedItem.index}] -> day${targetDayNumber}[${targetIndex}]`);
 
     // 드래그한 장소를 새 위치로 이동
     setSelectedItineraryPlaces(prev => {
-      const sameDayPlaces = prev.filter(p => p.dayNumber === targetDayNumber);
-      const otherDayPlaces = prev.filter(p => p.dayNumber !== targetDayNumber);
+      const result = [...prev];
       
-      console.log('같은 날짜 장소들:', sameDayPlaces.length);
+      // 드래그한 아이템 찾기
+      const draggedItemIndex = result.findIndex(p => p.id === draggedItem.placeId && p.dayNumber === draggedItem.dayNumber);
+      if (draggedItemIndex === -1) return prev;
       
       // 드래그한 아이템 제거
-      const [movedItem] = sameDayPlaces.splice(draggedItem.index, 1);
+      const [movedItem] = result.splice(draggedItemIndex, 1);
       console.log('이동할 아이템:', movedItem?.name);
       
-      // 새 위치에 삽입
-      sameDayPlaces.splice(targetIndex, 0, movedItem);
+      // 날짜 변경
+      movedItem.dayNumber = targetDayNumber;
       
-      const result = [...otherDayPlaces, ...sameDayPlaces];
-      console.log('최종 결과:', result.map(p => `${p.name}(day:${p.dayNumber})`));
+      // 목적지 날짜의 장소들만 필터링
+      const targetDayPlaces = result.filter(p => p.dayNumber === targetDayNumber);
+      const otherDayPlaces = result.filter(p => p.dayNumber !== targetDayNumber);
       
-      // 드래그로 순서 변경시에는 URL 업데이트하지 않음
-      // (기존 선택된 장소들 유지)
+      // 새 위치에 삽입 (목적지 날짜의 인덱스 기준)
+      targetDayPlaces.splice(targetIndex, 0, movedItem);
       
-      return result;
+      const finalResult = [...otherDayPlaces, ...targetDayPlaces];
+      console.log('최종 결과:', finalResult.map(p => `${p.name}(day:${p.dayNumber})`));
+      
+      return finalResult;
     });
 
     setDraggedItem(null);
@@ -476,7 +476,7 @@ export default function MapPage() {
   const getCategoryName = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
       restaurants: '맛집',
-      humanities: '문화',
+      humanities: '인문',
       nature: '자연',
       shopping: '쇼핑',
       accommodation: '숙박',
@@ -1137,7 +1137,7 @@ export default function MapPage() {
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => handleDrop(e, index, day)}
                           className={`bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors ${
-                            dragOverIndex === index && draggedItem && draggedItem.dayNumber === day ? 'border-[#3E68FF] bg-[#3E68FF]/10' : ''
+                            dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem ? 'border-[#3E68FF] bg-[#3E68FF]/10' : ''
                           }`}
                         >
                           <div className="flex items-start justify-between">
