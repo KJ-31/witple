@@ -132,11 +132,11 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
     const sectionPlaces = places.slice(0, 10)
     
     const attractions: Attraction[] = sectionPlaces.map(place => ({
-      id: place.place_id?.toString() || `${place.name}-${Math.random()}`,
+      id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
       name: place.name || '이름 없음',
       description: place.description || '설명 없음',
-      imageUrl: '', // 이미지는 현재 없음
-      rating: 4.5, // 기본 평점
+      imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
+      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
       category: getCategoryFromTableName(place.table_name)
     }))
     
@@ -169,11 +169,11 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
     if (remainingPlaces.length > 0) {
       const mixedPlaces = remainingPlaces.slice(0, 10)
       const attractions: Attraction[] = mixedPlaces.map(place => ({
-        id: place.place_id?.toString() || `${place.name}-${Math.random()}`,
+        id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
         name: place.name || '이름 없음',
         description: place.description || '설명 없음',
-        imageUrl: '', // 이미지는 현재 없음
-        rating: 4.5, // 기본 평점
+        imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
+        rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
         category: getCategoryFromTableName(place.table_name)
       }))
       
@@ -190,6 +190,26 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
   
   return sections
 }
+
+// 이미지 URL 추출 함수
+const getImageUrl = (imageUrls: any): string => {
+  if (!imageUrls) return '';
+  
+  try {
+    // JSON 문자열인 경우 파싱
+    const urls = typeof imageUrls === 'string' ? JSON.parse(imageUrls) : imageUrls;
+    
+    // 배열인 경우 첫 번째 이미지 반환
+    if (Array.isArray(urls) && urls.length > 0) {
+      return urls[0];
+    }
+    
+    return '';
+  } catch (error) {
+    console.error('이미지 URL 파싱 오류:', error);
+    return '';
+  }
+};
 
 // 테이블명을 카테고리로 변환
 const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping' => {

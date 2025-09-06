@@ -4,7 +4,7 @@ import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'reac
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { fetchRecommendedCities, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
+import { fetchRecommendations, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
   const router = useRouter()
@@ -31,7 +31,7 @@ export default function Home() {
     loadingRef.current = true
     setLoading(true)
     try {
-      const { data, hasMore: moreData } = await fetchCitiesByCategory(pageNum, 3)
+      const { data, hasMore: moreData } = await fetchRecommendations(30)
 
       if (pageNum === 0) {
         setCitySections(data)
