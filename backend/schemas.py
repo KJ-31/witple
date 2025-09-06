@@ -1,12 +1,12 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
+from enum import Enum
 
 
 class UserBase(BaseModel):
     email: EmailStr
-    username: str
-    full_name: Optional[str] = None
+    name: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -58,3 +58,81 @@ class PostResponse(PostBase):
 class PostListResponse(BaseModel):
     posts: List[PostResponse]
     total: int
+
+
+# Recommendation schemas
+class PersonaType(str, Enum):
+    luxury = "luxury"
+    modern = "modern"
+    nature_activity = "nature_activity"
+    foodie = "foodie"
+
+
+class PriorityType(str, Enum):
+    accommodation = "accommodation"
+    restaurants = "restaurants"
+    experience = "experience"
+    shopping = "shopping"
+
+
+class AccommodationType(str, Enum):
+    comfort = "comfort"
+    healing = "healing"
+    traditional = "traditional"
+    community = "community"
+
+
+class ExplorationType(str, Enum):
+    hot = "hot"
+    local = "local"
+    balance = "balance"
+    authentic_experience = "authentic_experience"
+
+
+class ActionType(str, Enum):
+    click = "click"
+    dwell_time = "dwell_time"
+    scroll_depth = "scroll_depth"
+    like = "like"
+    bookmark = "bookmark"
+    search = "search"
+
+
+class UserPreferencesBasic(BaseModel):
+    persona: PersonaType
+    priority: PriorityType
+    accommodation: AccommodationType
+    exploration: ExplorationType
+
+
+class UserPreferencesTag(BaseModel):
+    tag: str
+    weight: float = 1.0
+
+
+class PlaceRecommendation(BaseModel):
+    id: str
+    place_id: int
+    table_name: str
+    name: str
+    region: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    similarity_score: Optional[float] = None
+    popularity_score: Optional[float] = None
+    recommendation_type: Optional[str] = None
+
+
+class RecommendationRequest(BaseModel):
+    region: Optional[str] = None
+    category: Optional[str] = None
+    limit: int = 20
+
+
+class UserActionLog(BaseModel):
+    place_category: str
+    place_id: int
+    action_type: ActionType
+    action_value: Optional[float] = None
+    action_detail: Optional[str] = None

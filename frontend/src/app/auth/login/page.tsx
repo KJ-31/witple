@@ -2,17 +2,26 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { signIn, useSession } from 'next-auth/react'
-import { login } from './api'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const router = useRouter()
   const { data: session, status } = useSession()
+  const searchParams = useSearchParams()
+
+  // URL 파라미터에서 성공 메시지 확인
+  useEffect(() => {
+    const message = searchParams.get('message')
+    if (message === 'registration_success') {
+      setSuccessMessage('회원가입이 완료되었습니다! 로그인해주세요.')
+    }
+  }, [searchParams])
 
   // 이미 로그인된 사용자는 대시보드로 리다이렉트
   useEffect(() => {
@@ -39,11 +48,17 @@ export default function LoginPage() {
     setError('')
 
     try {
-      const response = await login(email, password)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('token', response.access_token)
+      const result = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
+      })
+      
+      if (result?.ok) {
+        router.push('/dashboard')
+      } else {
+        setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.')
       }
-      router.push('/dashboard')
     } catch (err) {
       setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.')
     } finally {
@@ -66,6 +81,11 @@ export default function LoginPage() {
           </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          {successMessage && (
+            <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+              {successMessage}
+            </div>
+          )}
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
               {error}
