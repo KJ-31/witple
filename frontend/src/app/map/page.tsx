@@ -90,6 +90,13 @@ export default function MapPage() {
   const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
+  const [routeSegments, setRouteSegments] = useState<{
+    origin: {lat: number, lng: number, name: string},
+    destination: {lat: number, lng: number, name: string},
+    distance: string,
+    duration: string,
+    transitDetails?: any
+  }[]>([])
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
@@ -906,8 +913,26 @@ export default function MapPage() {
     // 상태 메시지 제거
     setRouteStatus(null);
     
+    // 경로 구간 정보 초기화
+    setRouteSegments([]);
+    
+
     console.log('모든 경로와 마커가 제거되었습니다');
   };
+
+  // 특정 일차와 구간에 해당하는 경로 정보 가져오기
+  const getRouteSegmentInfo = (dayNumber: number, fromPlaceId: string, toPlaceId: string) => {
+    return routeSegments.find(segment => {
+      // 일차별 장소들에서 해당 구간 찾기
+      const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
+      const fromIndex = dayPlaces.findIndex(place => place.id === fromPlaceId);
+      const toIndex = dayPlaces.findIndex(place => place.id === toPlaceId);
+      
+      return segment.origin.name === dayPlaces[fromIndex]?.name && 
+             segment.destination.name === dayPlaces[toIndex]?.name;
+    });
+  };
+
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
@@ -1042,6 +1067,7 @@ export default function MapPage() {
     let allResults = [];
     let totalDistance = 0;
     let totalDuration = 0;
+    let segmentDetails = [];
 
     try {
       for (let i = 0; i < segments.length; i++) {
@@ -1070,8 +1096,33 @@ export default function MapPage() {
         allResults.push(result);
         
         const leg = result.routes[0].legs[0];
-        totalDistance += leg.distance?.value || 0;
-        totalDuration += leg.duration?.value || 0;
+        const distance = leg.distance?.value || 0;
+        const duration = leg.duration?.value || 0;
+        
+        totalDistance += distance;
+        totalDuration += duration;
+
+        // 구간 정보 저장
+        segmentDetails.push({
+          origin: segment.origin,
+          destination: segment.destination,
+          distance: leg.distance?.text || '알 수 없음',
+          duration: leg.duration?.text || '알 수 없음',
+          transitDetails: leg.steps?.map((step: any) => ({
+            instruction: step.instructions?.replace(/<[^>]*>/g, ''), // HTML 태그 제거
+            mode: step.travel_mode,
+            distance: step.distance?.text,
+            duration: step.duration?.text,
+            transitDetails: step.transit ? {
+              line: step.transit.line?.name,
+              vehicle: step.transit.line?.vehicle?.name,
+              departure_stop: step.transit.departure_stop?.name,
+              arrival_stop: step.transit.arrival_stop?.name,
+              departure_time: step.transit.departure_time?.text,
+              arrival_time: step.transit.arrival_time?.text
+            } : null
+          }))
+        });
       }
     } catch (err) {
       console.log('경로 계산 실패:', err);
@@ -1107,6 +1158,9 @@ export default function MapPage() {
 
     setDirectionsRenderers(newRenderers);
     await createSequenceMarkers(segments, isOptimized);
+
+    // 구간 정보를 상태에 저장
+    setRouteSegments(segmentDetails);
 
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
@@ -1388,6 +1442,7 @@ export default function MapPage() {
         </div>
       )}
 
+
       {/* Map Area */}
       <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
         <GoogleMap
@@ -1558,7 +1613,8 @@ export default function MapPage() {
                     
                     <div className="space-y-3 ml-5">
                       {groupedPlaces[day].map((place, index) => (
-                        <div key={`place-container-${place.id}-${day}-${index}`}>
+                        <React.Fragment key={`place-container-${place.id}-${day}-${index}`}>
+                        <div>
                           {/* 드롭 존 - 위쪽 */}
                           <div
                             data-drop-zone="true"
@@ -1668,6 +1724,113 @@ export default function MapPage() {
                             </div>
                           </div>
                         </div>
+
+                        {/* 구간 정보 (마지막 장소가 아닐 때만 표시) */}
+                        {index < groupedPlaces[day].length - 1 && (
+                          (() => {
+                            const nextPlace = groupedPlaces[day][index + 1];
+                            const segmentInfo = getRouteSegmentInfo(day, place.id, nextPlace.id);
+                            
+                            if (segmentInfo) {
+                              return (
+                                <div className="my-4">
+                                  <div className="flex items-center justify-center mb-3">
+                                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
+                                    <div className="mx-4 flex items-center space-x-2 text-sm">
+                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
+                                      <span className="text-[#94A9C9]">·</span>
+                                      <span className="text-[#34D399] font-medium">{segmentInfo.duration}</span>
+                                    </div>
+                                    <div className="flex-1 h-px bg-gradient-to-r from-[#3E68FF]/30 via-transparent to-transparent"></div>
+                                  </div>
+                                  
+                                  {/* 상세 교통수단 정보 */}
+                                  {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
+                                    <div className="bg-[#0B1220]/90 backdrop-blur-sm border border-[#3E68FF]/20 rounded-xl p-4 mx-2">
+                                      <div className="space-y-3">
+                                        {segmentInfo.transitDetails.map((step: any, stepIndex: number) => (
+                                          <div key={stepIndex}>
+                                            {step.transitDetails ? (
+                                              // 대중교통 구간
+                                              <div className="flex items-center space-x-3">
+                                                <div className="flex-shrink-0">
+                                                  <div className="bg-[#3E68FF] text-white px-3 py-1 rounded-full text-xs font-bold min-w-0">
+                                                    {step.transitDetails.line || step.transitDetails.vehicle}
+                                                  </div>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center space-x-2 text-sm">
+                                                    <span className="text-[#94A9C9] truncate">
+                                                      {step.transitDetails.departure_stop}
+                                                    </span>
+                                                    <svg className="w-4 h-4 text-[#3E68FF] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                                    </svg>
+                                                    <span className="text-[#94A9C9] truncate">
+                                                      {step.transitDetails.arrival_stop}
+                                                    </span>
+                                                  </div>
+                                                  {step.transitDetails.departure_time && (
+                                                    <div className="flex items-center space-x-3 text-xs text-[#6FA0E6] mt-1">
+                                                      <span>출발: {step.transitDetails.departure_time}</span>
+                                                      {step.transitDetails.arrival_time && (
+                                                        <span>도착: {step.transitDetails.arrival_time}</span>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                                <div className="flex-shrink-0 text-xs text-[#94A9C9]">
+                                                  {step.duration}
+                                                </div>
+                                              </div>
+                                            ) : step.mode === 'WALKING' ? (
+                                              // 도보 구간
+                                              <div className="flex items-center space-x-3">
+                                                <div className="flex-shrink-0">
+                                                  <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
+                                                    <span className="text-sm">🚶</span>
+                                                  </div>
+                                                </div>
+                                                <div className="flex-1 text-sm text-[#94A9C9]">
+                                                  <div className="truncate">
+                                                    {step.instruction || '도보 이동'}
+                                                  </div>
+                                                  <div className="text-xs text-[#6FA0E6] mt-1">
+                                                    {step.distance} · {step.duration}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              // 기타 교통수단
+                                              <div className="flex items-center space-x-3">
+                                                <div className="flex-shrink-0 text-xs text-[#94A9C9] bg-[#1F3C7A]/30 px-2 py-1 rounded">
+                                                  {step.mode}
+                                                </div>
+                                                <div className="flex-1 text-sm text-[#94A9C9] truncate">
+                                                  {step.instruction}
+                                                </div>
+                                                <div className="flex-shrink-0 text-xs text-[#6FA0E6]">
+                                                  {step.duration}
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            {/* 구간 사이 구분선 (마지막이 아닐 때) */}
+                                            {stepIndex < segmentInfo.transitDetails.length - 1 && (
+                                              <div className="h-px bg-[#3E68FF]/10 my-2 mx-4"></div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()
+                        )}
+                        </React.Fragment>
                       ))}
                       
                       {/* 마지막 드롭 존 */}
