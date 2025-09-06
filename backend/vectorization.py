@@ -12,6 +12,7 @@ import asyncio
 import asyncpg
 import json
 from dotenv import load_dotenv
+from services.weight_calculator import tag_weight_calculator
 
 # .env 파일 로드
 load_dotenv()
@@ -229,7 +230,7 @@ class RecommendationEngine:
         self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
     async def get_user_preferences(self, user_id: str) -> Dict:
-        """사용자 선호도 가져오기"""
+        """사용자 선호도 가져오기 (새로운 가중치 계산 시스템 적용)"""
         conn = await asyncpg.connect(self.db_url)
         
         try:
@@ -241,16 +242,28 @@ class RecommendationEngine:
                 ORDER BY created_at DESC LIMIT 1
             """, user_id)
             
-            # 태그 선호도
+            # 태그 선호도 (기존 가중치와 함께)
             tag_prefs = await conn.fetch("""
                 SELECT tag, weight
                 FROM user_preference_tags
                 WHERE user_id = $1
             """, user_id)
             
+            # 태그 데이터를 weight_calculator 형식으로 변환
+            user_tags = []
+            for tag in tag_prefs:
+                user_tags.append({
+                    'tag': tag['tag'],
+                    'frequency': int(tag['weight'])  # 기존 weight를 frequency로 사용
+                })
+            
+            # 새로운 가중치 계산 시스템 적용
+            calculated_tags = tag_weight_calculator.calculate_all_user_weights(user_tags) if user_tags else []
+            
             return {
                 'basic': dict(basic_prefs) if basic_prefs else None,
-                'tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []
+                'tags': calculated_tags,  # 계산된 가중치가 포함된 태그
+                'original_tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []  # 원본 태그도 보관
             }
             
         finally:
@@ -512,9 +525,17 @@ class RecommendationEngine:
             finally:
                 await conn.close()
         
-        # 태그 선호도 추가
+        # 태그 선호도 추가 (가중치 반영)
         for tag_pref in preferences['tags']:
-            preference_texts.append(tag_pref['tag'])
+            tag_name = tag_pref['tag']
+            calculated_weight = tag_pref['calculated_weight']
+            
+            # 가중치에 따라 텍스트 반복 (높은 가중치일수록 더 많은 영향)
+            repeat_count = max(1, int(calculated_weight))  # 최소 1번, 가중치에 따라 반복
+            for _ in range(repeat_count):
+                preference_texts.append(tag_name)
+            
+            logger.info(f"Tag '{tag_name}' added {repeat_count} times (weight: {calculated_weight})")
         
         # 행동 이력 기반 텍스트 추가 (좋아요, 북마크한 장소들의 정보)
         action_places = []
