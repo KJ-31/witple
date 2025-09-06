@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
 
@@ -109,6 +109,13 @@ export default function MapPage() {
     isOpen: boolean,
     dayNumber: number
   }>({ isOpen: false, dayNumber: 0 })
+  
+  // 삭제 확인 모달 상태
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean,
+    place: SelectedPlace | null,
+    dayNumber: number
+  }>({ isOpen: false, place: null, dayNumber: 0 })
   
   // 드래그 중일 때 body 스크롤 비활성화
   useEffect(() => {
@@ -258,7 +265,7 @@ export default function MapPage() {
   }, [placesParam, dayNumbersParam, sourceTablesParam])
 
   // 카테고리별 장소 가져오기
-  const fetchPlacesByCategory = async (category: CategoryKey) => {
+  const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
     try {
       setCategoryLoading(true)
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
@@ -293,21 +300,21 @@ export default function MapPage() {
     } finally {
       setCategoryLoading(false)
     }
-  }
+  }, [])
 
   // 카테고리 선택 시 장소 가져오기
   useEffect(() => {
     if (!showItinerary) {
       fetchPlacesByCategory(selectedCategory)
     }
-  }, [selectedCategory, showItinerary])
+  }, [selectedCategory, showItinerary, fetchPlacesByCategory])
 
   // 초기 로딩 시 전체 장소 가져오기 (일정 보기 모드가 아닐 때만)
   useEffect(() => {
     if (!placesParam) {
       fetchPlacesByCategory('all')
     }
-  }, [])
+  }, [placesParam, fetchPlacesByCategory])
 
   // 카테고리 정의
   const categories = [
@@ -591,6 +598,11 @@ export default function MapPage() {
       return sortedResult
     })
   };
+
+  // 지도 인스턴스 설정을 useCallback으로 메모화
+  const handleMapLoad = useCallback((mapInstanceParam: any) => {
+    setMapInstance(mapInstanceParam)
+  }, [])
 
   // 지도 마커 데이터 생성
   const mapMarkers = useMemo(() => {
@@ -1035,6 +1047,24 @@ export default function MapPage() {
     setOptimizeConfirmModal({ isOpen: false, dayNumber: 0 });
   };
 
+  // 삭제 확인 모달 열기
+  const openDeleteConfirm = (place: SelectedPlace, dayNumber: number) => {
+    setDeleteConfirmModal({ isOpen: true, place, dayNumber });
+  };
+
+  // 삭제 확인 모달 닫기
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmModal({ isOpen: false, place: null, dayNumber: 0 });
+  };
+
+  // 실제 삭제 실행
+  const confirmDelete = () => {
+    if (deleteConfirmModal.place) {
+      handleRemoveFromItinerary(deleteConfirmModal.place.id, deleteConfirmModal.dayNumber);
+      closeDeleteConfirm();
+    }
+  };
+
   // 일차별 경로 최적화 실행
   const optimizeRouteForDay = async (dayNumber: number) => {
     const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
@@ -1247,7 +1277,7 @@ export default function MapPage() {
           center={{ lat: 37.5665, lng: 126.9780 }}
           zoom={13}
           markers={mapMarkers}
-          onMapLoad={setMapInstance}
+          onMapLoad={handleMapLoad}
         />
       </div>
 
@@ -1429,28 +1459,40 @@ export default function MapPage() {
                           {/* 장소 카드 */}
                           <div
                             data-place-card="true"
-                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
+                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative"
                           >
-                          <div className="flex items-start justify-between">
-                            <div 
-                              className="flex-1 cursor-pointer" 
+                            {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                e.preventDefault();
-                                router.push(`/attraction/${place.id}`);
+                                openDeleteConfirm(place, day);
                               }}
-                              onMouseDown={(e) => e.stopPropagation()}
+                              className="absolute -top-2 -right-2 w-8 h-8 bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border border-[#3E68FF]/30 hover:border-[#3E68FF]/50 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10"
+                              title="일정에서 제거"
                             >
-                              <div className="flex items-center space-x-2 mb-2">
-                                <h4 className="font-semibold text-white">{place.name}</h4>
-                                <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
-                                  {getCategoryName(place.category)}
-                                </span>
+                              <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+
+                            <div className="flex items-start justify-between">
+                              <div 
+                                className="flex-1 cursor-pointer pr-4" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  router.push(`/attraction/${place.id}`);
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                <div className="flex items-center space-x-2 mb-2">
+                                  <h4 className="font-semibold text-white">{place.name}</h4>
+                                  <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
+                                    {getCategoryName(place.category)}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                            
-                            {/* 액션 버튼들 */}
-                            <div className="flex items-center gap-2 ml-3">
+                              
                               {/* 드래그 핸들 */}
                               <div 
                                 className="p-3 text-[#6FA0E6] hover:text-white cursor-grab active:cursor-grabbing transition-colors select-none" 
@@ -1494,20 +1536,6 @@ export default function MapPage() {
                                   <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
                                 </svg>
                               </div>
-                              
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRemoveFromItinerary(place.id, day);
-                                }}
-                                className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded-full transition-colors"
-                                title="일정에서 제거"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
                             </div>
                           </div>
                         </div>
@@ -1664,6 +1692,59 @@ export default function MapPage() {
                   className="flex-1 py-2.5 px-4 bg-[#FF9800]/20 hover:bg-[#FF9800]/30 border border-[#FF9800]/50 hover:border-[#FF9800]/70 rounded-xl text-[#FF9800] hover:text-[#FFA726] transition-all duration-200 font-medium"
                 >
                   확인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeDeleteConfirm}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              {/* 삭제 아이콘 */}
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              
+              {/* 제목 */}
+              <h3 className="text-lg font-semibold text-white mb-2">
+                장소 삭제 확인
+              </h3>
+              
+              {/* 설명 */}
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                <span className="text-white font-medium">&ldquo;{deleteConfirmModal.place?.name}&rdquo;</span>을(를)
+                <br/>
+                일정에서 삭제하시겠습니까?
+                <br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 장소는 복구할 수 없습니다.</span>
+              </p>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeDeleteConfirm}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
+                >
+                  삭제
                 </button>
               </div>
             </div>
