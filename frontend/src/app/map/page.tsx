@@ -1908,10 +1908,13 @@ export default function MapPage() {
                                                   <div className="flex items-center space-x-3">
                                                     <div className="flex-shrink-0">
                                                       <div 
-                                                        className="text-white px-3 py-1 rounded-full text-xs font-bold min-w-0" 
+                                                        className="text-white px-3 py-1 rounded-full text-xs font-bold min-w-0 flex items-center space-x-1" 
                                                         style={{ backgroundColor: bgColor }}
                                                       >
-                                                        {cleanName}
+                                                        <span className="text-sm">
+                                                          {isBus ? '🚌' : isSubway ? '🚇' : '🚍'}
+                                                        </span>
+                                                        <span>{cleanName}</span>
                                                       </div>
                                                     </div>
                                                     <div className="flex-1 min-w-0">
@@ -1926,15 +1929,6 @@ export default function MapPage() {
                                                           {step.transitDetails.arrival_stop}
                                                         </span>
                                                       </div>
-                                                      {/* 지하철만 시간 표시 */}
-                                                      {isSubway && step.transitDetails.departure_time && (
-                                                        <div className="flex items-center space-x-3 text-xs text-[#6FA0E6] mt-1">
-                                                          <span>출발: {step.transitDetails.departure_time}</span>
-                                                          {step.transitDetails.arrival_time && (
-                                                            <span>도착: {step.transitDetails.arrival_time}</span>
-                                                          )}
-                                                        </div>
-                                                      )}
                                                     </div>
                                                     <div className="flex-shrink-0 text-xs text-[#94A9C9]">
                                                       {step.duration}
