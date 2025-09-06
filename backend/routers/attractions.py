@@ -169,6 +169,98 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
     
     return cities_data, len(sorted_cities)
 
+@router.get("/cities-by-category")
+async def get_cities_by_category(
+    page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
+    limit: int = Query(3, ge=1, le=10, description="페이지당 지역 수"),
+    db: Session = Depends(get_db)
+):
+    """지역별로 카테고리별 구분된 섹션을 반환합니다."""
+    try:
+        # 모든 지역 수집
+        all_regions = set()
+        for table_model in CATEGORY_TABLES.values():
+            region_results = db.query(table_model.region).filter(
+                table_model.region.isnot(None),
+                table_model.region != ""
+            ).distinct().all()
+            
+            for (region,) in region_results:
+                if region and region.strip():
+                    all_regions.add(region.strip())
+        
+        # 지역을 우선순위에 따라 정렬
+        sorted_regions = sort_regions_by_priority(list(all_regions))
+        
+        # 페이지네이션 적용
+        offset = page * limit
+        paginated_regions = sorted_regions[offset:offset + limit]
+        
+        cities_data = []
+        
+        for region in paginated_regions:
+            # 해당 지역의 카테고리별 데이터 조회
+            category_sections = []
+            
+            for table_name, table_model in CATEGORY_TABLES.items():
+                category = get_category_from_table(table_name)
+                
+                # 해당 카테고리에서 지역 필터 적용
+                query = db.query(table_model).filter(
+                    or_(
+                        table_model.region.ilike(f"%{region}%"),
+                        table_model.region == region
+                    )
+                )
+                
+                # 각 카테고리에서 최대 4개씩 가져오기
+                attractions = query.limit(4).all()
+                
+                # 결과가 있는 카테고리만 포함
+                if attractions:
+                    formatted_attractions = []
+                    for attraction in attractions:
+                        formatted_attraction = format_attraction_data(attraction, category, table_name)
+                        formatted_attraction["city"] = {
+                            "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                            "name": attraction.city or "알 수 없음",
+                            "region": attraction.region or "알 수 없음"
+                        }
+                        formatted_attractions.append(formatted_attraction)
+                    
+                    # 카테고리 섹션 생성
+                    category_sections.append({
+                        "category": category,
+                        "categoryName": get_category_korean_name(category),
+                        "attractions": formatted_attractions,
+                        "total": len(formatted_attractions)
+                    })
+            
+            # 카테고리가 있는 지역만 포함
+            if category_sections:
+                cities_data.append({
+                    "id": f"region-{region}-{page}",
+                    "cityName": region,
+                    "description": f"{region}의 아름다운 여행지",
+                    "region": region,
+                    "recommendationScore": 95 - len(cities_data) * 5,
+                    "categorySections": category_sections
+                })
+        
+        return {
+            "data": cities_data,
+            "hasMore": offset + limit < len(sorted_regions),
+            "total": len(sorted_regions),
+            "page": page,
+            "limit": limit
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"지역별 카테고리 데이터 조회 중 오류 발생: {str(e)}"
+        )
+
+
 @router.get("/cities")
 async def get_recommended_cities(
     page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
@@ -455,8 +547,8 @@ async def get_regions(db: Session = Depends(get_db)):
                 if region and region.strip():
                     regions.add(region.strip())
         
-        # 지역 목록 정렬
-        sorted_regions = sorted(list(regions))
+        # 지역 목록을 우선순위에 따라 정렬
+        sorted_regions = sort_regions_by_priority(list(regions))
         
         return {
             "regions": sorted_regions,
@@ -467,6 +559,50 @@ async def get_regions(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"지역 목록 조회 중 오류 발생: {str(e)}"
         )
+
+
+def sort_regions_by_priority(regions):
+    """지역을 우선순위에 따라 정렬합니다."""
+    # 우선순위 정의
+    priority_order = [
+        # 특별시/광역시
+        "서울특별시", "서울시",
+        "부산광역시", "부산시",
+        "대구광역시", "대구시", 
+        "인천광역시", "인천시",
+        "광주광역시", "광주시",
+        "대전광역시", "대전시",
+        "울산광역시", "울산시",
+        "세종특별자치시", "세종시",
+        
+        # 도
+        "경기도",
+        "강원특별자치도", "강원도",
+        "충청북도",
+        "충청남도", 
+        "전북특별자치도", "전라북도",
+        "전라남도",
+        "경상북도",
+        "경상남도",
+        "제주특별자치도", "제주도", "제주"
+    ]
+    
+    # 우선순위에 따라 정렬
+    sorted_regions = []
+    remaining_regions = regions.copy()
+    
+    # 우선순위 순서대로 추가
+    for priority_region in priority_order:
+        for region in remaining_regions:
+            if priority_region in region or region in priority_region:
+                sorted_regions.append(region)
+                remaining_regions.remove(region)
+                break
+    
+    # 남은 지역들을 알파벳 순으로 추가
+    sorted_regions.extend(sorted(remaining_regions))
+    
+    return sorted_regions
 
 
 @router.get("/categories")
