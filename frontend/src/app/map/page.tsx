@@ -285,7 +285,8 @@ export default function MapPage() {
       place => !(place.id === placeId && place.dayNumber === dayNumber)
     );
     setSelectedItineraryPlaces(updatedPlaces);
-    updateUrlParameters(updatedPlaces);
+    // 삭제시에도 URL 업데이트하지 않음 (기존 선택된 장소들 유지)
+    // updateUrlParameters(updatedPlaces);
   };
 
 
