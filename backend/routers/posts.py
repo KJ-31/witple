@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from database import get_db
-from models import Post, User
+from models import Post, User, OAuthAccount
 from schemas import PostCreate, PostResponse, PostListResponse
 from config import settings
 from auth_utils import get_current_user
@@ -127,10 +127,12 @@ async def get_posts(
 ):
     """포스트 목록을 가져옵니다."""
     try:
-        # 최신 순으로 포스트 조회
+        # 최신 순으로 포스트 조회 (OAuth 계정 정보도 함께 로드)
         posts = (
             db.query(Post)
-            .options(joinedload(Post.user))
+            .options(
+                joinedload(Post.user).joinedload(User.oauth_accounts)
+            )
             .order_by(desc(Post.created_at))
             .offset(skip)
             .limit(limit)
@@ -138,6 +140,18 @@ async def get_posts(
         )
         
         total = db.query(Post).count()
+        
+        # 디버깅: OAuth 계정 정보 로깅
+        if posts:
+            logger.info(f"=== 포스트 조회 디버깅 ===")
+            logger.info(f"전체 포스트 수: {len(posts)}")
+            first_post = posts[0]
+            logger.info(f"첫 번째 포스트 ID: {first_post.id}")
+            logger.info(f"첫 번째 포스트 사용자: {first_post.user.email}")
+            logger.info(f"OAuth 계정 수: {len(first_post.user.oauth_accounts)}")
+            for oauth_account in first_post.user.oauth_accounts:
+                logger.info(f"OAuth 계정: provider={oauth_account.provider}, profile_picture={oauth_account.profile_picture}")
+            logger.info(f"========================")
         
         return PostListResponse(posts=posts, total=total)
         

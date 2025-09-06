@@ -37,6 +37,13 @@ export default function FeedPage() {
       const response = await fetch('/api/proxy/api/v1/posts/')
       if (response.ok) {
         const data = await response.json()
+        console.log('=== 포스트 API 응답 디버깅 ===')
+        console.log('전체 응답:', data)
+        console.log('첫 번째 포스트:', data.posts?.[0])
+        console.log('첫 번째 포스트 사용자:', data.posts?.[0]?.user)
+        console.log('OAuth 계정:', data.posts?.[0]?.user?.oauth_accounts)
+        console.log('==============================')
+        
         // API 응답 형태에 맞게 데이터 변환
         const postsWithLiked = data.posts.map((post: any) => ({
           ...post,
@@ -157,6 +164,18 @@ export default function FeedPage() {
                   {(post.user as any).profile_image ? (
                     <img
                       src={(post.user as any).profile_image}
+                      alt={(post.user as any).name || post.user.email}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (post.user as any).oauth_accounts?.find((account: any) => account.provider === 'google')?.profile_picture ? (
+                    <img
+                      src={(post.user as any).oauth_accounts.find((account: any) => account.provider === 'google').profile_picture}
+                      alt={(post.user as any).name || post.user.email}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : session?.user?.id === String(post.user_id) && session?.user?.image ? (
+                    <img
+                      src={session.user.image}
                       alt={(post.user as any).name || post.user.email}
                       className="w-full h-full object-cover"
                     />
