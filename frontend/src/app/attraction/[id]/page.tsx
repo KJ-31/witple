@@ -55,7 +55,11 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
       try {
         setLoading(true)
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`)
+        
+        // 새로운 ID 형식 처리: table_name_id 형식인 경우
+        let apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`
+        
+        const response = await fetch(apiUrl)
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
