@@ -39,9 +39,12 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
     if attraction.image_urls and isinstance(attraction.image_urls, list) and len(attraction.image_urls) > 0:
         image_url = attraction.image_urls[0]
     
+    # 고유 ID 생성: 테이블명_id 형식으로 변경
+    unique_id = f"{table_name}_{attraction.id}" if table_name else str(attraction.id)
+    
     # 기본 데이터 구조
     data = {
-        "id": str(attraction.id),
+        "id": unique_id,
         "name": attraction.name or "이름 없음",
         "description": attraction.overview[:100] + "..." if attraction.overview and len(attraction.overview) > 100 else (attraction.overview or "설명 없음"),
         "imageUrl": image_url,
@@ -259,44 +262,101 @@ async def get_city_details(city_id: str, db: Session = Depends(get_db)):
 async def get_attraction_details(attraction_id: str, db: Session = Depends(get_db)):
     """특정 관광지의 상세 정보를 가져옵니다."""
     try:
-        # 모든 테이블에서 해당 ID의 관광지 검색 (모든 결과를 수집)
-        matching_attractions = []
-        for table_name, table_model in CATEGORY_TABLES.items():
+        # 새로운 ID 형식 처리: table_name_id 형식
+        if "_" in attraction_id:
+            # 테이블명이 여러 단어로 구성된 경우를 고려하여 마지막 _ 기준으로 분리
+            parts = attraction_id.split("_")
+            if len(parts) >= 2:
+                # 마지막 부분이 숫자인지 확인
+                if parts[-1].isdigit():
+                    original_id = parts[-1]
+                    table_name = "_".join(parts[:-1])
+                else:
+                    # 마지막 부분이 숫자가 아니면 첫 번째 _ 기준으로 분리
+                    table_name, original_id = attraction_id.split("_", 1)
+            else:
+                table_name, original_id = attraction_id.split("_", 1)
+            
+            # 테이블명 검증
+            if table_name not in CATEGORY_TABLES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"잘못된 테이블명: {table_name}"
+                )
+            
+            table_model = CATEGORY_TABLES[table_name]
             attraction = db.query(table_model).filter(
-                table_model.id == int(attraction_id)
+                table_model.id == int(original_id)
             ).first()
             
-            if attraction:
-                category = get_category_from_table(table_name)
-                formatted_attraction = format_attraction_data(attraction, category, table_name)
-                
-                # 추가 상세 정보 포함
-                formatted_attraction.update({
-                    "city": {
-                        "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
-                        "name": attraction.city or "알 수 없음",
-                        "region": attraction.region or "알 수 없음"
-                    },
-                    "detailedInfo": getattr(attraction, 'detailed_info', None),
-                    "closedDays": getattr(attraction, 'closed_days', None),
-                    "majorCategory": getattr(attraction, 'major_category', None),
-                    "middleCategory": getattr(attraction, 'middle_category', None),
-                    "minorCategory": getattr(attraction, 'minor_category', None),
-                    "imageUrls": attraction.image_urls if attraction.image_urls else [],
-                    "createdAt": attraction.created_at.isoformat() if attraction.created_at else None,
-                    "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
-                })
-                
-                matching_attractions.append((table_name, formatted_attraction))
+            if not attraction:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="관광지를 찾을 수 없습니다."
+                )
+            
+            category = get_category_from_table(table_name)
+            formatted_attraction = format_attraction_data(attraction, category, table_name)
+            
+            # 추가 상세 정보 포함
+            formatted_attraction.update({
+                "city": {
+                    "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                    "name": attraction.city or "알 수 없음",
+                    "region": attraction.region or "알 수 없음"
+                },
+                "detailedInfo": getattr(attraction, 'detailed_info', None),
+                "closedDays": getattr(attraction, 'closed_days', None),
+                "majorCategory": getattr(attraction, 'major_category', None),
+                "middleCategory": getattr(attraction, 'middle_category', None),
+                "minorCategory": getattr(attraction, 'minor_category', None),
+                "imageUrls": attraction.image_urls if attraction.image_urls else [],
+                "createdAt": attraction.created_at.isoformat() if attraction.created_at else None,
+                "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
+            })
+            
+            return formatted_attraction
         
-        # 매칭된 결과가 있으면 첫 번째 결과 반환 (원래 동작 복원)
-        if matching_attractions:
-            return matching_attractions[0][1]
+        else:
+            # 기존 ID 형식 (숫자만) - 하위 호환성을 위해 유지
+            matching_attractions = []
+            for table_name, table_model in CATEGORY_TABLES.items():
+                attraction = db.query(table_model).filter(
+                    table_model.id == int(attraction_id)
+                ).first()
+                
+                if attraction:
+                    category = get_category_from_table(table_name)
+                    formatted_attraction = format_attraction_data(attraction, category, table_name)
+                    
+                    # 추가 상세 정보 포함
+                    formatted_attraction.update({
+                        "city": {
+                            "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                            "name": attraction.city or "알 수 없음",
+                            "region": attraction.region or "알 수 없음"
+                        },
+                        "detailedInfo": getattr(attraction, 'detailed_info', None),
+                        "closedDays": getattr(attraction, 'closed_days', None),
+                        "majorCategory": getattr(attraction, 'major_category', None),
+                        "middleCategory": getattr(attraction, 'middle_category', None),
+                        "minorCategory": getattr(attraction, 'minor_category', None),
+                        "imageUrls": attraction.image_urls if attraction.image_urls else [],
+                        "createdAt": attraction.created_at.isoformat() if attraction.created_at else None,
+                        "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
+                    })
+                    
+                    matching_attractions.append((table_name, formatted_attraction))
+            
+            # 매칭된 결과가 있으면 첫 번째 결과 반환
+            if matching_attractions:
+                return matching_attractions[0][1]
+            
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="관광지를 찾을 수 없습니다."
+            )
         
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="관광지를 찾을 수 없습니다."
-        )
     except HTTPException:
         raise
     except ValueError:
@@ -367,6 +427,145 @@ async def get_attraction_details_by_table(table_name: str, attraction_id: str, d
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"관광지 상세 정보 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/regions")
+async def get_regions(db: Session = Depends(get_db)):
+    """사용 가능한 지역 목록을 가져옵니다."""
+    try:
+        regions = set()
+        
+        # 모든 테이블에서 지역 정보 수집
+        for table_model in CATEGORY_TABLES.values():
+            region_results = db.query(table_model.region).filter(
+                table_model.region.isnot(None),
+                table_model.region != ""
+            ).distinct().all()
+            
+            for (region,) in region_results:
+                if region and region.strip():
+                    regions.add(region.strip())
+        
+        # 지역 목록 정렬
+        sorted_regions = sorted(list(regions))
+        
+        return {
+            "regions": sorted_regions,
+            "total": len(sorted_regions)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"지역 목록 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/categories")
+async def get_categories():
+    """사용 가능한 카테고리 목록을 가져옵니다."""
+    try:
+        categories = [
+            {"id": "nature", "name": "자연", "description": "자연 경관과 공원"},
+            {"id": "restaurants", "name": "맛집", "description": "음식점과 카페"},
+            {"id": "shopping", "name": "쇼핑", "description": "쇼핑몰과 시장"},
+            {"id": "accommodation", "name": "숙박", "description": "호텔과 펜션"},
+            {"id": "humanities", "name": "인문", "description": "문화재와 박물관"},
+            {"id": "leisure_sports", "name": "레저", "description": "스포츠와 레저 활동"}
+        ]
+        
+        return {
+            "categories": categories,
+            "total": len(categories)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"카테고리 목록 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/filtered")
+async def get_filtered_attractions(
+    region: Optional[str] = Query(None, description="지역 필터"),
+    category: Optional[str] = Query(None, description="카테고리 필터"),
+    page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 결과 수"),
+    db: Session = Depends(get_db)
+):
+    """지역 및 카테고리별로 필터링된 관광지 목록을 가져옵니다."""
+    try:
+        results = []
+        
+        # 카테고리 필터에 따른 테이블 선택
+        search_tables = {}
+        if category:
+            # 카테고리에 맞는 테이블만 검색
+            for table_name, table_model in CATEGORY_TABLES.items():
+                table_category = get_category_from_table(table_name)
+                if table_category == category:
+                    search_tables[table_name] = table_model
+        else:
+            # 모든 테이블 검색
+            search_tables = CATEGORY_TABLES
+        
+        # 각 테이블에서 필터링된 결과 조회
+        for table_name, table_model in search_tables.items():
+            query = db.query(table_model)
+            
+            # 지역 필터
+            if region:
+                query = query.filter(
+                    or_(
+                        table_model.region.ilike(f"%{region}%"),
+                        table_model.region == region
+                    )
+                )
+            
+            # 페이지네이션 적용하여 검색 결과 조회
+            offset = page * limit
+            attractions = query.offset(offset).limit(limit).all()
+            
+            # 결과 포맷팅
+            table_category = get_category_from_table(table_name)
+            for attraction in attractions:
+                formatted_attraction = format_attraction_data(attraction, table_category, table_name)
+                formatted_attraction["city"] = {
+                    "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                    "name": attraction.city or "알 수 없음",
+                    "region": attraction.region or "알 수 없음"
+                }
+                results.append(formatted_attraction)
+        
+        # 전체 결과 개수 계산
+        total_results = 0
+        for table_name, table_model in search_tables.items():
+            query = db.query(table_model)
+            if region:
+                query = query.filter(
+                    or_(
+                        table_model.region.ilike(f"%{region}%"),
+                        table_model.region == region
+                    )
+                )
+            total_results += query.count()
+        
+        return {
+            "attractions": results,
+            "total": len(results),
+            "totalAvailable": total_results,
+            "page": page,
+            "limit": limit,
+            "hasMore": (page + 1) * limit < total_results,
+            "filters": {
+                "region": region,
+                "category": category
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"필터링된 관광지 조회 중 오류 발생: {str(e)}"
         )
 
 

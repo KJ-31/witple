@@ -14,6 +14,13 @@ export default function Home() {
   const [page, setPage] = useState(0)
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadingRef = useRef(false)
+  
+  // 필터링 상태
+  const [selectedRegion, setSelectedRegion] = useState<string>('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [regions, setRegions] = useState<string[]>([])
+  const [categories, setCategories] = useState<Array<{id: string, name: string, description: string}>>([])
+  const [showFilters, setShowFilters] = useState(false)
 
   // 추천 도시 데이터 로드 함수
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
@@ -40,10 +47,117 @@ export default function Home() {
     }
   }, [])
 
+  // 필터 데이터 로드 함수
+  const loadFilterData = useCallback(async () => {
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      
+      // 지역 목록 로드
+      const regionsResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/regions`)
+      if (regionsResponse.ok) {
+        const regionsData = await regionsResponse.json()
+        setRegions(regionsData.regions)
+      }
+      
+      // 카테고리 목록 로드
+      const categoriesResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/categories`)
+      if (categoriesResponse.ok) {
+        const categoriesData = await categoriesResponse.json()
+        setCategories(categoriesData.categories)
+      }
+    } catch (error) {
+      console.error('필터 데이터 로드 오류:', error)
+    }
+  }, [])
+
+  // 필터링된 관광지 로드 함수
+  const loadFilteredAttractions = useCallback(async (pageNum: number) => {
+    if (loadingRef.current) return
+
+    loadingRef.current = true
+    setLoading(true)
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const params = new URLSearchParams({
+        page: pageNum.toString(),
+        limit: '3'
+      })
+      
+      if (selectedRegion) params.append('region', selectedRegion)
+      if (selectedCategory) params.append('category', selectedCategory)
+      
+      const url = `${API_BASE_URL}/api/v1/attractions/filtered?${params}`
+      console.log('Filtered attractions URL:', url)
+      
+      const response = await fetch(url)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      // 필터링된 결과를 CitySection 형식으로 변환
+      const filteredCitySections: CitySection[] = []
+      
+      if (result.attractions && result.attractions.length > 0) {
+        // 지역별로 그룹화
+        const groupedByRegion: { [key: string]: any[] } = {}
+        
+        result.attractions.forEach((attraction: any) => {
+          const region = attraction.region || '기타'
+          if (!groupedByRegion[region]) {
+            groupedByRegion[region] = []
+          }
+          groupedByRegion[region].push(attraction)
+        })
+        
+        // 각 지역별로 CitySection 생성
+        Object.entries(groupedByRegion).forEach(([region, attractions], index) => {
+          const cityName = attractions[0]?.city?.name || region
+          filteredCitySections.push({
+            id: `filtered-${region}-${index}`,
+            cityName: cityName,
+            description: selectedCategory ? 
+              `${region}의 ${categories.find(c => c.id === selectedCategory)?.name || selectedCategory}` :
+              `${region}의 추천 여행지`,
+            region: region,
+            attractions: attractions.slice(0, 8), // 최대 8개까지만
+            recommendationScore: 85 - index * 5
+          })
+        })
+      }
+
+      if (pageNum === 0) {
+        setCitySections(filteredCitySections)
+      } else {
+        setCitySections(prev => [...prev, ...filteredCitySections])
+      }
+
+      setHasMore(result.hasMore)
+      setPage(pageNum)
+    } catch (error) {
+      console.error('필터링된 데이터 로드 오류:', error)
+    } finally {
+      setLoading(false)
+      loadingRef.current = false
+    }
+  }, [selectedRegion, selectedCategory, categories])
+
   // 초기 데이터 로드
   useEffect(() => {
     loadRecommendedCities(0)
-  }, [])
+    loadFilterData()
+  }, [loadFilterData])
+
+  // 필터 변경 시 데이터 다시 로드
+  useEffect(() => {
+    if (selectedRegion || selectedCategory) {
+      loadFilteredAttractions(0)
+    } else {
+      loadRecommendedCities(0)
+    }
+  }, [selectedRegion, selectedCategory, loadFilteredAttractions, loadRecommendedCities])
 
   // 무한 스크롤 감지
   const lastElementRef = useCallback((node: HTMLDivElement | null) => {
@@ -90,7 +204,7 @@ export default function Home() {
       </div>
 
       {/* Search Bar */}
-      <div className="px-4 mb-24 mt-20">
+      <div className="px-4 mb-8 mt-20">
         <form onSubmit={handleSearch} className="relative w-[90%] mx-auto">
           <input
             type="text"
@@ -116,6 +230,107 @@ export default function Home() {
             </svg>
           </button>
         </form>
+      </div>
+
+      {/* Filter Section */}
+      <div className="px-4 mb-16">
+        <div className="w-[90%] mx-auto">
+          {/* Filter Toggle Button */}
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1F3C7A]/30 rounded-full text-[#6FA0E6] hover:bg-[#1F3C7A]/50 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+              <span className="text-sm font-medium">필터</span>
+              {(selectedRegion || selectedCategory) && (
+                <span className="bg-[#3E68FF] text-white text-xs px-2 py-1 rounded-full">
+                  {[selectedRegion, selectedCategory].filter(Boolean).length}
+                </span>
+              )}
+            </button>
+            
+            {/* Clear Filters */}
+            {(selectedRegion || selectedCategory) && (
+              <button
+                onClick={() => {
+                  setSelectedRegion('')
+                  setSelectedCategory('')
+                }}
+                className="text-[#6FA0E6] hover:text-white text-sm transition-colors"
+              >
+                필터 초기화
+              </button>
+            )}
+          </div>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <div className="bg-[#0F1A31]/50 rounded-2xl p-4 space-y-4">
+              {/* Region Filter */}
+              <div>
+                <label className="block text-[#94A9C9] text-sm font-medium mb-2">지역</label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setSelectedRegion('')}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                      !selectedRegion 
+                        ? 'bg-[#3E68FF] text-white' 
+                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                    }`}
+                  >
+                    전체
+                  </button>
+                  {regions.map((region) => (
+                    <button
+                      key={region}
+                      onClick={() => setSelectedRegion(region)}
+                      className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                        selectedRegion === region 
+                          ? 'bg-[#3E68FF] text-white' 
+                          : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                      }`}
+                    >
+                      {region}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category Filter */}
+              <div>
+                <label className="block text-[#94A9C9] text-sm font-medium mb-2">카테고리</label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setSelectedCategory('')}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                      !selectedCategory 
+                        ? 'bg-[#3E68FF] text-white' 
+                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                    }`}
+                  >
+                    전체
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      key={category.id}
+                      onClick={() => setSelectedCategory(category.id)}
+                      className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                        selectedCategory === category.id 
+                          ? 'bg-[#3E68FF] text-white' 
+                          : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                      }`}
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 추천 도시별 명소 섹션 (무한 스크롤) */}
