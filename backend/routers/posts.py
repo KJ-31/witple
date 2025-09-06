@@ -15,6 +15,7 @@ from database import get_db
 from models import Post, User
 from schemas import PostCreate, PostResponse, PostListResponse
 from config import settings
+from auth_utils import get_current_user
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -77,23 +78,14 @@ def save_image_to_s3(base64_data: str, filename: str) -> str:
 @router.post("/", response_model=PostResponse)
 async def create_post(
     post_data: PostCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """새 포스트를 생성합니다."""
     try:
-        # 임시 사용자 (실제로는 JWT 토큰에서 사용자 정보 가져와야 함)
-        user = db.query(User).first()
-        if not user:
-            # 테스트용 사용자 생성 (기존 스키마에 맞춤)
-            user = User(
-                user_id=str(uuid.uuid4()),
-                email="kimquokka@example.com",
-                name="김쿼카",
-                pw="dummy_password"
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+        # JWT 토큰에서 가져온 현재 사용자 사용
+        user = current_user
+        logger.info(f"Creating post for user: {user.user_id} ({user.email})")
         
         # 고유한 파일명 생성
         file_extension = "jpg"  # 실제로는 이미지 데이터에서 확장자 추출해야 함
