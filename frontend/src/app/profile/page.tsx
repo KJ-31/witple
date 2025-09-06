@@ -54,8 +54,16 @@ export default function ProfilePage() {
       
       if (response.ok) {
         const data = await response.json()
+        console.log('=== 사용자 게시글 필터링 디버그 ===')
+        console.log('현재 세션 사용자 ID:', session.user?.id)
+        console.log('현재 세션 사용자 이메일:', session.user?.email)
+        console.log('전체 게시글 수:', data.posts?.length || 0)
+        console.log('게시글 user_id 샘플:', data.posts?.[0]?.user_id)
+        
         // 현재 사용자의 게시글만 필터링
-        const userPosts = data.posts.filter((post: Post) => post.user_id === session.user?.email)
+        const userPosts = data.posts.filter((post: Post) => post.user_id === session.user?.id)
+        console.log('필터링된 게시글 수:', userPosts.length)
+        console.log('==============================')
         setPosts(userPosts)
       } else {
         console.error('게시글 가져오기 실패')

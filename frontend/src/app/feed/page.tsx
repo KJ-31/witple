@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 
 interface User {
@@ -26,6 +27,7 @@ interface Post {
 
 export default function FeedPage() {
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -320,12 +322,11 @@ export default function FeedPage() {
 
           <button
             onClick={() => {
-              // 임시로 로그인 상태를 확인 (실제 구현에서는 인증 상태를 확인)
-              const isLoggedIn = false // 여기서 실제 로그인 상태 확인
-              if (isLoggedIn) {
+              // NextAuth 세션 상태를 확인하여 로그인 여부 판단
+              if (status === 'authenticated' && session) {
                 router.push('/profile')
               } else {
-                router.push('/auth/register')
+                router.push('/auth/login')
               }
             }}
             className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
