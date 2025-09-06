@@ -45,21 +45,43 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    import logging
+    logger = logging.getLogger(__name__)
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
     try:
+        logger.info(f"토큰 검증 시작 - 토큰 길이: {len(token) if token else 0}")
+        logger.info(f"SECRET_KEY 길이: {len(settings.SECRET_KEY)}")
+        logger.info(f"ALGORITHM: {settings.ALGORITHM}")
+        
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        logger.info(f"JWT 디코딩 성공 - payload: {payload}")
+        
         email: str = payload.get("sub")
         if email is None:
+            logger.error("JWT payload에서 email(sub) 찾을 수 없음")
             raise credentials_exception
+            
+        logger.info(f"토큰에서 추출된 이메일: {email}")
         token_data = TokenData(email=email)
-    except JWTError:
+        
+    except JWTError as e:
+        logger.error(f"JWT 에러 발생: {str(e)}")
+        logger.error(f"토큰 내용 (처음 50자): {token[:50] if token else 'None'}")
+        raise credentials_exception
+    except Exception as e:
+        logger.error(f"예상치 못한 에러: {str(e)}")
         raise credentials_exception
     
     user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
+        logger.error(f"사용자 찾을 수 없음: {token_data.email}")
         raise credentials_exception
+        
+    logger.info(f"사용자 인증 성공: {user.email}")
     return user
