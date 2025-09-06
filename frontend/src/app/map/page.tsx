@@ -762,73 +762,109 @@ export default function MapPage() {
   } => {
     if (destinations.length === 0) return { order: [], totalDistance: 0, optimizedNames: [] };
     
-    const result = [];
+    // 최종 결과 배열을 미리 생성 (잠금된 위치는 고정)
+    const finalOrder = new Array(destinations.length).fill(-1);
+    const finalNames = new Array(destinations.length).fill('');
     const visited = new Array(destinations.length).fill(false);
-    let currentLocation = origin;
-    let totalDistance = 0;
-
-    const lockedWaypoints = constraints
-      .map((constraint, index) => ({ ...constraint, originalIndex: index }))
-      .filter(constraint => constraint.locked)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
-
-    for (const locked of lockedWaypoints) {
-      const index = locked.originalIndex;
-      if (!visited[index]) {
-        const distance = calculateDistance(
-          currentLocation.lat, currentLocation.lng,
-          destinations[index].lat, destinations[index].lng
-        );
-        
-        visited[index] = true;
-        result.push({
-          index,
-          name: destinationNames[index],
-          distance,
-          locked: true
-        });
-        totalDistance += distance;
-        currentLocation = destinations[index];
+    
+    // 1. 잠금된 장소들을 먼저 고정된 위치에 배치
+    constraints.forEach((constraint, index) => {
+      if (constraint.locked && constraint.order !== undefined) {
+        const fixedPosition = constraint.order - 1; // order는 1부터 시작하므로 -1
+        if (fixedPosition >= 0 && fixedPosition < destinations.length) {
+          finalOrder[fixedPosition] = index;
+          finalNames[fixedPosition] = destinationNames[index];
+          visited[index] = true;
+        }
+      }
+    });
+    
+    // 2. 잠금되지 않은 장소들을 가장 가까운 거리 순으로 배치
+    const unlockedIndices = [];
+    for (let i = 0; i < destinations.length; i++) {
+      if (!visited[i]) {
+        unlockedIndices.push(i);
       }
     }
-
-    while (result.length < destinations.length) {
+    
+    // 3. 빈 슬롯들을 찾기
+    const emptySlots = [];
+    for (let i = 0; i < finalOrder.length; i++) {
+      if (finalOrder[i] === -1) {
+        emptySlots.push(i);
+      }
+    }
+    
+    // 4. 최적화: 각 빈 슬롯에 대해 가장 적합한 장소 배치
+    let currentLocation = origin;
+    let totalDistance = 0;
+    
+    // 순서대로 처리하면서 거리 계산
+    for (let slotIndex = 0; slotIndex < emptySlots.length; slotIndex++) {
+      const slot = emptySlots[slotIndex];
+      
+      // 이전 위치까지의 경로를 따라 현재 위치 업데이트
+      if (slot > 0) {
+        const prevIndex = finalOrder[slot - 1];
+        if (prevIndex !== -1) {
+          currentLocation = destinations[prevIndex];
+        }
+      }
+      
+      // 가장 가까운 미방문 장소 찾기
       let nearestIndex = -1;
       let nearestDistance = Infinity;
-
-      for (let j = 0; j < destinations.length; j++) {
-        if (!visited[j] && !constraints[j].locked) {
+      
+      for (const unlockedIndex of unlockedIndices) {
+        if (!visited[unlockedIndex]) {
           const distance = calculateDistance(
             currentLocation.lat, currentLocation.lng,
-            destinations[j].lat, destinations[j].lng
+            destinations[unlockedIndex].lat, destinations[unlockedIndex].lng
           );
           
           if (distance < nearestDistance) {
             nearestDistance = distance;
-            nearestIndex = j;
+            nearestIndex = unlockedIndex;
           }
         }
       }
-
+      
+      // 가장 가까운 장소를 현재 슬롯에 배치
       if (nearestIndex !== -1) {
+        finalOrder[slot] = nearestIndex;
+        finalNames[slot] = destinationNames[nearestIndex];
         visited[nearestIndex] = true;
-        result.push({
-          index: nearestIndex,
-          name: destinationNames[nearestIndex],
-          distance: nearestDistance,
-          locked: false
-        });
         totalDistance += nearestDistance;
         currentLocation = destinations[nearestIndex];
-      } else {
-        break;
+      }
+    }
+    
+    // 전체 거리 재계산
+    totalDistance = 0;
+    let prevLocation = origin;
+    for (let i = 0; i < finalOrder.length; i++) {
+      const index = finalOrder[i];
+      if (index !== -1) {
+        const distance = calculateDistance(
+          prevLocation.lat, prevLocation.lng,
+          destinations[index].lat, destinations[index].lng
+        );
+        totalDistance += distance;
+        prevLocation = destinations[index];
       }
     }
 
+    console.log('제약 조건 최적화 결과:', {
+      finalOrder,
+      finalNames,
+      constraints,
+      totalDistance
+    });
+
     return { 
-      order: result.map(r => r.index), 
+      order: finalOrder.filter(index => index !== -1), 
       totalDistance, 
-      optimizedNames: result.map(r => r.name)
+      optimizedNames: finalNames.filter(name => name !== '')
     };
   };
 
@@ -1167,7 +1203,7 @@ export default function MapPage() {
         return;
       }
 
-      // 잠금 제약 조건 생성
+      // 잠금 제약 조건 생성 (현재 순서 기준)
       const constraints = restPlaces
         .filter(place => place.latitude && place.longitude)
         .map((place, index) => {
@@ -1175,7 +1211,7 @@ export default function MapPage() {
           const isLocked = lockedPlaces[key] || false;
           return {
             locked: isLocked,
-            order: isLocked ? index + 1 : undefined // 잠금된 경우 현재 순서를 유지
+            order: isLocked ? index + 1 : undefined // 잠금된 경우 현재 순서를 유지 (첫번째 장소 제외하고 1부터 시작)
           };
         });
 
@@ -1185,7 +1221,8 @@ export default function MapPage() {
         origin: firstPlace.name,
         destinations: destinationNames,
         constraints: constraints,
-        lockedCount: lockedCount
+        lockedCount: lockedCount,
+        lockedPlaces: lockedPlaces
       });
 
       // 제약 조건이 있는 최적화 실행
