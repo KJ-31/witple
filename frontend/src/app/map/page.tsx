@@ -1938,21 +1938,29 @@ export default function MapPage() {
                                               })()
                                             ) : step.mode === 'WALKING' ? (
                                               // 도보 구간
-                                              <div className="flex items-center space-x-3">
-                                                <div className="flex-shrink-0">
-                                                  <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
-                                                    <span className="text-sm">🚶</span>
+                                              (() => {
+                                                // 마지막 도보 구간인지 확인
+                                                const isLastStep = stepIndex === segmentInfo.transitDetails.length - 1;
+                                                const walkingText = isLastStep ? `${segmentInfo.destination.name}까지 도보` : (step.instruction || '도보 이동');
+                                                
+                                                return (
+                                                  <div className="flex items-center space-x-3">
+                                                    <div className="flex-shrink-0">
+                                                      <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
+                                                        <span className="text-sm">🚶</span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex-1 text-sm text-[#94A9C9]">
+                                                      <div className="truncate">
+                                                        {walkingText}
+                                                      </div>
+                                                      <div className="text-xs text-[#6FA0E6] mt-1">
+                                                        {step.distance} · {step.duration}
+                                                      </div>
+                                                    </div>
                                                   </div>
-                                                </div>
-                                                <div className="flex-1 text-sm text-[#94A9C9]">
-                                                  <div className="truncate">
-                                                    {step.instruction || '도보 이동'}
-                                                  </div>
-                                                  <div className="text-xs text-[#6FA0E6] mt-1">
-                                                    {step.distance} · {step.duration}
-                                                  </div>
-                                                </div>
-                                              </div>
+                                                );
+                                              })()
                                             ) : (
                                               // 기타 교통수단
                                               <div className="flex items-center space-x-3">
