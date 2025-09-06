@@ -1,34 +1,13 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
-import configparser
 import os
+from dotenv import load_dotenv
 
-
-def get_database_url_from_config():
-    """DB.conf 파일에서 데이터베이스 URL을 생성합니다."""
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'DB.conf')
-    
-    if os.path.exists(config_path):
-        config = configparser.ConfigParser()
-        config.read(config_path)
-        
-        if 'postgres_config' in config:
-            pg_config = config['postgres_config']
-            host = pg_config.get('host')
-            port = pg_config.get('port')
-            username = pg_config.get('username')
-            password = pg_config.get('password')
-            database = pg_config.get('database')
-            
-            return f"postgresql://{username}:{password}@{host}:{port}/{database}"
-    
-    # 기본값
-    return "postgresql://witple_user:witple_password@localhost:5432/witple_db"
-
+# .env 파일 로드
+load_dotenv()
 
 class Settings(BaseSettings):
     # 데이터베이스 설정
-    DATABASE_URL: str = get_database_url_from_config()
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db")
     
     # Redis 설정
     REDIS_URL: str = "redis://localhost:6379"

@@ -20,7 +20,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 @router.post("/register", response_model=UserResponse)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
-    logger.info(f"Register request received: email={user.email}, username={user.username}, full_name={user.full_name}")
+    logger.info(f"Register request received: email={user.email}, name={user.name}")
     
     try:
         # 이메일 중복 확인
@@ -37,17 +37,20 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         hashed_password = get_password_hash(user.password)
         logger.info("Password hashed successfully")
         
+        user_id = str(uuid.uuid4())
         db_user = User(
+            user_id=user_id,
             email=user.email,
-            username=user.username,
-            hashed_password=hashed_password,
-            full_name=user.full_name
+            name=user.name,
+            pw=hashed_password,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
         )
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
         
-        logger.info(f"User created successfully: id={db_user.id}")
+        logger.info(f"User created successfully: id={db_user.user_id}")
         return db_user
         
     except Exception as e:
@@ -113,7 +116,7 @@ async def login(request: Request, db: Session = Depends(get_db)):
         
         # 비밀번호 검증
         logger.info("Step 12: Verifying password...")
-        if not verify_password(password, user.hashed_password):
+        if not verify_password(password, user.pw):
             logger.warning(f"Password verification failed for user: {username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

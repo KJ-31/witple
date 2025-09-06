@@ -56,14 +56,64 @@ export const register = async (email: string, password: string, full_name: strin
   const response = await apiClient.post('/api/v1/auth/register', {
     email,
     password,
-    username: email, // email을 username으로 사용
-    full_name,
+    name: full_name,
   })
   return response.data
 }
 
 export const getCurrentUser = async () => {
   const response = await apiClient.get('/api/v1/auth/me')
+  return response.data
+}
+
+// 프론트엔드 값을 DB 값으로 매핑하는 함수
+const mapPreferencesToDB = (preferences: any) => {
+  const travelStyleMap: Record<string, string> = {
+    luxury: 'luxury',
+    city: 'modern', 
+    nature: 'nature_activity',
+    food: 'foodie'
+  }
+  
+  const investmentMap: Record<string, string> = {
+    accommodation: 'accommodation',
+    food: 'restaurants',
+    experience: 'experience',
+    shopping: 'shopping'
+  }
+  
+  const accommodationMap: Record<string, string> = {
+    hotel: 'comfort',
+    nature: 'healing',
+    traditional: 'traditional',
+    social: 'community'
+  }
+  
+  const destinationMap: Record<string, string> = {
+    famous: 'hot',
+    hidden: 'local',
+    mixed: 'balance',
+    experience: 'authentic_experience'
+  }
+  
+  return {
+    persona: travelStyleMap[preferences.travelStyle] || preferences.travelStyle,
+    priority: investmentMap[preferences.investment] || preferences.investment,
+    accommodation: accommodationMap[preferences.accommodation] || preferences.accommodation,
+    exploration: destinationMap[preferences.destination] || preferences.destination
+  }
+}
+
+// 선호도 저장 API
+export const saveUserPreferences = async (preferences: any, token: string) => {
+  const mappedPreferences = mapPreferencesToDB(preferences)
+  
+  const response = await apiClient.post('/api/v1/users/preferences', mappedPreferences, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  })
   return response.data
 }
 

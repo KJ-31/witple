@@ -6,8 +6,7 @@ from enum import Enum
 
 class UserBase(BaseModel):
     email: EmailStr
-    username: str
-    full_name: Optional[str] = None
+    name: Optional[str] = None
 
 
 class UserCreate(UserBase):

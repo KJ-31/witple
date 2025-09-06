@@ -235,17 +235,16 @@ class RecommendationEngine:
             # 기본 선호도
             basic_prefs = await conn.fetchrow("""
                 SELECT persona, priority, accommodation, exploration 
-                FROM user_preferences_basic 
+                FROM user_preferences 
                 WHERE user_id = $1
                 ORDER BY created_at DESC LIMIT 1
             """, user_id)
             
             # 태그 선호도
             tag_prefs = await conn.fetch("""
-                SELECT upt.tag, upt.weight
-                FROM user_preferences_tags upt
-                JOIN user_preferences_basic upb ON upt.preference_id = upb.id
-                WHERE upb.user_id = $1
+                SELECT tag, weight
+                FROM user_preference_tags
+                WHERE user_id = $1
             """, user_id)
             
             return {
@@ -301,12 +300,51 @@ class RecommendationEngine:
         
         return final_scores.tolist()
 
-    async def get_popular_places(self, region: str = None, category: str = None, limit: int = 20, exclude_places: List[tuple] = None) -> List[Dict]:
-        """인기 장소 가져오기 (로그인 전 추천)"""
+    async def get_fallback_places(self, limit: int = 20) -> List[Dict]:
+        """개인화 추천 실패시 실제 DB 데이터에서 간단한 장소 반환"""
         conn = await asyncpg.connect(self.db_url)
         
         try:
-            # 행동 로그 기반 인기도 계산
+            # place_recommendations 테이블에서 간단히 데이터 가져오기
+            query = """
+                SELECT place_id, table_name, name, region, city, latitude, longitude, 
+                       description, image_urls
+                FROM place_recommendations 
+                ORDER BY RANDOM() 
+                LIMIT $1
+            """
+            
+            places = await conn.fetch(query, limit)
+            
+            results = []
+            for place in places:
+                results.append({
+                    'place_id': place['place_id'],
+                    'table_name': place['table_name'],
+                    'name': place['name'] or '이름 없음',
+                    'region': place['region'] or '지역 미상',
+                    'city': place['city'],
+                    'latitude': float(place['latitude']) if place['latitude'] else 0.0,
+                    'longitude': float(place['longitude']) if place['longitude'] else 0.0,
+                    'description': place['description'] or '설명 없음',
+                    'image_urls': place['image_urls'],
+                    'similarity_score': 0.7  # 기본 점수
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in fallback places: {str(e)}")
+            return []
+        finally:
+            await conn.close()
+
+    async def get_popular_places(self, region: str = None, category: str = None, limit: int = 20, exclude_places: List[tuple] = None) -> List[Dict]:
+        """인기 장소 가져오기 (로그인 전 추천) - 통합 테이블 사용"""
+        conn = await asyncpg.connect(self.db_url)
+        
+        try:
+            # 행동 로그 기반 인기도 계산 (통합 테이블 사용)
             query = """
                 WITH place_popularity AS (
                     SELECT 
@@ -317,16 +355,13 @@ class RecommendationEngine:
                     FROM user_action_logs ual
                     JOIN action_weights aw ON ual.action_type = aw.action_type
                     GROUP BY ual.place_category, ual.place_id
-                ),
-                enriched_places AS (
-                    SELECT 
-                        pf.*,
-                        COALESCE(pp.popularity_score, 0) as popularity_score,
-                        COALESCE(pp.action_count, 0) as action_count
-                    FROM place_features pf
-                    LEFT JOIN place_popularity pp ON pf.table_name = pp.table_name AND pf.place_id = pp.place_id
                 )
-                SELECT * FROM enriched_places
+                SELECT 
+                    pr.*,
+                    COALESCE(pp.popularity_score, 0) as popularity_score,
+                    COALESCE(pp.action_count, 0) as action_count
+                FROM place_recommendations pr
+                LEFT JOIN place_popularity pp ON pr.table_name = pp.table_name AND pr.place_id = pp.place_id
             """
             
             conditions = []
@@ -335,12 +370,12 @@ class RecommendationEngine:
             
             if region:
                 param_count += 1
-                conditions.append(f"region = ${param_count}")
+                conditions.append(f"pr.region = ${param_count}")
                 params.append(region)
             
             if category:
                 param_count += 1
-                conditions.append(f"table_name = ${param_count}")
+                conditions.append(f"pr.table_name = ${param_count}")
                 params.append(category)
             
             # 제외할 장소 조건 추가
@@ -348,7 +383,7 @@ class RecommendationEngine:
                 exclude_conditions = []
                 for place_id, table_name in exclude_places:
                     param_count += 2
-                    exclude_conditions.append(f"NOT (place_id = ${param_count - 1} AND table_name = ${param_count})")
+                    exclude_conditions.append(f"NOT (pr.place_id = ${param_count - 1} AND pr.table_name = ${param_count})")
                     params.extend([place_id, table_name])
                 conditions.extend(exclude_conditions)
             
@@ -371,7 +406,7 @@ class RecommendationEngine:
         category: str = None, 
         limit: int = 20
     ) -> List[Dict]:
-        """개인화 추천 (로그인 후)"""
+        """개인화 추천 (로그인 후) - 통합 테이블 사용"""
         conn = await asyncpg.connect(self.db_url)
         
         try:
@@ -382,8 +417,8 @@ class RecommendationEngine:
             # 사용자 선호도 벡터 생성
             user_vector = await self._create_user_vector(preferences, actions)
             
-            # 장소 데이터 가져오기
-            query = "SELECT * FROM place_features"
+            # 통합 테이블에서 장소 데이터 가져오기 (JOIN 없음)
+            query = "SELECT * FROM place_recommendations"
             conditions = []
             params = []
             param_count = 0
@@ -400,6 +435,9 @@ class RecommendationEngine:
             
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
+            
+            # 성능을 위해 전체가 아닌 샘플링 (큰 데이터셋인 경우)
+            query += " ORDER BY RANDOM() LIMIT 5000"
             
             places = await conn.fetch(query, *params)
             
