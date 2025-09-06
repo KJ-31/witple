@@ -768,14 +768,31 @@ export default function MapPage() {
 
   // 기존 경로 제거
   const clearRoute = () => {
-    directionsRenderers.forEach(renderer => renderer.setMap(null));
+    // 모든 기존 경로 렌더러 제거
+    directionsRenderers.forEach(renderer => {
+      if (renderer) {
+        renderer.setMap(null);
+        renderer.setDirections(null);
+      }
+    });
     setDirectionsRenderers([]);
-    sequenceMarkers.forEach(marker => marker.setMap(null));
+    
+    // 모든 기존 마커 제거
+    sequenceMarkers.forEach(marker => {
+      if (marker) {
+        marker.setMap(null);
+      }
+    });
     setSequenceMarkers([]);
+    
+    // 상태 메시지 제거
+    setRouteStatus(null);
+    
+    console.log('모든 경로와 마커가 제거되었습니다');
   };
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
-  const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[]) => {
+  const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
     
     const newSequenceMarkers = [];
@@ -791,7 +808,7 @@ export default function MapPage() {
         
         const markerColor = i === 0 ? '#4CAF50' : 
                            i === allPoints.length - 1 ? '#F44336' : 
-                           '#2196F3';
+                           isOptimized ? '#FF9800' : '#2196F3'; // 최적화된 경로는 주황색
         
         const marker = new (window as any).google.maps.Marker({
           position: coords,
@@ -822,6 +839,7 @@ export default function MapPage() {
                   i === allPoints.length - 1 ? '최종 목적지입니다' : 
                   `${i === 1 ? '첫 번째' : i === 2 ? '두 번째' : i === 3 ? '세 번째' : `${i}번째`} 방문할 장소입니다`}
               </p>
+              ${isOptimized && i > 0 && i < allPoints.length - 1 ? '<p style="margin: 5px 0 0 0; font-size: 10px; color: #FF9800; font-weight: bold;">🔄 최적화된 순서</p>' : ''}
             </div>
           `
         });
@@ -839,8 +857,63 @@ export default function MapPage() {
     setSequenceMarkers(newSequenceMarkers);
   };
 
-  // 최적화된 경로 렌더링
-  const renderOptimizedRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+  // 기본 동선 렌더링 (순서대로)
+  const renderBasicRoute = async (dayNumber: number) => {
+    const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
+    
+    if (dayPlaces.length < 2) {
+      updateStatus(`${dayNumber}일차에 경로를 계획할 장소가 충분하지 않습니다 (최소 2개 필요)`, 'error');
+      return;
+    }
+
+    try {
+      // 먼저 모든 기존 경로와 마커 완전히 제거
+      clearRoute();
+      // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      updateStatus(`${dayNumber}일차 기본 동선 표시 중...`, 'loading');
+
+      // 순서대로 경로 구간 생성
+      const segments = [];
+      for (let i = 0; i < dayPlaces.length - 1; i++) {
+        const current = dayPlaces[i];
+        const next = dayPlaces[i + 1];
+        
+        if (!current.latitude || !current.longitude || !next.latitude || !next.longitude) {
+          continue;
+        }
+        
+        segments.push({
+          origin: { 
+            lat: current.latitude, 
+            lng: current.longitude, 
+            name: current.name 
+          },
+          destination: { 
+            lat: next.latitude, 
+            lng: next.longitude, 
+            name: next.name 
+          }
+        });
+      }
+
+      if (segments.length === 0) {
+        updateStatus('좌표 정보가 없어서 경로를 표시할 수 없습니다', 'error');
+        return;
+      }
+
+      console.log(`${dayNumber}일차 기본 동선:`, segments);
+      await renderRoute(segments, false); // 기본 동선
+
+    } catch (error) {
+      console.error(`${dayNumber}일차 Basic route error:`, error);
+      updateStatus(`${dayNumber}일차 기본 동선 표시 중 오류가 발생했습니다.`, 'error');
+    }
+  };
+
+  // 경로 렌더링 (기본 동선 또는 최적화 경로)
+  const renderRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     if (!(window as any).google?.maps?.DirectionsService) {
       console.error('Google Maps DirectionsService not available');
       return;
@@ -899,7 +972,7 @@ export default function MapPage() {
       const renderer = new (window as any).google.maps.DirectionsRenderer({
         draggable: false,
         polylineOptions: {
-          strokeColor: '#34A853', // 대중교통용 초록색
+          strokeColor: isOptimized ? '#FF9800' : '#34A853', // 최적화는 주황색, 기본은 초록색
           strokeWeight: 6,
           strokeOpacity: 0.8
         },
@@ -915,12 +988,12 @@ export default function MapPage() {
     }
 
     setDirectionsRenderers(newRenderers);
-    await createSequenceMarkers(segments);
+    await createSequenceMarkers(segments, isOptimized);
 
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
     
-    const routeTypeText = isOptimized ? '최적화된 경로!' : '경로 계획 완료!';
+    const routeTypeText = isOptimized ? '최적화된 경로!' : '기본 동선 표시 완료!';
     updateStatus(
       `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
       'success'
@@ -937,8 +1010,12 @@ export default function MapPage() {
     }
 
     try {
-      updateStatus(`${dayNumber}일차 경로 최적화 중...`, 'loading');
+      // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
+      // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      updateStatus(`${dayNumber}일차 경로 최적화 중...`, 'loading');
 
       // 첫 번째 장소를 출발지로, 나머지를 목적지로 설정
       const [firstPlace, ...restPlaces] = dayPlaces;
@@ -999,7 +1076,7 @@ export default function MapPage() {
       }
 
       console.log(`${dayNumber}일차 최적화된 경로 구간:`, segments);
-      await renderOptimizedRoute(segments, true);
+      await renderRoute(segments, true);
 
     } catch (error) {
       console.error(`${dayNumber}일차 Route optimization error:`, error);
@@ -1232,41 +1309,63 @@ export default function MapPage() {
                     highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
                   }`}>
                     <div 
-                      className="flex items-center mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
+                      className="flex items-center justify-between mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
                       onClick={() => {
                         setHighlightedDay(highlightedDay === day ? null : day);
-                        // 2개 이상의 장소가 있으면 경로 최적화 실행
-                        if (groupedPlaces[day].length >= 2) {
-                          optimizeRouteForDay(day);
-                        }
                       }}
                     >
-                      <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
-                        highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
-                      }`}>
-                        <span className="text-white text-sm font-bold">{day}</span>
+                      <div className="flex items-center">
+                        <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
+                          highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
+                        }`}>
+                          <span className="text-white text-sm font-bold">{day}</span>
+                        </div>
+                        <h3 className={`text-lg font-semibold transition-colors duration-200 ${
+                          highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
+                        }`}>
+                          {day}일차
+                          {startDateParam && (
+                            <span className="text-sm text-[#94A9C9] ml-2">
+                              ({new Date(new Date(startDateParam).getTime() + (day - 1) * 24 * 60 * 60 * 1000).toLocaleDateString('ko-KR', { 
+                                month: 'short', 
+                                day: 'numeric' 
+                              })})
+                            </span>
+                          )}
+                        </h3>
                       </div>
-                      <h3 className={`text-lg font-semibold transition-colors duration-200 ${
-                        highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
-                      }`}>
-                        {day}일차
-                        {startDateParam && (
-                          <span className="text-sm text-[#94A9C9] ml-2">
-                            ({new Date(new Date(startDateParam).getTime() + (day - 1) * 24 * 60 * 60 * 1000).toLocaleDateString('ko-KR', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            })})
-                          </span>
-                        )}
-                      </h3>
                       
-                      {/* 경로 표시 아이콘 (2개 이상일 때) */}
+                      {/* 경로 버튼들 (2개 이상일 때만 표시) */}
                       {groupedPlaces[day].length >= 2 && (
-                        <div className="ml-3 text-[#6FA0E6] flex items-center space-x-1">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                          </svg>
-                          <span className="text-xs">경로 보기</span>
+                        <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedDay(day);
+                              renderBasicRoute(day);
+                            }}
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#34A853]/10 hover:bg-[#34A853]/20 border border-[#34A853]/30 hover:border-[#34A853]/50 rounded-lg transition-all duration-200 group"
+                            title="순서대로 기본 동선 보기"
+                          >
+                            <svg className="w-3 h-3 text-[#34A853] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            </svg>
+                            <span className="text-[#34A853] group-hover:text-[#4CAF50] text-xs font-medium transition-colors">기본 동선</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedDay(day);
+                              optimizeRouteForDay(day);
+                            }}
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group"
+                            title="최적화된 경로 보기"
+                          >
+                            <svg className="w-3 h-3 text-[#FF9800] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span className="text-[#FF9800] group-hover:text-[#FFA726] text-xs font-medium transition-colors">최적화 경로</span>
+                          </button>
                         </div>
                       )}
                     </div>
