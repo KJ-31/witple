@@ -381,10 +381,8 @@ export default function MapPage() {
       const result = [...otherDayPlaces, ...sameDayPlaces];
       console.log('최종 결과:', result.map(p => `${p.name}(day:${p.dayNumber})`));
       
-      // URL 파라미터 업데이트
-      setTimeout(() => {
-        updateUrlParameters(result);
-      }, 0);
+      // 드래그로 순서 변경시에는 URL 업데이트하지 않음
+      // (기존 선택된 장소들 유지)
       
       return result;
     });
