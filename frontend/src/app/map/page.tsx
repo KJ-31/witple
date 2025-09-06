@@ -91,6 +91,8 @@ export default function MapPage() {
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [mapInstance, setMapInstance] = useState<any>(null)
+  const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
 
   // 화면 높이 측정
@@ -307,7 +309,91 @@ export default function MapPage() {
     router.replace(`/map?${queryParams.toString()}`);
   };
 
-  // 위아래 순서 변경 함수
+  // 드래그 앤 드롭 핸들러들
+  const handleDragStart = (e: React.DragEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    console.log('드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+    setDraggedItem({ placeId: place.id, dayNumber, index });
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', place.id);
+    // 드래그 시작 시 약간 투명하게
+    (e.target as HTMLElement).style.opacity = '0.5';
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number, dayNumber: number) => {
+    e.preventDefault();
+    
+    // 같은 날짜 내에서만 드래그 오버 허용
+    if (draggedItem && draggedItem.dayNumber === dayNumber) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverIndex(index);
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+      setDragOverIndex(null);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number, targetDayNumber: number) => {
+    e.preventDefault();
+    console.log('드롭 이벤트:', targetIndex, targetDayNumber, draggedItem);
+    
+    if (!draggedItem) {
+      console.log('draggedItem이 없음');
+      return;
+    }
+    
+    // 같은 날짜 내에서만 재배열 허용
+    if (draggedItem.dayNumber !== targetDayNumber) {
+      console.log('다른 날짜로 이동 시도, 무시');
+      return;
+    }
+    
+    if (draggedItem.index === targetIndex) {
+      console.log('같은 위치로 이동, 무시');
+      return;
+    }
+
+    console.log('순서 변경 실행:', draggedItem.index, '->', targetIndex);
+
+    // 드래그한 장소를 새 위치로 이동
+    setSelectedItineraryPlaces(prev => {
+      const sameDayPlaces = prev.filter(p => p.dayNumber === targetDayNumber);
+      const otherDayPlaces = prev.filter(p => p.dayNumber !== targetDayNumber);
+      
+      console.log('같은 날짜 장소들:', sameDayPlaces.length);
+      
+      // 드래그한 아이템 제거
+      const [movedItem] = sameDayPlaces.splice(draggedItem.index, 1);
+      console.log('이동할 아이템:', movedItem?.name);
+      
+      // 새 위치에 삽입
+      sameDayPlaces.splice(targetIndex, 0, movedItem);
+      
+      const result = [...otherDayPlaces, ...sameDayPlaces];
+      console.log('최종 결과:', result.map(p => `${p.name}(day:${p.dayNumber})`));
+      
+      // URL 파라미터 업데이트
+      setTimeout(() => {
+        updateUrlParameters(result);
+      }, 0);
+      
+      return result;
+    });
+
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+
+  // 위아래 순서 변경 함수 (드래그로 대체되지만 일단 유지)
   const movePlace = (placeId: string, direction: 'up' | 'down') => {
     setSelectedItineraryPlaces(prev => {
       const currentPlace = prev.find(p => p.id === placeId)
@@ -1049,65 +1135,62 @@ export default function MapPage() {
                       {groupedPlaces[day].map((place, index) => (
                         <div
                           key={`${place.id}-${day}-${index}`}
-                          className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
+                          onDragOver={(e) => handleDragOver(e, index, day)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleDrop(e, index, day)}
+                          className={`bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors ${
+                            dragOverIndex === index && draggedItem && draggedItem.dayNumber === day ? 'border-[#3E68FF] bg-[#3E68FF]/10' : ''
+                          }`}
                         >
                           <div className="flex items-start justify-between">
-                            <div className="flex-1 cursor-pointer" onClick={() => router.push(`/attraction/${place.id}`)}>
+                            <div 
+                              className="flex-1 cursor-pointer" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                router.push(`/attraction/${place.id}`);
+                              }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
                               <div className="flex items-center space-x-2 mb-2">
                                 <h4 className="font-semibold text-white">{place.name}</h4>
                                 <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
                                   {getCategoryName(place.category)}
                                 </span>
                               </div>
-                              <p className="text-[#94A9C9] text-sm mb-2">📍 {place.cityName || place.city?.name}</p>
-                              <p className="text-[#94A9C9] text-sm mb-2 line-clamp-2">{place.description}</p>
-                              <div className="flex items-center">
-                                <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                                <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
-                              </div>
                             </div>
                             
                             {/* 액션 버튼들 */}
-                            <div className="flex gap-2 ml-3">
-                              {/* 순서 이동 버튼들 */}
-                              <div className="flex flex-col gap-1">
-                                {/* 위로 이동 버튼 - 첫 번째 장소가 아닐 때만 표시 */}
-                                {index > 0 ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlace(place.id, 'up');
-                                    }}
-                                    className="p-1.5 bg-[#1F3C7A]/30 text-[#6FA0E6] hover:text-white hover:bg-[#3E68FF]/50 rounded-lg transition-colors"
-                                    title="위로 이동"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                    </svg>
-                                  </button>
-                                ) : (
-                                  <div className="p-1.5 w-[32px] h-[32px]"></div>
-                                )}
-                                
-                                {/* 아래로 이동 버튼 - 마지막 장소가 아닐 때만 표시 */}
-                                {index < groupedPlaces[day].length - 1 ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlace(place.id, 'down');
-                                    }}
-                                    className="p-1.5 bg-[#1F3C7A]/30 text-[#6FA0E6] hover:text-white hover:bg-[#3E68FF]/50 rounded-lg transition-colors"
-                                    title="아래로 이동"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                  </button>
-                                ) : (
-                                  <div className="p-1.5 w-[32px] h-[32px]"></div>
-                                )}
+                            <div className="flex items-center gap-2 ml-3">
+                              {/* 드래그 핸들 */}
+                              <div 
+                                className="p-3 text-[#6FA0E6] hover:text-white cursor-grab active:cursor-grabbing transition-colors select-none" 
+                                title="드래그해서 순서 변경"
+                                draggable="true"
+                                onDragStart={(e) => {
+                                  console.log('드래그 시작!');
+                                  e.stopPropagation();
+                                  handleDragStart(e, place, day, index);
+                                }}
+                                onDragEnd={(e) => {
+                                  console.log('드래그 종료!');
+                                  e.stopPropagation();
+                                  handleDragEnd(e);
+                                }}
+                                onMouseDown={(e) => {
+                                  console.log('마우스 다운!');
+                                  e.stopPropagation();
+                                }}
+                                style={{ 
+                                  touchAction: 'manipulation',
+                                  userSelect: 'none',
+                                  WebkitUserSelect: 'none',
+                                  WebkitTouchCallout: 'none'
+                                }}
+                              >
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                                </svg>
                               </div>
                               
                               <button
