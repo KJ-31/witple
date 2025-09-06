@@ -17,10 +17,30 @@ class UserResponse(BaseModel):
     user_id: str
     email: str
     name: Optional[str] = None
+    age: Optional[int] = None
+    nationality: Optional[str] = None
+    profile_image: Optional[str] = None
     created_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
+
+
+class ProfileImageUpdate(BaseModel):
+    image_data: str  # Base64 encoded image data
+
+
+class ProfileInfoUpdate(BaseModel):
+    name: Optional[str] = None
+    age: Optional[int] = None
+    nationality: Optional[str] = None
+
+
+class ProfilePreferencesUpdate(BaseModel):
+    persona: Optional[PersonaType] = None
+    priority: Optional[PriorityType] = None
+    accommodation: Optional[AccommodationType] = None
+    exploration: Optional[ExplorationType] = None
 
 
 class Token(BaseModel):
