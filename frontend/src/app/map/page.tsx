@@ -1131,15 +1131,23 @@ export default function MapPage() {
                     
                     <div className="space-y-3 ml-5">
                       {groupedPlaces[day].map((place, index) => (
-                        <div
-                          key={`${place.id}-${day}-${index}`}
-                          onDragOver={(e) => handleDragOver(e, index, day)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, index, day)}
-                          className={`bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors ${
-                            dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem ? 'border-[#3E68FF] bg-[#3E68FF]/10' : ''
-                          }`}
-                        >
+                        <div key={`place-container-${place.id}-${day}-${index}`}>
+                          {/* 드롭 존 - 위쪽 */}
+                          <div
+                            onDragOver={(e) => handleDragOver(e, index, day)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, index, day)}
+                            className={`h-2 w-full transition-all duration-200 ${
+                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
+                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
+                                : ''
+                            }`}
+                          />
+                          
+                          {/* 장소 카드 */}
+                          <div
+                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
+                          >
                           <div className="flex items-start justify-between">
                             <div 
                               className="flex-1 cursor-pointer" 
@@ -1204,9 +1212,22 @@ export default function MapPage() {
                                 </svg>
                               </button>
                             </div>
+                            </div>
                           </div>
                         </div>
                       ))}
+                      
+                      {/* 마지막 드롭 존 */}
+                      <div
+                        onDragOver={(e) => handleDragOver(e, groupedPlaces[day].length, day)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, groupedPlaces[day].length, day)}
+                        className={`h-2 w-full transition-all duration-200 ${
+                          dragOverIndex?.day === day && dragOverIndex?.index === groupedPlaces[day].length && draggedItem 
+                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
+                            : ''
+                        }`}
+                      />
                     </div>
                   </div>
                 ));
