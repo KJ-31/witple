@@ -1531,10 +1531,10 @@ export default function MapPage() {
                               WebkitTouchCallout: 'none'
                             } as React.CSSProperties}
                           >
-                            {/* Long press 힌트 */}
-                            <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-60 transition-opacity duration-200 pointer-events-none">
-                              <div className="bg-[#3E68FF]/80 text-white text-xs px-2 py-1 rounded-full whitespace-nowrap">
-                                길게 눌러서 이동
+                            {/* Long press 말풍선 힌트 */}
+                            <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
+                              <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
+                                꾹 눌러 이동
                               </div>
                             </div>
                             
