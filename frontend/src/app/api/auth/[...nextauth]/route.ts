@@ -88,9 +88,26 @@ const authOptions: NextAuthOptions = {
           if (response.ok) {
             const data = await response.json()
             console.log('Backend response:', data)
-            // 백엔드에서 받은 토큰을 user 객체에 추가
-            ;(user as any).backendToken = data.access_token
-            return true
+            
+            // 백엔드에서 사용자 정보 가져오기
+            const userResponse = await fetch(`${apiUrl}/api/v1/auth/me`, {
+              headers: {
+                'Authorization': `Bearer ${data.access_token}`,
+              },
+            })
+            
+            if (userResponse.ok) {
+              const userData = await userResponse.json()
+              // 백엔드에서 받은 정보를 user 객체에 추가
+              ;(user as any).id = userData.user_id
+              ;(user as any).backendToken = data.access_token
+              console.log('User updated with backend data:', { id: userData.user_id, email: userData.email })
+              return true
+            } else {
+              console.error('Failed to get user data from backend')
+              return false
+            }
+          
           } else {
             console.error('Backend error:', await response.text())
             return false
@@ -103,16 +120,22 @@ const authOptions: NextAuthOptions = {
       return true
     },
     async jwt({ token, user }) {
-      // 로그인 시 토큰에 백엔드 토큰 추가
+      // 로그인 시 토큰에 백엔드 토큰과 사용자 정보 추가
       if ((user as any)?.backendToken) {
         ;(token as any).backendToken = (user as any).backendToken
+        ;(token as any).userId = user.id
       }
       return token
     },
     async session({ session, token }) {
-      // 세션에 백엔드 토큰 추가
+      // 세션에 백엔드 토큰과 사용자 ID 추가
       if ((token as any).backendToken) {
         ;(session as any).backendToken = (token as any).backendToken
+      }
+      if ((token as any).userId) {
+        if (session.user) {
+          ;(session.user as any).id = (token as any).userId
+        }
       }
       return session
     }

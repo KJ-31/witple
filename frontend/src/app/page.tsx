@@ -3,10 +3,12 @@
 import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { fetchRecommendedCities, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [loading, setLoading] = useState(false)
@@ -454,9 +456,8 @@ export default function Home() {
 
           <button
             onClick={() => {
-              // 임시로 로그인 상태를 확인 (실제 구현에서는 인증 상태를 확인)
-              const isLoggedIn = false // 여기서 실제 로그인 상태 확인
-              if (isLoggedIn) {
+              // NextAuth 세션 상태를 확인하여 로그인 여부 판단
+              if (status === 'authenticated' && session) {
                 router.push('/profile')
               } else {
                 router.push('/auth/login')
