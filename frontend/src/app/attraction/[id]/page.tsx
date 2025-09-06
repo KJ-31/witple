@@ -57,7 +57,17 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
         // 새로운 ID 형식 처리: table_name_id 형식인 경우
-        let apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`
+        let apiUrl: string
+        if (params.id.includes('_')) {
+          // table_name_id 형식인 경우 (예: leisure_sports_577)
+          const lastUnderscoreIndex = params.id.lastIndexOf('_')
+          const tableName = params.id.substring(0, lastUnderscoreIndex)
+          const attractionId = params.id.substring(lastUnderscoreIndex + 1)
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
+        } else {
+          // 기존 형식인 경우
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`
+        }
         
         const response = await fetch(apiUrl)
         
