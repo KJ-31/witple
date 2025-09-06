@@ -212,8 +212,15 @@ export default function MapPage() {
           try {
             let apiUrl
             if (sourceTables[i] && sourceTables[i] !== 'unknown') {
-              // 새로운 API 사용: /attractions/{table}/{id}
-              apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${sourceTables[i]}/${placeIds[i]}`
+              // ID에서 숫자 부분만 추출 (예: leisure_sports_577 -> 577)
+              const numericId = placeIds[i].split('_').pop()
+              if (numericId && !isNaN(Number(numericId))) {
+                // 새로운 API 사용: /attractions/{table}/{id}
+                apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${sourceTables[i]}/${numericId}`
+              } else {
+                // 숫자 부분을 추출할 수 없으면 기존 API 사용
+                apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`
+              }
             } else {
               // 기존 API 사용: /attractions/{id}
               apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`
