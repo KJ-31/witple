@@ -964,9 +964,24 @@ export default function MapPage() {
     return '#3E68FF';
   };
 
-  // 서울 버스 색상 매핑  
+  // 버스 색상 매핑 (서울, 경기, 인천 등 포함)
   const getBusColor = (lineName: string) => {
-    // 버스 번호 추출
+    // 경기도 버스
+    if (lineName.includes('경기')) {
+      if (lineName.includes('일반')) {
+        return '#4caf50'; // 초록색 - 경기 일반버스
+      } else if (lineName.includes('좌석') || lineName.includes('직행')) {
+        return '#f44336'; // 빨간색 - 경기 좌석/직행버스
+      }
+      return '#4caf50'; // 기본 경기버스는 초록색
+    }
+    
+    // 인천 버스
+    if (lineName.includes('인천')) {
+      return '#ffa726'; // 주황색 - 인천버스
+    }
+    
+    // 서울 버스 (기존 로직)
     const busNumber = lineName.replace(/[^0-9]/g, '');
     const firstDigit = parseInt(busNumber.charAt(0));
     
@@ -985,18 +1000,60 @@ export default function MapPage() {
   };
 
   // 교통수단 이름 정리 (버스 번호만 추출)
-  const getCleanTransitName = (lineName: string) => {
-    // 버스인 경우 번호만 추출
-    if (lineName.includes('버스')) {
+  const getCleanTransitName = (transitDetails: any) => {
+    // step.transitDetails 객체에서 정보 추출
+    const lineName = transitDetails.line || '';
+    const shortName = transitDetails.short_name || '';
+    const vehicleName = transitDetails.vehicle || '';
+    const vehicleType = transitDetails.vehicle_type || '';
+    
+    console.log('Cleaning transit name:', { lineName, shortName, vehicleName, vehicleType });
+    
+    // short_name이 있고 숫자로만 이루어져 있으면 버스 번호일 가능성이 높음
+    if (shortName && /^\d+$/.test(shortName)) {
+      return shortName + '번';
+    }
+    
+    // line name에서 버스 번호 추출 시도
+    if (lineName && (lineName.includes('버스') || lineName.includes('Bus') || vehicleType === 'BUS')) {
+      // 숫자만 추출해서 버스 번호로 표시
       const busNumber = lineName.match(/\d+/);
-      return busNumber ? busNumber[0] + '번' : lineName;
+      if (busNumber) {
+        return busNumber[0] + '번';
+      }
+      
+      // short_name에서 번호 찾기
+      if (shortName) {
+        const shortBusNumber = shortName.match(/\d+/);
+        if (shortBusNumber) {
+          return shortBusNumber[0] + '번';
+        }
+      }
+      
+      // 숫자가 없는 경우 지역명과 버스 타입 제거
+      let cleanName = lineName
+        .replace(/서울\s*/, '')
+        .replace(/경기\s*/, '')
+        .replace(/인천\s*/, '')
+        .replace(/간선\s*/, '')
+        .replace(/지선\s*/, '')
+        .replace(/일반\s*/, '')
+        .replace(/광역\s*/, '')
+        .replace(/마을\s*/, '')
+        .replace(/순환\s*/, '')
+        .replace(/버스/, '')
+        .trim();
+      
+      return cleanName || '버스';
     }
+    
     // 지하철인 경우 호선 정보 추출
-    if (lineName.includes('지하철') || lineName.includes('호선')) {
+    if (lineName && (lineName.includes('지하철') || lineName.includes('호선') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL')) {
       const lineMatch = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
-      return lineMatch ? lineMatch[1] : lineName;
+      return lineMatch ? lineMatch[1] : (shortName || lineName);
     }
-    return lineName;
+    
+    return shortName || lineName || '알 수 없음';
   };
 
 
@@ -1174,20 +1231,35 @@ export default function MapPage() {
           destination: segment.destination,
           distance: leg.distance?.text || '알 수 없음',
           duration: leg.duration?.text || '알 수 없음',
-          transitDetails: leg.steps?.map((step: any) => ({
-            instruction: step.instructions?.replace(/<[^>]*>/g, ''), // HTML 태그 제거
-            mode: step.travel_mode,
-            distance: step.distance?.text,
-            duration: step.duration?.text,
-            transitDetails: step.transit ? {
-              line: step.transit.line?.name,
-              vehicle: step.transit.line?.vehicle?.name,
-              departure_stop: step.transit.departure_stop?.name,
-              arrival_stop: step.transit.arrival_stop?.name,
-              departure_time: step.transit.departure_time?.text,
-              arrival_time: step.transit.arrival_time?.text
-            } : null
-          }))
+          transitDetails: leg.steps?.map((step: any) => {
+            // 교통수단 정보 디버깅을 위한 로그
+            if (step.transit) {
+              console.log('Transit step data:', {
+                line_name: step.transit.line?.name,
+                line_short_name: step.transit.line?.short_name,
+                vehicle_name: step.transit.line?.vehicle?.name,
+                vehicle_type: step.transit.line?.vehicle?.type,
+                full_step: step.transit
+              });
+            }
+            
+            return {
+              instruction: step.instructions?.replace(/<[^>]*>/g, ''), // HTML 태그 제거
+              mode: step.travel_mode,
+              distance: step.distance?.text,
+              duration: step.duration?.text,
+              transitDetails: step.transit ? {
+                line: step.transit.line?.name,
+                short_name: step.transit.line?.short_name, // 짧은 이름 추가
+                vehicle: step.transit.line?.vehicle?.name,
+                vehicle_type: step.transit.line?.vehicle?.type, // 차량 타입 추가
+                departure_stop: step.transit.departure_stop?.name,
+                arrival_stop: step.transit.arrival_stop?.name,
+                departure_time: step.transit.departure_time?.text,
+                arrival_time: step.transit.arrival_time?.text
+              } : null
+            };
+          })
         });
       }
     } catch (err) {
@@ -1820,9 +1892,10 @@ export default function MapPage() {
                                               // 대중교통 구간
                                               (() => {
                                                 const originalLine = step.transitDetails.line || step.transitDetails.vehicle || '';
-                                                const cleanName = getCleanTransitName(originalLine);
-                                                const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림');
-                                                const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine);
+                                                const cleanName = getCleanTransitName(step.transitDetails);
+                                                const vehicleType = step.transitDetails.vehicle_type || '';
+                                                const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL';
+                                                const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine) || vehicleType === 'BUS';
                                                 
                                                 let bgColor = '#3E68FF';
                                                 if (isSubway) {
