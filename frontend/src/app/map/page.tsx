@@ -94,6 +94,34 @@ export default function MapPage() {
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
+  
+  // 터치 드래그 상태
+  const [touchDragData, setTouchDragData] = useState<{
+    isDragging: boolean,
+    startY: number,
+    currentY: number,
+    dragElement: HTMLElement | null,
+    clone: HTMLElement | null
+  } | null>(null)
+  
+  // 드래그 중일 때 body 스크롤 비활성화
+  useEffect(() => {
+    if (touchDragData?.isDragging) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+    
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [touchDragData?.isDragging]);
 
   // 화면 높이 측정
   useEffect(() => {
@@ -319,6 +347,112 @@ export default function MapPage() {
     // 드래그 시작 시 약간 투명하게
     (e.target as HTMLElement).style.opacity = '0.5';
   };
+
+  // 터치 이벤트 핸들러
+  const handleDragTouchStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    console.log('터치 드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+    
+    const touch = e.touches[0];
+    const element = e.currentTarget as HTMLElement;
+    // 전체 카드 요소를 찾기 (드래그 핸들의 부모 카드)
+    const cardElement = element.closest('[data-place-card]') as HTMLElement;
+    if (!cardElement) return;
+    
+    const rect = cardElement.getBoundingClientRect();
+    
+    // 카드 전체의 복사본 생성
+    const clone = cardElement.cloneNode(true) as HTMLElement;
+    clone.style.position = 'fixed';
+    clone.style.zIndex = '9999';
+    clone.style.opacity = '0.8';
+    clone.style.width = rect.width + 'px';
+    clone.style.height = rect.height + 'px';
+    clone.style.left = rect.left + 'px';
+    clone.style.top = rect.top + 'px';
+    clone.style.pointerEvents = 'none';
+    clone.style.transform = 'rotate(2deg)';
+    clone.style.boxShadow = '0 10px 25px rgba(0,0,0,0.4)';
+    document.body.appendChild(clone);
+    
+    setDraggedItem({ placeId: place.id, dayNumber, index });
+    setTouchDragData({
+      isDragging: true,
+      startY: touch.clientY,
+      currentY: touch.clientY,
+      dragElement: cardElement,
+      clone
+    });
+    
+    // 원본 요소 스타일 변경
+    cardElement.style.opacity = '0.3';
+  };
+  
+  const handleDragTouchMove = (e: React.TouchEvent) => {
+    if (!touchDragData?.isDragging || !touchDragData.clone) return;
+    
+    const touch = e.touches[0];
+    
+    // 복사본 위치 업데이트
+    const deltaY = touch.clientY - touchDragData.startY;
+    const originalRect = touchDragData.dragElement!.getBoundingClientRect();
+    touchDragData.clone.style.left = originalRect.left + 'px';
+    touchDragData.clone.style.top = (originalRect.top + deltaY) + 'px';
+    
+    setTouchDragData(prev => prev ? {
+      ...prev,
+      currentY: touch.clientY
+    } : null);
+    
+    // 드롭 존 감지
+    const dropZones = document.querySelectorAll('[data-drop-zone]');
+    let targetFound = false;
+    
+    dropZones.forEach(zone => {
+      const zoneRect = zone.getBoundingClientRect();
+      if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
+        const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
+        const index = parseInt(zone.getAttribute('data-index') || '0');
+        setDragOverIndex({ day: dayNumber, index });
+        targetFound = true;
+      }
+    });
+    
+    if (!targetFound) {
+      setDragOverIndex(null);
+    }
+  };
+  
+  const handleDragTouchEnd = (e: React.TouchEvent) => {
+    if (!touchDragData?.isDragging) return;
+    
+    // 복사본 제거
+    if (touchDragData.clone) {
+      document.body.removeChild(touchDragData.clone);
+    }
+    
+    // 원본 요소 스타일 복원
+    if (touchDragData.dragElement) {
+      touchDragData.dragElement.style.opacity = '1';
+    }
+    
+    // 드롭 처리
+    if (dragOverIndex && draggedItem) {
+      console.log('터치 드롭:', dragOverIndex, draggedItem);
+      // 가짜 이벤트 객체 생성
+      const fakeEvent = {
+        preventDefault: () => {},
+        dataTransfer: { dropEffect: 'move' }
+      } as React.DragEvent;
+      handleDrop(fakeEvent, dragOverIndex.index, dragOverIndex.day);
+    }
+    
+    // 상태 초기화
+    setTouchDragData(null);
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+  
+  
 
   const handleDragEnd = (e: React.DragEvent) => {
     (e.target as HTMLElement).style.opacity = '1';
@@ -1135,6 +1269,9 @@ export default function MapPage() {
                         <div key={`place-container-${place.id}-${day}-${index}`}>
                           {/* 드롭 존 - 위쪽 */}
                           <div
+                            data-drop-zone="true"
+                            data-day={day}
+                            data-index={index}
                             onDragOver={(e) => handleDragOver(e, index, day)}
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, day)}
@@ -1147,6 +1284,7 @@ export default function MapPage() {
                           
                           {/* 장소 카드 */}
                           <div
+                            data-place-card="true"
                             className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
                           >
                           <div className="flex items-start justify-between">
@@ -1188,12 +1326,25 @@ export default function MapPage() {
                                   console.log('마우스 다운!');
                                   e.stopPropagation();
                                 }}
+                                onTouchStart={(e) => {
+                                  console.log('터치 시작!');
+                                  e.stopPropagation();
+                                  handleDragTouchStart(e, place, day, index);
+                                }}
+                                onTouchMove={(e) => {
+                                  handleDragTouchMove(e);
+                                }}
+                                onTouchEnd={(e) => {
+                                  console.log('터치 종료!');
+                                  e.stopPropagation();
+                                  handleDragTouchEnd(e);
+                                }}
                                 style={{ 
-                                  touchAction: 'manipulation',
+                                  touchAction: 'none',
                                   userSelect: 'none',
                                   WebkitUserSelect: 'none',
                                   WebkitTouchCallout: 'none'
-                                }}
+                                } as React.CSSProperties}
                               >
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                                   <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
@@ -1220,6 +1371,9 @@ export default function MapPage() {
                       
                       {/* 마지막 드롭 존 */}
                       <div
+                        data-drop-zone="true"
+                        data-day={day}
+                        data-index={groupedPlaces[day].length}
                         onDragOver={(e) => handleDragOver(e, groupedPlaces[day].length, day)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, groupedPlaces[day].length, day)}
