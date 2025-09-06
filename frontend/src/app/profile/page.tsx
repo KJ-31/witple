@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 
 interface TripCard {
   id: number
@@ -58,6 +58,18 @@ export default function ProfilePage() {
   // 로그인하지 않은 경우 아무것도 렌더링하지 않음 (리다이렉트 처리됨)
   if (!session) {
     return null
+  }
+
+  // 로그아웃 핸들러
+  const handleLogout = async () => {
+    try {
+      await signOut({ 
+        callbackUrl: '/', // 로그아웃 후 메인 페이지로 이동
+        redirect: true 
+      })
+    } catch (error) {
+      console.error('로그아웃 오류:', error)
+    }
   }
 
   // 목업 데이터
@@ -325,6 +337,16 @@ export default function ProfilePage() {
       {/* Tab Content */}
       <div className="px-4 pb-8">
         {renderTabContent()}
+      </div>
+
+      {/* Logout Button at Bottom */}
+      <div className="px-4 pb-8">
+        <button 
+          onClick={handleLogout}
+          className="w-full bg-red-500 text-white py-4 rounded-2xl font-medium hover:bg-red-600 transition-colors"
+        >
+          로그아웃
+        </button>
       </div>
     </div>
   )
