@@ -120,6 +120,18 @@ export default function MapPage() {
     dayNumber: number
   }>({ isOpen: false, place: null, dayNumber: 0 })
   
+  // 장소별 잠금 상태 관리
+  const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
+  
+  // 잠금 토글 함수
+  const toggleLockPlace = (placeId: string, dayNumber: number) => {
+    const key = `${placeId}_${dayNumber}`;
+    setLockedPlaces(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+  
   // 드래그 중일 때 body 스크롤 비활성화
   useEffect(() => {
     if (longPressData?.isDragging) {
@@ -1117,7 +1129,7 @@ export default function MapPage() {
     }
   };
 
-  // 일차별 경로 최적화 실행
+  // 일차별 경로 최적화 실행 (제약 조건 포함)
   const optimizeRouteForDay = async (dayNumber: number) => {
     const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
     
@@ -1155,17 +1167,34 @@ export default function MapPage() {
         return;
       }
 
+      // 잠금 제약 조건 생성
+      const constraints = restPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map((place, index) => {
+          const key = `${place.id}_${dayNumber}`;
+          const isLocked = lockedPlaces[key] || false;
+          return {
+            locked: isLocked,
+            order: isLocked ? index + 1 : undefined // 잠금된 경우 현재 순서를 유지
+          };
+        });
+
+      const lockedCount = constraints.filter(c => c.locked).length;
+
       console.log(`${dayNumber}일차 최적화 시작:`, {
         origin: firstPlace.name,
-        destinations: destinationNames
+        destinations: destinationNames,
+        constraints: constraints,
+        lockedCount: lockedCount
       });
 
-      const optimized = optimizeRouteOrder(originCoords, destinationCoords, destinationNames);
+      // 제약 조건이 있는 최적화 실행
+      const optimized = optimizeRouteOrderWithConstraints(originCoords, destinationCoords, destinationNames, constraints);
       
       console.log(`${dayNumber}일차 최적화된 순서:`, optimized.optimizedNames);
       console.log(`${dayNumber}일차 예상 총 거리:`, optimized.totalDistance.toFixed(1), 'km');
 
-      updateStatus(`${dayNumber}일차 경로 최적화 완료! 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
+      updateStatus(`${dayNumber}일차 경로 최적화 완료! (${lockedCount}개 순서 고정) 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
 
       // 최적화된 순서대로 장소 객체 재구성
       const optimizedPlaces = [firstPlace];
@@ -1538,6 +1567,30 @@ export default function MapPage() {
                               </div>
                             </div>
                             
+                            {/* 잠금 버튼 - 휴지통 왼쪽 */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleLockPlace(place.id, day);
+                              }}
+                              className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
+                                lockedPlaces[`${place.id}_${day}`] 
+                                  ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
+                                  : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
+                              }`}
+                              title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
+                            >
+                              {lockedPlaces[`${place.id}_${day}`] ? (
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-[#FF9800]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+
                             {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
                             <button
                               onClick={(e) => {
@@ -1549,7 +1602,7 @@ export default function MapPage() {
                             >
                               <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
+              </svg>
                             </button>
 
                             <div className="flex items-start justify-between">
