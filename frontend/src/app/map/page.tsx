@@ -86,7 +86,42 @@ export default function MapPage() {
   const [showItinerary, setShowItinerary] = useState(!!placesParam)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
+  const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
+  const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
+  const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
+  const [mapInstance, setMapInstance] = useState<any>(null)
+  const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
+  
+  // 터치 드래그 상태
+  const [touchDragData, setTouchDragData] = useState<{
+    isDragging: boolean,
+    startY: number,
+    currentY: number,
+    dragElement: HTMLElement | null,
+    clone: HTMLElement | null
+  } | null>(null)
+  
+  // 드래그 중일 때 body 스크롤 비활성화
+  useEffect(() => {
+    if (touchDragData?.isDragging) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+    
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [touchDragData?.isDragging]);
 
   // 화면 높이 측정
   useEffect(() => {
@@ -278,7 +313,8 @@ export default function MapPage() {
       place => !(place.id === placeId && place.dayNumber === dayNumber)
     );
     setSelectedItineraryPlaces(updatedPlaces);
-    updateUrlParameters(updatedPlaces);
+    // 삭제시에도 URL 업데이트하지 않음 (기존 선택된 장소들 유지)
+    // updateUrlParameters(updatedPlaces);
   };
 
 
@@ -302,7 +338,195 @@ export default function MapPage() {
     router.replace(`/map?${queryParams.toString()}`);
   };
 
-  // 위아래 순서 변경 함수
+  // 드래그 앤 드롭 핸들러들
+  const handleDragStart = (e: React.DragEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    console.log('드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+    setDraggedItem({ placeId: place.id, dayNumber, index });
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', place.id);
+    // 드래그 시작 시 약간 투명하게
+    (e.target as HTMLElement).style.opacity = '0.5';
+  };
+
+  // 터치 이벤트 핸들러
+  const handleDragTouchStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    console.log('터치 드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+    
+    const touch = e.touches[0];
+    const element = e.currentTarget as HTMLElement;
+    // 전체 카드 요소를 찾기 (드래그 핸들의 부모 카드)
+    const cardElement = element.closest('[data-place-card]') as HTMLElement;
+    if (!cardElement) return;
+    
+    const rect = cardElement.getBoundingClientRect();
+    
+    // 카드 전체의 복사본 생성
+    const clone = cardElement.cloneNode(true) as HTMLElement;
+    clone.style.position = 'fixed';
+    clone.style.zIndex = '9999';
+    clone.style.opacity = '0.8';
+    clone.style.width = rect.width + 'px';
+    clone.style.height = rect.height + 'px';
+    clone.style.left = rect.left + 'px';
+    clone.style.top = rect.top + 'px';
+    clone.style.pointerEvents = 'none';
+    clone.style.transform = 'rotate(2deg)';
+    clone.style.boxShadow = '0 10px 25px rgba(0,0,0,0.4)';
+    document.body.appendChild(clone);
+    
+    setDraggedItem({ placeId: place.id, dayNumber, index });
+    setTouchDragData({
+      isDragging: true,
+      startY: touch.clientY,
+      currentY: touch.clientY,
+      dragElement: cardElement,
+      clone
+    });
+    
+    // 원본 요소 스타일 변경
+    cardElement.style.opacity = '0.3';
+  };
+  
+  const handleDragTouchMove = (e: React.TouchEvent) => {
+    if (!touchDragData?.isDragging || !touchDragData.clone) return;
+    
+    const touch = e.touches[0];
+    
+    // 복사본 위치 업데이트
+    const deltaY = touch.clientY - touchDragData.startY;
+    const originalRect = touchDragData.dragElement!.getBoundingClientRect();
+    touchDragData.clone.style.left = originalRect.left + 'px';
+    touchDragData.clone.style.top = (originalRect.top + deltaY) + 'px';
+    
+    setTouchDragData(prev => prev ? {
+      ...prev,
+      currentY: touch.clientY
+    } : null);
+    
+    // 드롭 존 감지
+    const dropZones = document.querySelectorAll('[data-drop-zone]');
+    let targetFound = false;
+    
+    dropZones.forEach(zone => {
+      const zoneRect = zone.getBoundingClientRect();
+      if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
+        const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
+        const index = parseInt(zone.getAttribute('data-index') || '0');
+        setDragOverIndex({ day: dayNumber, index });
+        targetFound = true;
+      }
+    });
+    
+    if (!targetFound) {
+      setDragOverIndex(null);
+    }
+  };
+  
+  const handleDragTouchEnd = (e: React.TouchEvent) => {
+    if (!touchDragData?.isDragging) return;
+    
+    // 복사본 제거
+    if (touchDragData.clone) {
+      document.body.removeChild(touchDragData.clone);
+    }
+    
+    // 원본 요소 스타일 복원
+    if (touchDragData.dragElement) {
+      touchDragData.dragElement.style.opacity = '1';
+    }
+    
+    // 드롭 처리
+    if (dragOverIndex && draggedItem) {
+      console.log('터치 드롭:', dragOverIndex, draggedItem);
+      // 가짜 이벤트 객체 생성
+      const fakeEvent = {
+        preventDefault: () => {},
+        dataTransfer: { dropEffect: 'move' }
+      } as React.DragEvent;
+      handleDrop(fakeEvent, dragOverIndex.index, dragOverIndex.day);
+    }
+    
+    // 상태 초기화
+    setTouchDragData(null);
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+  
+  
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number, dayNumber: number) => {
+    e.preventDefault();
+    
+    // 모든 일차에서 드래그 오버 허용
+    if (draggedItem) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverIndex({ day: dayNumber, index: index });
+    } else {
+      e.dataTransfer.dropEffect = 'none';
+      setDragOverIndex(null);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number, targetDayNumber: number) => {
+    e.preventDefault();
+    console.log('드롭 이벤트:', targetIndex, targetDayNumber, draggedItem);
+    
+    if (!draggedItem) {
+      console.log('draggedItem이 없음');
+      return;
+    }
+    
+    // 같은 위치로 이동하는 경우 무시
+    if (draggedItem.dayNumber === targetDayNumber && draggedItem.index === targetIndex) {
+      console.log('같은 위치로 이동, 무시');
+      return;
+    }
+
+    console.log('장소 이동 실행:', `day${draggedItem.dayNumber}[${draggedItem.index}] -> day${targetDayNumber}[${targetIndex}]`);
+
+    // 드래그한 장소를 새 위치로 이동
+    setSelectedItineraryPlaces(prev => {
+      const result = [...prev];
+      
+      // 드래그한 아이템 찾기
+      const draggedItemIndex = result.findIndex(p => p.id === draggedItem.placeId && p.dayNumber === draggedItem.dayNumber);
+      if (draggedItemIndex === -1) return prev;
+      
+      // 드래그한 아이템 제거
+      const [movedItem] = result.splice(draggedItemIndex, 1);
+      console.log('이동할 아이템:', movedItem?.name);
+      
+      // 날짜 변경
+      movedItem.dayNumber = targetDayNumber;
+      
+      // 목적지 날짜의 장소들만 필터링
+      const targetDayPlaces = result.filter(p => p.dayNumber === targetDayNumber);
+      const otherDayPlaces = result.filter(p => p.dayNumber !== targetDayNumber);
+      
+      // 새 위치에 삽입 (목적지 날짜의 인덱스 기준)
+      targetDayPlaces.splice(targetIndex, 0, movedItem);
+      
+      const finalResult = [...otherDayPlaces, ...targetDayPlaces];
+      console.log('최종 결과:', finalResult.map(p => `${p.name}(day:${p.dayNumber})`));
+      
+      return finalResult;
+    });
+
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+
+  // 위아래 순서 변경 함수 (드래그로 대체되지만 일단 유지)
   const movePlace = (placeId: string, direction: 'up' | 'down') => {
     setSelectedItineraryPlaces(prev => {
       const currentPlace = prev.find(p => p.id === placeId)
@@ -387,7 +611,7 @@ export default function MapPage() {
   const getCategoryName = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
       restaurants: '맛집',
-      humanities: '문화',
+      humanities: '인문',
       nature: '자연',
       shopping: '쇼핑',
       accommodation: '숙박',
@@ -395,6 +619,389 @@ export default function MapPage() {
     }
     return categoryMap[category] || category
   }
+
+  // 하버사인 공식으로 두 좌표간 거리 계산 (km)
+  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // 좌표 변환 함수
+  const getCoordinates = async (placeName: string): Promise<{lat: number, lng: number}> => {
+    // 먼저 selectedItineraryPlaces에서 해당 장소의 좌표를 찾기
+    const place = selectedItineraryPlaces.find(p => p.name === placeName);
+    if (place && place.latitude && place.longitude) {
+      return { lat: place.latitude, lng: place.longitude };
+    }
+    
+    // 좌표가 없다면 Geocoding API 사용 (구글 맵이 로드된 후)
+    if ((window as any).google?.maps?.Geocoder) {
+      const geocoder = new (window as any).google.maps.Geocoder();
+      return new Promise((resolve, reject) => {
+        geocoder.geocode({ address: placeName }, (results: any, status: any) => {
+          if (status === 'OK' && results[0]) {
+            resolve({
+              lat: results[0].geometry.location.lat(),
+              lng: results[0].geometry.location.lng()
+            });
+          } else {
+            reject(new Error(`Geocoding failed: ${status}`));
+          }
+        });
+      });
+    }
+    
+    throw new Error('Coordinates not available');
+  };
+
+  // 최적화된 경로 계산 (제약 조건 포함)
+  const optimizeRouteOrderWithConstraints = (
+    origin: {lat: number, lng: number}, 
+    destinations: {lat: number, lng: number}[], 
+    destinationNames: string[], 
+    constraints: { locked: boolean; order?: number }[]
+  ): {
+    order: number[],
+    totalDistance: number,
+    optimizedNames: string[]
+  } => {
+    if (destinations.length === 0) return { order: [], totalDistance: 0, optimizedNames: [] };
+    
+    const result = [];
+    const visited = new Array(destinations.length).fill(false);
+    let currentLocation = origin;
+    let totalDistance = 0;
+
+    const lockedWaypoints = constraints
+      .map((constraint, index) => ({ ...constraint, originalIndex: index }))
+      .filter(constraint => constraint.locked)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    for (const locked of lockedWaypoints) {
+      const index = locked.originalIndex;
+      if (!visited[index]) {
+        const distance = calculateDistance(
+          currentLocation.lat, currentLocation.lng,
+          destinations[index].lat, destinations[index].lng
+        );
+        
+        visited[index] = true;
+        result.push({
+          index,
+          name: destinationNames[index],
+          distance,
+          locked: true
+        });
+        totalDistance += distance;
+        currentLocation = destinations[index];
+      }
+    }
+
+    while (result.length < destinations.length) {
+      let nearestIndex = -1;
+      let nearestDistance = Infinity;
+
+      for (let j = 0; j < destinations.length; j++) {
+        if (!visited[j] && !constraints[j].locked) {
+          const distance = calculateDistance(
+            currentLocation.lat, currentLocation.lng,
+            destinations[j].lat, destinations[j].lng
+          );
+          
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestIndex = j;
+          }
+        }
+      }
+
+      if (nearestIndex !== -1) {
+        visited[nearestIndex] = true;
+        result.push({
+          index: nearestIndex,
+          name: destinationNames[nearestIndex],
+          distance: nearestDistance,
+          locked: false
+        });
+        totalDistance += nearestDistance;
+        currentLocation = destinations[nearestIndex];
+      } else {
+        break;
+      }
+    }
+
+    return { 
+      order: result.map(r => r.index), 
+      totalDistance, 
+      optimizedNames: result.map(r => r.name)
+    };
+  };
+
+  // 간단한 최적화 (제약 조건 없음)
+  const optimizeRouteOrder = (origin: {lat: number, lng: number}, destinations: {lat: number, lng: number}[], destinationNames: string[]): {
+    order: number[],
+    totalDistance: number,
+    optimizedNames: string[]
+  } => {
+    const constraints = destinations.map(() => ({ locked: false }));
+    return optimizeRouteOrderWithConstraints(origin, destinations, destinationNames, constraints);
+  };
+
+  // 상태 업데이트 함수
+  const updateStatus = (message: string, type: 'loading' | 'success' | 'error') => {
+    setRouteStatus({ message, type });
+    setTimeout(() => setRouteStatus(null), 3000);
+  };
+
+  // 기존 경로 제거
+  const clearRoute = () => {
+    directionsRenderers.forEach(renderer => renderer.setMap(null));
+    setDirectionsRenderers([]);
+    sequenceMarkers.forEach(marker => marker.setMap(null));
+    setSequenceMarkers([]);
+  };
+
+  // 순서 마커 생성 (START, 1, 2, 3, END)
+  const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[]) => {
+    sequenceMarkers.forEach(marker => marker.setMap(null));
+    
+    const newSequenceMarkers = [];
+    const allPoints = [segments[0].origin, ...segments.map(s => s.destination)];
+    
+    for (let i = 0; i < allPoints.length; i++) {
+      try {
+        const coords = { lat: allPoints[i].lat, lng: allPoints[i].lng };
+        
+        const markerLabel = i === 0 ? 'START' : 
+                           i === allPoints.length - 1 ? 'END' : 
+                           i.toString();
+        
+        const markerColor = i === 0 ? '#4CAF50' : 
+                           i === allPoints.length - 1 ? '#F44336' : 
+                           '#2196F3';
+        
+        const marker = new (window as any).google.maps.Marker({
+          position: coords,
+          map: mapInstance,
+          icon: {
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40">
+                <path d="M15 0C6.7 0 0 6.7 0 15c0 8.3 15 25 15 25s15-16.7 15-25C30 6.7 23.3 0 15 0z" fill="${markerColor}" stroke="white" stroke-width="2"/>
+                <text x="15" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white">${markerLabel}</text>
+              </svg>
+            `)}`,
+            scaledSize: new (window as any).google.maps.Size(30, 40),
+            anchor: new (window as any).google.maps.Point(15, 40)
+          },
+          title: `${i === 0 ? '출발지' : i === allPoints.length - 1 ? '목적지' : `${i}번째 경유지`}: ${allPoints[i].name}`,
+          zIndex: 1000
+        });
+
+        const infoWindow = new (window as any).google.maps.InfoWindow({
+          content: `
+            <div style="padding: 10px; text-align: center;">
+              <h4 style="margin: 0 0 5px 0; color: ${markerColor};">
+                ${i === 0 ? '🚩 출발지' : i === allPoints.length - 1 ? '🏁 목적지' : `📍 ${i}번째 경유지`}
+              </h4>
+              <p style="margin: 0; font-weight: bold;">${allPoints[i].name}</p>
+              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
+                ${i === 0 ? '여행의 시작점입니다' : 
+                  i === allPoints.length - 1 ? '최종 목적지입니다' : 
+                  `${i === 1 ? '첫 번째' : i === 2 ? '두 번째' : i === 3 ? '세 번째' : `${i}번째`} 방문할 장소입니다`}
+              </p>
+            </div>
+          `
+        });
+
+        marker.addListener('click', () => {
+          infoWindow.open(mapInstance, marker);
+        });
+
+        newSequenceMarkers.push(marker);
+      } catch (error) {
+        console.error(`순서 마커 생성 실패: ${allPoints[i].name}`, error);
+      }
+    }
+    
+    setSequenceMarkers(newSequenceMarkers);
+  };
+
+  // 최적화된 경로 렌더링
+  const renderOptimizedRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+    if (!(window as any).google?.maps?.DirectionsService) {
+      console.error('Google Maps DirectionsService not available');
+      return;
+    }
+
+    const directionsService = new (window as any).google.maps.DirectionsService();
+
+    let allResults = [];
+    let totalDistance = 0;
+    let totalDuration = 0;
+
+    try {
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        
+        const request = {
+          origin: { lat: segment.origin.lat, lng: segment.origin.lng },
+          destination: { lat: segment.destination.lat, lng: segment.destination.lng },
+          waypoints: [],
+          travelMode: (window as any).google.maps.TravelMode.TRANSIT,
+          region: 'KR',
+          language: 'ko'
+        };
+
+        const result = await new Promise<any>((resolve, reject) => {
+          directionsService.route(request, (result: any, status: any) => {
+            console.log(`${segment.origin.name} -> ${segment.destination.name}:`, status);
+            if (status === 'OK' && result) {
+              resolve(result);
+            } else {
+              reject(new Error(`Directions failed: ${status}`));
+            }
+          });
+        });
+
+        allResults.push(result);
+        
+        const leg = result.routes[0].legs[0];
+        totalDistance += leg.distance?.value || 0;
+        totalDuration += leg.duration?.value || 0;
+      }
+    } catch (err) {
+      console.log('경로 계산 실패:', err);
+      throw err;
+    }
+
+    if (allResults.length === 0) {
+      throw new Error('경로를 찾을 수 없습니다.');
+    }
+
+    const newRenderers = [];
+
+    for (let i = 0; i < allResults.length; i++) {
+      const result = allResults[i];
+      
+      const renderer = new (window as any).google.maps.DirectionsRenderer({
+        draggable: false,
+        polylineOptions: {
+          strokeColor: '#34A853', // 대중교통용 초록색
+          strokeWeight: 6,
+          strokeOpacity: 0.8
+        },
+        suppressMarkers: i > 0,
+        preserveViewport: i > 0
+      });
+
+      renderer.setDirections(result);
+      if (mapInstance) {
+        renderer.setMap(mapInstance);
+      }
+      newRenderers.push(renderer);
+    }
+
+    setDirectionsRenderers(newRenderers);
+    await createSequenceMarkers(segments);
+
+    const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
+    const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
+    
+    const routeTypeText = isOptimized ? '최적화된 경로!' : '경로 계획 완료!';
+    updateStatus(
+      `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
+      'success'
+    );
+  };
+
+  // 일차별 경로 최적화 실행
+  const optimizeRouteForDay = async (dayNumber: number) => {
+    const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
+    
+    if (dayPlaces.length < 2) {
+      updateStatus(`${dayNumber}일차에 경로를 계획할 장소가 충분하지 않습니다 (최소 2개 필요)`, 'error');
+      return;
+    }
+
+    try {
+      updateStatus(`${dayNumber}일차 경로 최적화 중...`, 'loading');
+      clearRoute();
+
+      // 첫 번째 장소를 출발지로, 나머지를 목적지로 설정
+      const [firstPlace, ...restPlaces] = dayPlaces;
+      
+      if (!firstPlace.latitude || !firstPlace.longitude) {
+        updateStatus('출발지의 좌표 정보가 없습니다', 'error');
+        return;
+      }
+
+      const originCoords = { lat: firstPlace.latitude, lng: firstPlace.longitude };
+      const destinationCoords = restPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({ lat: place.latitude!, lng: place.longitude! }));
+      const destinationNames = restPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => place.name);
+
+      if (destinationCoords.length === 0) {
+        updateStatus('경유지의 좌표 정보가 없습니다', 'error');
+        return;
+      }
+
+      console.log(`${dayNumber}일차 최적화 시작:`, {
+        origin: firstPlace.name,
+        destinations: destinationNames
+      });
+
+      const optimized = optimizeRouteOrder(originCoords, destinationCoords, destinationNames);
+      
+      console.log(`${dayNumber}일차 최적화된 순서:`, optimized.optimizedNames);
+      console.log(`${dayNumber}일차 예상 총 거리:`, optimized.totalDistance.toFixed(1), 'km');
+
+      updateStatus(`${dayNumber}일차 경로 최적화 완료! 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
+
+      // 최적화된 순서대로 장소 객체 재구성
+      const optimizedPlaces = [firstPlace];
+      for (const name of optimized.optimizedNames) {
+        const place = restPlaces.find(p => p.name === name);
+        if (place) optimizedPlaces.push(place);
+      }
+
+      const segments = [];
+      for (let i = 0; i < optimizedPlaces.length - 1; i++) {
+        const current = optimizedPlaces[i];
+        const next = optimizedPlaces[i + 1];
+        segments.push({
+          origin: { 
+            lat: current.latitude!, 
+            lng: current.longitude!, 
+            name: current.name 
+          },
+          destination: { 
+            lat: next.latitude!, 
+            lng: next.longitude!, 
+            name: next.name 
+          }
+        });
+      }
+
+      console.log(`${dayNumber}일차 최적화된 경로 구간:`, segments);
+      await renderOptimizedRoute(segments, true);
+
+    } catch (error) {
+      console.error(`${dayNumber}일차 Route optimization error:`, error);
+      updateStatus(
+        `${dayNumber}일차 경로 최적화 중 오류가 발생했습니다.`, 
+        'error'
+      );
+    }
+  };
 
   // 로딩 상태
   if (loading) {
@@ -485,6 +1092,32 @@ export default function MapPage() {
         </div>
       </div>
 
+      {/* Route Status Toast */}
+      {routeStatus && (
+        <div className={`absolute top-32 left-4 right-4 z-50 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 ${
+          routeStatus.type === 'loading' ? 'bg-blue-900/80 text-blue-100' :
+          routeStatus.type === 'success' ? 'bg-green-900/80 text-green-100' :
+          'bg-red-900/80 text-red-100'
+        }`}>
+          <div className="flex items-center space-x-2">
+            {routeStatus.type === 'loading' && (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+            )}
+            {routeStatus.type === 'success' && (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+            {routeStatus.type === 'error' && (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span className="text-sm font-medium">{routeStatus.message}</span>
+          </div>
+        </div>
+      )}
+
       {/* Map Area */}
       <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
         <GoogleMap
@@ -492,6 +1125,7 @@ export default function MapPage() {
           center={{ lat: 37.5665, lng: 126.9780 }}
           zoom={13}
           markers={mapMarkers}
+          onMapLoad={setMapInstance}
         />
       </div>
 
@@ -529,12 +1163,26 @@ export default function MapPage() {
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
-                <button
-                  onClick={() => setShowItinerary(false)}
-                  className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
-                >
-                  장소 찾기
-                </button>
+                <div className="flex items-center space-x-2">
+                  {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (
+                    <button
+                      onClick={clearRoute}
+                      className="px-3 py-1.5 bg-red-900/30 hover:bg-red-900/50 rounded-full text-sm text-red-400 hover:text-red-300 transition-colors flex items-center space-x-1"
+                      title="경로 지우기"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span>경로 지우기</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowItinerary(false)}
+                    className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
+                  >
+                    장소 찾기
+                  </button>
+                </div>
               </div>
               
               {/* 여행 정보 */}
@@ -573,12 +1221,27 @@ export default function MapPage() {
                 const sortedDays = Object.keys(groupedPlaces).map(Number).sort((a, b) => a - b);
 
                 return sortedDays.map(day => (
-                  <div key={day} className="mb-6">
-                    <div className="flex items-center mb-3">
-                      <div className="bg-[#3E68FF] rounded-full w-8 h-8 flex items-center justify-center mr-3">
+                  <div key={day} className={`mb-6 rounded-2xl transition-all duration-300 ${
+                    highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
+                  }`}>
+                    <div 
+                      className="flex items-center mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
+                      onClick={() => {
+                        setHighlightedDay(highlightedDay === day ? null : day);
+                        // 2개 이상의 장소가 있으면 경로 최적화 실행
+                        if (groupedPlaces[day].length >= 2) {
+                          optimizeRouteForDay(day);
+                        }
+                      }}
+                    >
+                      <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
+                        highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
+                      }`}>
                         <span className="text-white text-sm font-bold">{day}</span>
                       </div>
-                      <h3 className="text-lg font-semibold text-white">
+                      <h3 className={`text-lg font-semibold transition-colors duration-200 ${
+                        highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
+                      }`}>
                         {day}일차
                         {startDateParam && (
                           <span className="text-sm text-[#94A9C9] ml-2">
@@ -589,71 +1252,103 @@ export default function MapPage() {
                           </span>
                         )}
                       </h3>
+                      
+                      {/* 경로 표시 아이콘 (2개 이상일 때) */}
+                      {groupedPlaces[day].length >= 2 && (
+                        <div className="ml-3 text-[#6FA0E6] flex items-center space-x-1">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                          </svg>
+                          <span className="text-xs">경로 보기</span>
+                        </div>
+                      )}
                     </div>
                     
                     <div className="space-y-3 ml-5">
                       {groupedPlaces[day].map((place, index) => (
-                        <div
-                          key={`${place.id}-${day}-${index}`}
-                          className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
-                        >
+                        <div key={`place-container-${place.id}-${day}-${index}`}>
+                          {/* 드롭 존 - 위쪽 */}
+                          <div
+                            data-drop-zone="true"
+                            data-day={day}
+                            data-index={index}
+                            onDragOver={(e) => handleDragOver(e, index, day)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, index, day)}
+                            className={`h-2 w-full transition-all duration-200 ${
+                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
+                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
+                                : ''
+                            }`}
+                          />
+                          
+                          {/* 장소 카드 */}
+                          <div
+                            data-place-card="true"
+                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
+                          >
                           <div className="flex items-start justify-between">
-                            <div className="flex-1 cursor-pointer" onClick={() => router.push(`/attraction/${place.id}`)}>
+                            <div 
+                              className="flex-1 cursor-pointer" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                router.push(`/attraction/${place.id}`);
+                              }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
                               <div className="flex items-center space-x-2 mb-2">
                                 <h4 className="font-semibold text-white">{place.name}</h4>
                                 <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
                                   {getCategoryName(place.category)}
                                 </span>
                               </div>
-                              <p className="text-[#94A9C9] text-sm mb-2">📍 {place.cityName || place.city?.name}</p>
-                              <p className="text-[#94A9C9] text-sm mb-2 line-clamp-2">{place.description}</p>
-                              <div className="flex items-center">
-                                <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                                <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
-                              </div>
                             </div>
                             
                             {/* 액션 버튼들 */}
-                            <div className="flex gap-2 ml-3">
-                              {/* 순서 이동 버튼들 */}
-                              <div className="flex flex-col gap-1">
-                                {/* 위로 이동 버튼 - 첫 번째 장소가 아닐 때만 표시 */}
-                                {index > 0 ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlace(place.id, 'up');
-                                    }}
-                                    className="p-1.5 bg-[#1F3C7A]/30 text-[#6FA0E6] hover:text-white hover:bg-[#3E68FF]/50 rounded-lg transition-colors"
-                                    title="위로 이동"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                                    </svg>
-                                  </button>
-                                ) : (
-                                  <div className="p-1.5 w-[32px] h-[32px]"></div>
-                                )}
-                                
-                                {/* 아래로 이동 버튼 - 마지막 장소가 아닐 때만 표시 */}
-                                {index < groupedPlaces[day].length - 1 ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      movePlace(place.id, 'down');
-                                    }}
-                                    className="p-1.5 bg-[#1F3C7A]/30 text-[#6FA0E6] hover:text-white hover:bg-[#3E68FF]/50 rounded-lg transition-colors"
-                                    title="아래로 이동"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                  </button>
-                                ) : (
-                                  <div className="p-1.5 w-[32px] h-[32px]"></div>
-                                )}
+                            <div className="flex items-center gap-2 ml-3">
+                              {/* 드래그 핸들 */}
+                              <div 
+                                className="p-3 text-[#6FA0E6] hover:text-white cursor-grab active:cursor-grabbing transition-colors select-none" 
+                                title="드래그해서 순서 변경"
+                                draggable="true"
+                                onDragStart={(e) => {
+                                  console.log('드래그 시작!');
+                                  e.stopPropagation();
+                                  handleDragStart(e, place, day, index);
+                                }}
+                                onDragEnd={(e) => {
+                                  console.log('드래그 종료!');
+                                  e.stopPropagation();
+                                  handleDragEnd(e);
+                                }}
+                                onMouseDown={(e) => {
+                                  console.log('마우스 다운!');
+                                  e.stopPropagation();
+                                }}
+                                onTouchStart={(e) => {
+                                  console.log('터치 시작!');
+                                  e.stopPropagation();
+                                  handleDragTouchStart(e, place, day, index);
+                                }}
+                                onTouchMove={(e) => {
+                                  handleDragTouchMove(e);
+                                }}
+                                onTouchEnd={(e) => {
+                                  console.log('터치 종료!');
+                                  e.stopPropagation();
+                                  handleDragTouchEnd(e);
+                                }}
+                                style={{ 
+                                  touchAction: 'none',
+                                  userSelect: 'none',
+                                  WebkitUserSelect: 'none',
+                                  WebkitTouchCallout: 'none'
+                                } as React.CSSProperties}
+                              >
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                                </svg>
                               </div>
                               
                               <button
@@ -669,9 +1364,25 @@ export default function MapPage() {
                                 </svg>
                               </button>
                             </div>
+                            </div>
                           </div>
                         </div>
                       ))}
+                      
+                      {/* 마지막 드롭 존 */}
+                      <div
+                        data-drop-zone="true"
+                        data-day={day}
+                        data-index={groupedPlaces[day].length}
+                        onDragOver={(e) => handleDragOver(e, groupedPlaces[day].length, day)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, groupedPlaces[day].length, day)}
+                        className={`h-2 w-full transition-all duration-200 ${
+                          dragOverIndex?.day === day && dragOverIndex?.index === groupedPlaces[day].length && draggedItem 
+                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
+                            : ''
+                        }`}
+                      />
                     </div>
                   </div>
                 ));
