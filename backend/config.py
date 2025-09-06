@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # JWT 설정
     SECRET_KEY: str = "your-secret-key-here"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8시간
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7일 (개발용)
 
     # 환경 설정
     ENVIRONMENT: str = "development"

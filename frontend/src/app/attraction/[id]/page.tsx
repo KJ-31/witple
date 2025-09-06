@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 
 interface AttractionDetailProps {
   params: { id: string }
@@ -45,9 +46,22 @@ interface AttractionData {
 
 export default function AttractionDetail({ params }: AttractionDetailProps) {
   const router = useRouter()
+  const { data: session } = useSession()
   const [attraction, setAttraction] = useState<AttractionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isSaved, setIsSaved] = useState(false)
+  const [saveLoading, setSaveLoading] = useState(false)
+
+  // 토큰 가져오기 함수
+  const getToken = () => {
+    // 먼저 세션에서 토큰 확인
+    if ((session as any)?.backendToken) {
+      return (session as any).backendToken
+    }
+    // 세션에 없으면 localStorage에서 확인
+    return localStorage.getItem('access_token')
+  }
 
   // API에서 관광지 상세 정보 가져오기
   useEffect(() => {
@@ -67,6 +81,9 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         
         const data = await response.json()
         setAttraction(data)
+        
+        // 저장 상태도 함께 확인
+        await checkSavedStatus(data)
       } catch (error) {
         console.error('관광지 정보 로드 오류:', error)
         setError('관광지 정보를 불러올 수 없습니다.')
@@ -79,6 +96,128 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
       fetchAttractionDetail()
     }
   }, [params.id])
+
+  // 저장 상태 확인 함수
+  const checkSavedStatus = async (attractionData: AttractionData) => {
+    try {
+      const token = getToken()
+      if (!token) return
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/check`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: attractionData.name,
+          address: attractionData.address,
+          latitude: attractionData.latitude?.toString(),
+          longitude: attractionData.longitude?.toString()
+        })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setIsSaved(data.is_saved)
+      } else if (response.status === 401) {
+        console.log('토큰 만료됨 - 저장 상태 확인 건너뛰기')
+        localStorage.removeItem('access_token')
+      }
+    } catch (error) {
+      console.error('저장 상태 확인 오류:', error)
+    }
+  }
+
+  // 북마크 토글 함수
+  const handleBookmarkToggle = async () => {
+    if (!attraction || saveLoading) return
+    
+    try {
+      setSaveLoading(true)
+      const token = getToken()
+      
+      if (!token) {
+        alert('로그인이 필요합니다.')
+        router.push('/auth/login')
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      
+      if (isSaved) {
+        // 저장 해제
+        const checkResponse = await fetch(`${API_BASE_URL}/api/v1/saved-locations/check`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: attraction.name,
+            address: attraction.address,
+            latitude: attraction.latitude?.toString(),
+            longitude: attraction.longitude?.toString()
+          })
+        })
+        
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json()
+          if (checkData.location_id) {
+            const deleteResponse = await fetch(`${API_BASE_URL}/api/v1/saved-locations/${checkData.location_id}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            })
+            
+            if (deleteResponse.ok) {
+              setIsSaved(false)
+            } else if (deleteResponse.status === 401) {
+              alert('세션이 만료되었습니다. 다시 로그인해주세요.')
+              localStorage.removeItem('access_token')
+              router.push('/auth/login')
+              return
+            }
+          }
+        } else if (checkResponse.status === 401) {
+          alert('세션이 만료되었습니다. 다시 로그인해주세요.')
+          localStorage.removeItem('access_token')
+          router.push('/auth/login')
+          return
+        }
+      } else {
+        // 저장
+        const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: attraction.name,
+            address: attraction.address,
+            latitude: attraction.latitude?.toString(),
+            longitude: attraction.longitude?.toString()
+          })
+        })
+        
+        if (response.ok) {
+          setIsSaved(true)
+        } else if (response.status === 401) {
+          alert('세션이 만료되었습니다. 다시 로그인해주세요.')
+          localStorage.removeItem('access_token')
+          router.push('/auth/login')
+          return
+        }
+      }
+    } catch (error) {
+      console.error('북마크 처리 오류:', error)
+    } finally {
+      setSaveLoading(false)
+    }
+  }
 
   const handleBack = () => {
     router.back()
@@ -118,7 +257,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
-      {/* Header with back button */}
+      {/* Header with back button and bookmark */}
       <div className="relative">
         <button
           onClick={handleBack}
@@ -127,6 +266,35 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
           <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
+        </button>
+
+        {/* Bookmark button */}
+        <button
+          onClick={handleBookmarkToggle}
+          disabled={saveLoading}
+          className={`absolute top-4 right-4 z-10 p-2 rounded-full backdrop-blur-sm transition-colors ${
+            isSaved 
+              ? 'bg-[#3E68FF]/80 hover:bg-[#3E68FF]' 
+              : 'bg-black/30 hover:bg-black/50'
+          } ${saveLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          {saveLoading ? (
+            <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
+          ) : (
+            <svg 
+              className={`w-6 h-6 transition-colors ${isSaved ? 'text-white' : 'text-white'}`}
+              fill={isSaved ? "currentColor" : "none"} 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" 
+              />
+            </svg>
+          )}
         </button>
 
         {/* Main image */}

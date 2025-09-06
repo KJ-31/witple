@@ -157,3 +157,30 @@ class UserActionLog(BaseModel):
     action_type: ActionType
     action_value: Optional[float] = None
     action_detail: Optional[str] = None
+
+
+# Saved Location schemas
+class SavedLocationBase(BaseModel):
+    name: str
+    address: Optional[str] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
+
+
+class SavedLocationCreate(SavedLocationBase):
+    pass
+
+
+class SavedLocationResponse(SavedLocationBase):
+    id: int
+    user_id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class SavedLocationListResponse(BaseModel):
+    locations: List[SavedLocationResponse]
+    total: int

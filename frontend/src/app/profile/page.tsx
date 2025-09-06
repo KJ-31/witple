@@ -24,13 +24,15 @@ interface Post {
   created_at: string
 }
 
-interface SavedItem {
+interface SavedLocation {
   id: number
-  type: 'restaurant' | 'accommodation' | 'attraction'
-  title: string
-  location: string
-  rating: number
-  image?: string
+  user_id: string
+  name: string
+  address?: string
+  latitude?: string
+  longitude?: string
+  created_at: string
+  updated_at?: string
 }
 
 export default function ProfilePage() {
@@ -39,9 +41,21 @@ export default function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false)
   const [posts, setPosts] = useState<Post[]>([])
   const [postsLoading, setPostsLoading] = useState(false)
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([])
+  const [savedLoading, setSavedLoading] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 토큰 가져오기 함수 (attraction 페이지와 동일)
+  const getToken = () => {
+    // 먼저 세션에서 토큰 확인
+    if ((session as any)?.backendToken) {
+      return (session as any).backendToken
+    }
+    // 세션에 없으면 localStorage에서 확인
+    return localStorage.getItem('access_token')
+  }
 
   // 기본 정보 폼 상태
   const [basicInfo, setBasicInfo] = useState({
@@ -161,6 +175,37 @@ export default function ProfilePage() {
     }
   }, [session])
 
+  // 저장된 장소 로딩 함수
+  const loadSavedLocations = useCallback(async () => {
+    try {
+      setSavedLoading(true)
+      const token = getToken()
+      
+      if (!token) {
+        console.log('토큰 없음 - 저장된 장소 로딩 건너뛰기')
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSavedLocations(data.locations || [])
+      } else {
+        console.error('저장된 장소 로딩 실패:', response.status)
+      }
+    } catch (error) {
+      console.error('저장된 장소 로딩 중 오류:', error)
+    } finally {
+      setSavedLoading(false)
+    }
+  }, [])
+
   // 로그인하지 않은 사용자는 로그인 페이지로 리다이렉트
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -173,8 +218,9 @@ export default function ProfilePage() {
     if (session) {
       fetchUserProfile()
       fetchUserPosts()
+      loadSavedLocations()
     }
-  }, [session, fetchUserProfile, fetchUserPosts])
+  }, [session, fetchUserProfile, fetchUserPosts, loadSavedLocations])
 
   // 세션에서 초기 폼 데이터 설정
   useEffect(() => {
@@ -521,36 +567,40 @@ export default function ProfilePage() {
   ]
 
 
-  const savedItems: SavedItem[] = [
-    {
-      id: 1,
-      type: 'restaurant',
-      title: '보영식당',
-      location: '경기도 의정부시',
-      rating: 4.5
-    },
-    {
-      id: 2,
-      type: 'accommodation',
-      title: '제주 오션뷰 펜션',
-      location: '제주특별자치도 제주시',
-      rating: 4.8
-    },
-    {
-      id: 3,
-      type: 'attraction',
-      title: '경복궁',
-      location: '서울특별시 종로구',
-      rating: 4.7
-    },
-    {
-      id: 4,
-      type: 'restaurant',
-      title: '싸리골',
-      location: '강원특별자치도 정선군',
-      rating: 4.2
+
+  // 저장된 장소 삭제 함수
+  const handleDeleteSavedLocation = async (locationId: number) => {
+    try {
+      const token = getToken()
+      
+      if (!token) {
+        alert('로그인이 필요합니다.')
+        return
+      }
+      
+      if (!confirm('저장된 장소를 삭제하시겠습니까?')) {
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/${locationId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        // 삭제 성공 시 목록에서 해당 장소 제거
+        setSavedLocations(prev => prev.filter(location => location.id !== locationId))
+      } else {
+        alert('삭제에 실패했습니다.')
+      }
+    } catch (error) {
+      console.error('저장된 장소 삭제 중 오류:', error)
+      alert('삭제 중 오류가 발생했습니다.')
     }
-  ]
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -691,29 +741,45 @@ export default function ProfilePage() {
       case 'saved':
         return (
           <div className="space-y-4">
-            {savedItems.map((item) => (
-              <div key={item.id} className="bg-gray-800 p-4 rounded-2xl">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-1">
-                      <span className="text-xl">
-                        {item.type === 'restaurant' ? '🍽️' :
-                          item.type === 'accommodation' ? '🏨' : '🎯'}
-                      </span>
-                      <h3 className="text-white font-semibold">{item.title}</h3>
-                    </div>
-                    <p className="text-gray-300 text-sm mb-2">{item.location}</p>
-                    <div className="flex items-center space-x-1">
-                      <span className="text-yellow-400">⭐</span>
-                      <span className="text-gray-300 text-sm">{item.rating}</span>
-                    </div>
-                  </div>
-                  <button className="text-red-400 hover:text-red-300 transition-colors">
-                    <span className="text-xl">❤️</span>
-                  </button>
-                </div>
+            {savedLoading ? (
+              <div className="flex justify-center items-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
               </div>
-            ))}
+            ) : savedLocations.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-6xl mb-4">📍</div>
+                <p className="text-gray-400 text-lg mb-2">저장된 장소가 없습니다</p>
+                <p className="text-gray-500 text-sm">관심있는 장소를 북마크해보세요!</p>
+              </div>
+            ) : (
+              savedLocations.map((location) => (
+                <div key={location.id} className="bg-gray-800 p-4 rounded-2xl">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-xl">📍</span>
+                        <h3 className="text-white font-semibold">{location.name}</h3>
+                      </div>
+                      <p className="text-gray-300 text-sm mb-2">
+                        {location.address || '주소 정보 없음'}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        {new Date(location.created_at).toLocaleDateString('ko-KR')}에 저장됨
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteSavedLocation(location.id)}
+                      className="text-red-400 hover:text-red-300 transition-colors p-1"
+                      title="저장된 장소 삭제"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )
 

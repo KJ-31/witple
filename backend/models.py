@@ -24,6 +24,7 @@ class User(Base):
     oauth_accounts = relationship("OAuthAccount", back_populates="user")
     preferences = relationship("UserPreference", back_populates="user")
     preference_tags = relationship("UserPreferenceTag", back_populates="user")
+    saved_locations = relationship("SavedLocation", back_populates="user")
 
 
 class OAuthAccount(Base):
@@ -95,3 +96,19 @@ class UserPreferenceTag(Base):
 
     # Relationship to user
     user = relationship("User", back_populates="preference_tags")
+
+
+class SavedLocation(Base):
+    __tablename__ = "saved_locations"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    name = Column(String, nullable=False)  # 장소명
+    address = Column(String, nullable=True)  # 주소
+    latitude = Column(String, nullable=True)  # 위도
+    longitude = Column(String, nullable=True)  # 경도
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to user
+    user = relationship("User", back_populates="saved_locations")
