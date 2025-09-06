@@ -1019,30 +1019,34 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <div className="px-4 mb-6">
-        <div className="flex space-x-4">
-          {(['trips', 'posts', 'saved'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-3 px-6 rounded-2xl font-medium transition-colors ${activeTab === tab
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-800 text-gray-300 border border-gray-700'
-                }`}
-            >
-              {tab === 'trips' ? 'Trips' :
-                tab === 'posts' ? 'Posts' :
-                  'Saved'}
-            </button>
-          ))}
+      {/* Tab Navigation - 프로필 편집 모드일 때 숨기기 */}
+      {!isEditing && (
+        <div className="px-4 mb-6">
+          <div className="flex space-x-4">
+            {(['trips', 'posts', 'saved'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-3 px-6 rounded-2xl font-medium transition-colors ${activeTab === tab
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-800 text-gray-300 border border-gray-700'
+                  }`}
+              >
+                {tab === 'trips' ? 'Trips' :
+                  tab === 'posts' ? 'Posts' :
+                    'Saved'}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Tab Content */}
-      <div className="px-4 pb-8">
-        {renderTabContent()}
-      </div>
+      {/* Tab Content - 프로필 편집 모드일 때 숨기기 */}
+      {!isEditing && (
+        <div className="px-4 pb-8">
+          {renderTabContent()}
+        </div>
+      )}
 
       {/* Post Edit Modal */}
       {editingPost && (
