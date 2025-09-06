@@ -59,8 +59,62 @@ export default function ProfilePage() {
     exploration: ''
   })
   const [isUpdatingPreferences, setIsUpdatingPreferences] = useState(false)
+  
+  // 사용자 프로필 데이터 상태
+  const [userProfile, setUserProfile] = useState<any>(null)
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false)
+  
   const router = useRouter()
   const { data: session, status } = useSession()
+
+  // 사용자 프로필 정보 가져오기
+  const fetchUserProfile = useCallback(async () => {
+    if (!session) {
+      console.log('fetchUserProfile: 세션 없음')
+      return
+    }
+    
+    console.log('=== fetchUserProfile 시작 ===')
+    console.log('세션 상태:', session)
+    console.log('백엔드 토큰:', (session as any)?.backendToken ? '있음' : '없음')
+    
+    setIsLoadingProfile(true)
+    try {
+      const headers: any = {
+        'Content-Type': 'application/json',
+      }
+
+      if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+        console.log('Authorization 헤더 추가됨')
+      } else {
+        console.log('경고: backendToken이 없음')
+      }
+
+      console.log('요청 헤더:', headers)
+
+      const response = await fetch('/api/proxy/api/v1/profile/me', {
+        headers: headers
+      })
+      
+      console.log('응답 상태:', response.status)
+      console.log('응답 OK:', response.ok)
+      
+      if (response.ok) {
+        const profileData = await response.json()
+        console.log('프로필 데이터:', profileData)
+        setUserProfile(profileData)
+      } else {
+        const errorData = await response.json()
+        console.error('프로필 정보 가져오기 실패:', errorData)
+      }
+    } catch (error) {
+      console.error('프로필 정보 가져오기 오류:', error)
+    } finally {
+      setIsLoadingProfile(false)
+      console.log('=== fetchUserProfile 완료 ===')
+    }
+  }, [session])
 
   // 사용자 게시글 가져오기
   const fetchUserPosts = useCallback(async () => {
@@ -106,12 +160,13 @@ export default function ProfilePage() {
     }
   }, [status, router])
 
-  // 세션이 있을 때 게시글 가져오기
+  // 세션이 있을 때 프로필 정보와 게시글 가져오기
   useEffect(() => {
     if (session) {
+      fetchUserProfile()
       fetchUserPosts()
     }
-  }, [session, fetchUserPosts])
+  }, [session, fetchUserProfile, fetchUserPosts])
 
   // 세션에서 초기 폼 데이터 설정
   useEffect(() => {
@@ -155,7 +210,13 @@ export default function ProfilePage() {
 
   // 프로필 이미지 업로드
   const handleProfileImageUpload = async () => {
-    if (!selectedImage || !session?.user?.id) return
+    console.log('=== 프로필 이미지 업로드 시작 ===')
+    
+    if (!selectedImage || !session?.user?.id) {
+      console.log('업로드 취소: 이미지 또는 세션 없음')
+      alert('업로드 취소: 이미지 또는 세션 없음')
+      return
+    }
 
     setIsUploadingImage(true)
     try {
@@ -166,7 +227,13 @@ export default function ProfilePage() {
       // 백엔드 토큰이 있으면 Authorization 헤더 추가
       if ((session as any)?.backendToken) {
         headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+        console.log('Authorization 헤더 추가됨')
+      } else {
+        console.log('경고: backendToken이 없음')
       }
+
+      console.log('요청 헤더:', headers)
+      console.log('이미지 데이터 길이:', selectedImage.length)
 
       const response = await fetch('/api/proxy/api/v1/profile/image', {
         method: 'PUT',
@@ -176,8 +243,12 @@ export default function ProfilePage() {
         })
       })
 
+      console.log('응답 상태:', response.status)
+      console.log('응답 OK:', response.ok)
+
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('서버 에러 응답:', errorData)
         throw new Error(errorData.detail || '프로필 이미지 업로드 실패')
       }
 
@@ -187,13 +258,14 @@ export default function ProfilePage() {
       alert('프로필 이미지가 업데이트되었습니다!')
       setSelectedImage(null)
       
-      // 세션 새로고침 필요
-      window.location.reload()
+      // 프로필 데이터 다시 가져오기 (페이지 새로고침 없이)
+      await fetchUserProfile()
     } catch (error: any) {
       console.error('프로필 이미지 업데이트 오류:', error)
       alert(`이미지 업데이트에 실패했습니다: ${error.message}`)
     } finally {
       setIsUploadingImage(false)
+      console.log('=== 프로필 이미지 업로드 종료 ===')
     }
   }
 
@@ -518,39 +590,52 @@ export default function ProfilePage() {
 
       {/* Profile Section */}
       <div className="flex flex-col items-center px-4 pb-8">
-        <div className="relative w-24 h-24 rounded-full bg-gray-300 mb-4 overflow-hidden">
-          {selectedImage ? (
-            <img
-              src={selectedImage}
-              alt="Selected Profile"
-              className="w-full h-full object-cover"
-            />
-          ) : session.user?.image ? (
-            <img
-              src={session.user.image}
-              alt="Profile"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-blue-500 text-white text-2xl font-bold">
-              {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
-            </div>
-          )}
+        <div className="relative w-24 h-24 mb-4">
+          <div className="w-full h-full rounded-full bg-gray-300 overflow-hidden">
+            {selectedImage ? (
+              <img
+                src={selectedImage}
+                alt="Selected Profile"
+                className="w-full h-full object-cover"
+              />
+            ) : userProfile?.profile_image ? (
+              <>
+                <img
+                  src={userProfile.profile_image}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
+                />
+                {console.log('프로필 이미지 표시 중:', userProfile.profile_image)}
+              </>
+            ) : session.user?.image ? (
+              <img
+                src={session.user.image}
+                alt="Profile"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-blue-500 text-white text-2xl font-bold">
+                {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
+              </div>
+            )}
+          </div>
           
-          {/* 카메라 아이콘 */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="absolute bottom-0 right-0 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
+          {/* 카메라 아이콘 - 편집 모드일 때 오른쪽 하단에 표시 (프로필 사진 위에) */}
+          {isEditing && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute -bottom-1 -right-1 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors shadow-lg"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+          )}
         </div>
 
-        {/* 이미지 선택 후 업로드 버튼 */}
-        {selectedImage && (
+        {/* 이미지 선택 후 업로드 버튼 - 편집 모드일 때만 표시 */}
+        {selectedImage && isEditing && (
           <div className="flex space-x-2 mb-4">
             <button
               onClick={handleProfileImageUpload}
@@ -588,7 +673,13 @@ export default function ProfilePage() {
 
         {/* 편집 모드 토글 버튼 */}
         <button
-          onClick={() => setIsEditing(!isEditing)}
+          onClick={() => {
+            setIsEditing(!isEditing)
+            // 편집 모드 종료시 선택된 이미지 초기화
+            if (isEditing) {
+              setSelectedImage(null)
+            }
+          }}
           className="w-64 bg-gray-200 text-gray-800 py-3 rounded-2xl font-medium hover:bg-gray-100 transition-colors mb-4"
         >
           {isEditing ? '편집 완료' : '프로필 편집'}

@@ -55,8 +55,8 @@ def save_image_to_s3(base64_data: str, filename: str) -> str:
             Bucket=settings.S3_BUCKET_NAME,
             Key=f"posts/{filename}",
             Body=image_data,
-            ContentType='image/jpeg',
-            # ACL='public-read'  # 공개 읽기 권한
+            ContentType='image/jpeg'
+            # ACL 제거: 버킷에서 ACL이 비활성화되어 있음
         )
         
         # S3 URL 반환

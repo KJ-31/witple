@@ -26,23 +26,6 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
-class ProfileImageUpdate(BaseModel):
-    image_data: str  # Base64 encoded image data
-
-
-class ProfileInfoUpdate(BaseModel):
-    name: Optional[str] = None
-    age: Optional[int] = None
-    nationality: Optional[str] = None
-
-
-class ProfilePreferencesUpdate(BaseModel):
-    persona: Optional[PersonaType] = None
-    priority: Optional[PriorityType] = None
-    accommodation: Optional[AccommodationType] = None
-    exploration: Optional[ExplorationType] = None
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -107,6 +90,24 @@ class ExplorationType(str, Enum):
     local = "local"
     balance = "balance"
     authentic_experience = "authentic_experience"
+
+
+# Profile update schemas (moved after Enum definitions)
+class ProfileImageUpdate(BaseModel):
+    image_data: str  # Base64 encoded image data
+
+
+class ProfileInfoUpdate(BaseModel):
+    name: Optional[str] = None
+    age: Optional[int] = None
+    nationality: Optional[str] = None
+
+
+class ProfilePreferencesUpdate(BaseModel):
+    persona: Optional[PersonaType] = None
+    priority: Optional[PriorityType] = None
+    accommodation: Optional[AccommodationType] = None
+    exploration: Optional[ExplorationType] = None
 
 
 class ActionType(str, Enum):

@@ -58,7 +58,8 @@ def save_profile_image_to_s3(base64_data: str, user_id: str) -> str:
             Bucket=settings.S3_BUCKET_NAME,
             Key=f"profiles/{filename}",
             Body=image_data,
-            ContentType='image/jpeg',
+            ContentType='image/jpeg'
+            # ACL 제거: 버킷에서 ACL이 비활성화되어 있음
         )
         
         # S3 URL 반환
