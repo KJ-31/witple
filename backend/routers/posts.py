@@ -223,3 +223,97 @@ async def unlike_post(
         db.commit()
     
     return {"message": "좋아요가 제거되었습니다.", "likes_count": post.likes_count}
+
+
+@router.put("/{post_id}", response_model=PostResponse)
+async def update_post(
+    post_id: int,
+    post_data: PostCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """포스트를 수정합니다."""
+    try:
+        # 포스트 조회
+        post = db.query(Post).filter(Post.id == post_id).first()
+        
+        if not post:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="포스트를 찾을 수 없습니다."
+            )
+        
+        # 포스트 소유자 확인
+        if post.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="포스트를 수정할 권한이 없습니다."
+            )
+        
+        # 이미지 업데이트 (새로운 이미지가 제공된 경우)
+        if post_data.image_data:
+            file_extension = "jpg"
+            filename = f"{uuid.uuid4()}.{file_extension}"
+            image_url = save_image_to_s3(post_data.image_data, filename)
+            post.image_url = image_url
+        
+        # 포스트 정보 업데이트
+        post.caption = post_data.caption
+        post.location = post_data.location
+        
+        db.commit()
+        db.refresh(post)
+        
+        # 사용자 정보와 함께 반환
+        post_with_user = db.query(Post).options(joinedload(Post.user)).filter(Post.id == post.id).first()
+        
+        logger.info(f"포스트 수정 완료: {post.id} by {current_user.user_id}")
+        return post_with_user
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"포스트 수정 중 오류: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"포스트 수정 중 오류 발생: {str(e)}"
+        )
+
+
+@router.delete("/{post_id}")
+async def delete_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """포스트를 삭제합니다."""
+    try:
+        # 포스트 조회
+        post = db.query(Post).filter(Post.id == post_id).first()
+        
+        if not post:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="포스트를 찾을 수 없습니다."
+            )
+        
+        # 포스트 소유자 확인
+        if post.user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="포스트를 삭제할 권한이 없습니다."
+            )
+        
+        # 포스트 삭제
+        db.delete(post)
+        db.commit()
+        
+        logger.info(f"포스트 삭제 완료: {post_id} by {current_user.user_id}")
+        return {"message": "포스트가 삭제되었습니다."}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"포스트 삭제 중 오류: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"포스트 삭제 중 오류 발생: {str(e)}"
+        )
