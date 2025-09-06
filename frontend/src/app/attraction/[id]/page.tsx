@@ -66,7 +66,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
           apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
         } else {
           // 기존 형식인 경우
-          apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${params.id}`
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${params.id}`
         }
         
         const response = await fetch(apiUrl)

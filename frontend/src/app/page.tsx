@@ -24,14 +24,29 @@ export default function Home() {
   const [categories, setCategories] = useState<Array<{id: string, name: string, description: string}>>([])
   const [showFilters, setShowFilters] = useState(false)
 
-  // 추천 도시 데이터 로드 함수 (기본 뷰 - 지역별 카테고리별 구분)
+  // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
     if (loadingRef.current) return
 
     loadingRef.current = true
     setLoading(true)
     try {
-      const { data, hasMore: moreData } = await fetchRecommendations(30)
+      let data: CitySection[], hasMore: boolean
+
+      // 로그인 상태에 따라 다른 API 호출
+      if (status === 'authenticated' && session) {
+        // 로그인 상태: 추천 알고리즘 데이터 사용
+        console.log('로그인 상태: 추천 알고리즘 데이터 로드')
+        const result = await fetchRecommendations(30)
+        data = result.data
+        hasMore = result.hasMore
+      } else {
+        // 비로그인 상태: 지역별 카테고리별 구분된 데이터 사용
+        console.log('비로그인 상태: 지역별 카테고리별 데이터 로드')
+        const result = await fetchCitiesByCategory(pageNum, 3)
+        data = result.data
+        hasMore = result.hasMore
+      }
 
       if (pageNum === 0) {
         setCitySections(data)
@@ -39,7 +54,7 @@ export default function Home() {
         setCitySections(prev => [...prev, ...data])
       }
 
-      setHasMore(moreData)
+      setHasMore(hasMore)
       setPage(pageNum)
     } catch (error) {
       console.error('데이터 로드 오류:', error)
@@ -47,7 +62,7 @@ export default function Home() {
       setLoading(false)
       loadingRef.current = false
     }
-  }, [])
+  }, [status, session])
 
   // 필터 데이터 로드 함수
   const loadFilterData = useCallback(async () => {
@@ -179,17 +194,18 @@ export default function Home() {
     }
   }, [selectedRegion, selectedCategory, categories])
 
-  // 초기 데이터 로드
+  // 초기 데이터 로드 및 세션 상태 변경 시 데이터 재로드
   useEffect(() => {
     loadRecommendedCities(0)
     loadFilterData()
-  }, [loadFilterData])
+  }, [loadRecommendedCities, loadFilterData])
 
   // 필터 변경 시 데이터 다시 로드
   useEffect(() => {
     if (selectedRegion || selectedCategory) {
       loadFilteredAttractions(0)
     } else {
+      // 필터가 없을 때는 로그인 상태에 따라 적절한 데이터 로드
       loadRecommendedCities(0)
     }
   }, [selectedRegion, selectedCategory, loadFilteredAttractions, loadRecommendedCities])
@@ -201,12 +217,15 @@ export default function Home() {
 
     observerRef.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
-        loadRecommendedCities(page + 1)
+        // 필터가 적용된 상태가 아닐 때만 무한 스크롤 동작
+        if (!selectedRegion && !selectedCategory) {
+          loadRecommendedCities(page + 1)
+        }
       }
     })
 
     if (node) observerRef.current.observe(node)
-  }, [hasMore, page])
+  }, [hasMore, page, selectedRegion, selectedCategory, loadRecommendedCities])
 
   const handleSearch = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -293,6 +312,10 @@ export default function Home() {
                 onClick={() => {
                   setSelectedRegion('')
                   setSelectedCategory('')
+                  // 필터 초기화 후 로그인 상태에 따라 적절한 데이터 로드
+                  setTimeout(() => {
+                    loadRecommendedCities(0)
+                  }, 100)
                 }}
                 className="text-[#6FA0E6] hover:text-white text-sm transition-colors"
               >
