@@ -86,6 +86,7 @@ export default function MapPage() {
   const [showItinerary, setShowItinerary] = useState(!!placesParam)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
 
   // 화면 높이 측정
@@ -573,12 +574,21 @@ export default function MapPage() {
                 const sortedDays = Object.keys(groupedPlaces).map(Number).sort((a, b) => a - b);
 
                 return sortedDays.map(day => (
-                  <div key={day} className="mb-6">
-                    <div className="flex items-center mb-3">
-                      <div className="bg-[#3E68FF] rounded-full w-8 h-8 flex items-center justify-center mr-3">
+                  <div key={day} className={`mb-6 rounded-2xl transition-all duration-300 ${
+                    highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
+                  }`}>
+                    <div 
+                      className="flex items-center mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
+                      onClick={() => setHighlightedDay(highlightedDay === day ? null : day)}
+                    >
+                      <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
+                        highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
+                      }`}>
                         <span className="text-white text-sm font-bold">{day}</span>
                       </div>
-                      <h3 className="text-lg font-semibold text-white">
+                      <h3 className={`text-lg font-semibold transition-colors duration-200 ${
+                        highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
+                      }`}>
                         {day}일차
                         {startDateParam && (
                           <span className="text-sm text-[#94A9C9] ml-2">
