@@ -22,6 +22,7 @@ const authOptions: NextAuthOptions = {
 
         try {
           const apiUrl = process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+          
           const formData = new URLSearchParams()
           formData.append('username', credentials.email)
           formData.append('password', credentials.password)
