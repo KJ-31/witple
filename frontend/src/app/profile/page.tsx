@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
@@ -15,11 +15,13 @@ interface TripCard {
 
 interface Post {
   id: number
-  title: string
-  content: string
-  date: string
-  likes: number
-  comments: number
+  user_id: string
+  caption: string
+  image_url: string
+  location?: string
+  likes_count: number
+  comments_count: number
+  created_at: string
 }
 
 interface SavedItem {
@@ -33,8 +35,39 @@ interface SavedItem {
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'trips' | 'posts' | 'saved'>('trips')
+  const [posts, setPosts] = useState<Post[]>([])
+  const [postsLoading, setPostsLoading] = useState(false)
   const router = useRouter()
   const { data: session, status } = useSession()
+
+  // 사용자 게시글 가져오기
+  const fetchUserPosts = useCallback(async () => {
+    if (!session) return
+    
+    setPostsLoading(true)
+    try {
+      const response = await fetch('/api/proxy/api/v1/posts/', {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        // 현재 사용자의 게시글만 필터링
+        const userPosts = data.posts.filter((post: Post) => post.user_id === session.user?.email)
+        setPosts(userPosts)
+      } else {
+        console.error('게시글 가져오기 실패')
+        setPosts([])
+      }
+    } catch (error) {
+      console.error('게시글 가져오기 오류:', error)
+      setPosts([])
+    } finally {
+      setPostsLoading(false)
+    }
+  }, [session])
 
   // 로그인하지 않은 사용자는 로그인 페이지로 리다이렉트
   useEffect(() => {
@@ -42,6 +75,13 @@ export default function ProfilePage() {
       router.push('/auth/login')
     }
   }, [status, router])
+
+  // 세션이 있을 때 게시글 가져오기
+  useEffect(() => {
+    if (session) {
+      fetchUserPosts()
+    }
+  }, [session, fetchUserPosts])
 
   // 로딩 중이면 로딩 화면 표시
   if (status === 'loading') {
@@ -106,32 +146,6 @@ export default function ProfilePage() {
     }
   ]
 
-  const posts: Post[] = [
-    {
-      id: 1,
-      title: '서울 명동 맛집 추천!',
-      content: '명동에서 꼭 가봐야 할 맛집들을 소개합니다...',
-      date: '2025.08.15',
-      likes: 24,
-      comments: 8
-    },
-    {
-      id: 2,
-      title: '부산 해운대 여행 후기',
-      content: '해운대에서의 즐거운 여행 경험을 공유합니다...',
-      date: '2024.07.05',
-      likes: 18,
-      comments: 12
-    },
-    {
-      id: 3,
-      title: '전주 한옥마을 가이드',
-      content: '전주 한옥마을 완벽 가이드를 준비했습니다...',
-      date: '2025.03.05',
-      likes: 31,
-      comments: 5
-    }
-  ]
 
   const savedItems: SavedItem[] = [
     {
@@ -212,22 +226,66 @@ export default function ProfilePage() {
         )
 
       case 'posts':
+        if (postsLoading) {
+          return (
+            <div className="flex justify-center items-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
+              <span className="ml-2 text-gray-400">게시글을 불러오는 중...</span>
+            </div>
+          )
+        }
+
+        if (posts.length === 0) {
+          return (
+            <div className="text-center py-8">
+              <p className="text-gray-400">작성한 게시글이 없습니다.</p>
+              <Link href="/feed/create">
+                <button className="mt-4 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                  첫 게시글 작성하기
+                </button>
+              </Link>
+            </div>
+          )
+        }
+
         return (
           <div className="space-y-4">
             {posts.map((post) => (
               <div key={post.id} className="bg-gray-800 p-4 rounded-2xl">
-                <h3 className="text-white text-lg font-semibold mb-2">{post.title}</h3>
-                <p className="text-gray-300 text-sm mb-3 line-clamp-2">{post.content}</p>
+                {/* 이미지가 있으면 표시 */}
+                {post.image_url && (
+                  <div className="mb-3 rounded-lg overflow-hidden">
+                    <img 
+                      src={post.image_url} 
+                      alt="Post image"
+                      className="w-full h-48 object-cover"
+                    />
+                  </div>
+                )}
+                
+                <p className="text-white text-base mb-3">{post.caption}</p>
+                
+                {/* 위치 정보가 있으면 표시 */}
+                {post.location && (
+                  <div className="flex items-center mb-2 text-sm text-gray-400">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <span>{post.location}</span>
+                  </div>
+                )}
+                
                 <div className="flex items-center justify-between text-sm text-gray-400">
-                  <span>{post.date}</span>
+                  <span>{new Date(post.created_at).toLocaleDateString('ko-KR')}</span>
                   <div className="flex items-center space-x-4">
                     <div className="flex items-center space-x-1">
                       <span>❤️</span>
-                      <span>{post.likes}</span>
+                      <span>{post.likes_count}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <span>💬</span>
-                      <span>{post.comments}</span>
+                      <span>{post.comments_count}</span>
                     </div>
                   </div>
                 </div>
