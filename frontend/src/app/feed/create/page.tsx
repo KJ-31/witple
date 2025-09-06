@@ -78,8 +78,25 @@ export default function CreatePostPage() {
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=ko`
           )
           const data = await response.json()
-          const address = data.display_name || `${latitude}, ${longitude}`
-          setLocation(address)
+          
+          if (data.display_name) {
+            // 간소화된 주소 생성 (첫 번째, 마지막 정보만)
+            const parts = data.display_name.split(',').map((part: string) => part.trim())
+            const first = parts[0] || ''
+            const last = parts[parts.length - 1] || ''
+            
+            let simplifiedAddress = ''
+            if (first === last || parts.length === 1) {
+              simplifiedAddress = last
+            } else {
+              simplifiedAddress = `${first}, ${last}`
+            }
+            
+            setLocation(simplifiedAddress)
+          } else {
+            setLocation(`${latitude}, ${longitude}`)
+          }
+          
           setShowLocationOptions(false)
         } catch (error) {
           console.error('주소 변환 실패:', error)
@@ -173,7 +190,19 @@ export default function CreatePostPage() {
     city?: string
     importance?: number
   }) => {
-    setLocation(result.display_name)
+    // 간소화된 주소 생성 (첫 번째, 마지막 정보만)
+    const parts = result.display_name.split(',').map((part: string) => part.trim())
+    const first = parts[0] || ''
+    const last = parts[parts.length - 1] || ''
+    
+    let simplifiedAddress = ''
+    if (first === last || parts.length === 1) {
+      simplifiedAddress = last
+    } else {
+      simplifiedAddress = `${first}, ${last}`
+    }
+    
+    setLocation(simplifiedAddress)
     setCoordinates({ lat: parseFloat(result.lat), lng: parseFloat(result.lon) })
     setShowSearchResults(false)
     setShowLocationOptions(false)
@@ -482,25 +511,24 @@ export default function CreatePostPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
                       <div className="flex-1">
-                        <p className="text-white text-sm font-medium line-clamp-2">
-                          {result.name || result.display_name}
+                        <p className="text-white text-sm font-medium line-clamp-1">
+                          {result.name || result.display_name.split(',')[0]}
                         </p>
-                        {result.name && result.name !== result.display_name && (
-                          <p className="text-gray-400 text-xs mt-1 line-clamp-1">
-                            {result.display_name}
-                          </p>
-                        )}
-                        {result.city && (
-                          <p className="text-gray-500 text-xs">
-                            {result.city}
-                          </p>
-                        )}
+                        <p className="text-gray-400 text-xs mt-1">
+                          {(() => {
+                            const parts = result.display_name.split(',').map((part: string) => part.trim())
+                            const first = parts[0] || ''
+                            const last = parts[parts.length - 1] || ''
+                            
+                            // 첫 번째와 마지막이 같으면 하나만 표시
+                            if (first === last || parts.length === 1) {
+                              return last
+                            }
+                            
+                            return `${first}, ${last}`
+                          })()}
+                        </p>
                       </div>
-                      {result.type && (
-                        <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded ml-2 flex-shrink-0">
-                          {result.type}
-                        </span>
-                      )}
                     </button>
                   ))}
                 </div>
@@ -541,7 +569,20 @@ export default function CreatePostPage() {
             <div className="mt-2 p-3 bg-gray-800 border border-gray-700 rounded-2xl">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <p className="text-white font-medium text-sm">{location}</p>
+                  <p className="text-white font-medium text-sm">
+                    {(() => {
+                      const parts = location.split(',').map((part: string) => part.trim())
+                      const first = parts[0] || ''
+                      const last = parts[parts.length - 1] || ''
+                      
+                      // 첫 번째와 마지막이 같으면 하나만 표시
+                      if (first === last || parts.length === 1) {
+                        return last
+                      }
+                      
+                      return `${first}, ${last}`
+                    })()}
+                  </p>
                   <p className="text-gray-400 text-xs mt-1">
                     좌표: {coordinates.lat.toFixed(6)}, {coordinates.lng.toFixed(6)}
                   </p>
