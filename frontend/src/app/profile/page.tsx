@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
@@ -35,8 +35,30 @@ interface SavedItem {
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'trips' | 'posts' | 'saved'>('trips')
+  const [editTab, setEditTab] = useState<'basic' | 'travel'>('basic')
+  const [isEditing, setIsEditing] = useState(false)
   const [posts, setPosts] = useState<Post[]>([])
   const [postsLoading, setPostsLoading] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // 기본 정보 폼 상태
+  const [basicInfo, setBasicInfo] = useState({
+    name: '',
+    age: '',
+    nationality: ''
+  })
+  const [isUpdatingBasicInfo, setIsUpdatingBasicInfo] = useState(false)
+  
+  // 여행 취향 폼 상태
+  const [travelPreferences, setTravelPreferences] = useState({
+    persona: '',
+    priority: '',
+    accommodation: '',
+    exploration: ''
+  })
+  const [isUpdatingPreferences, setIsUpdatingPreferences] = useState(false)
   const router = useRouter()
   const { data: session, status } = useSession()
 
@@ -91,6 +113,17 @@ export default function ProfilePage() {
     }
   }, [session, fetchUserPosts])
 
+  // 세션에서 초기 폼 데이터 설정
+  useEffect(() => {
+    if (session?.user) {
+      setBasicInfo({
+        name: session.user.name || '',
+        age: (session.user as any).age || '',
+        nationality: (session.user as any).nationality || ''
+      })
+    }
+  }, [session])
+
   // 로딩 중이면 로딩 화면 표시
   if (status === 'loading') {
     return (
@@ -106,6 +139,141 @@ export default function ProfilePage() {
   // 로그인하지 않은 경우 아무것도 렌더링하지 않음 (리다이렉트 처리됨)
   if (!session) {
     return null
+  }
+
+  // 이미지 파일 선택 핸들러
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setSelectedImage(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  // 프로필 이미지 업로드
+  const handleProfileImageUpload = async () => {
+    if (!selectedImage || !session?.user?.id) return
+
+    setIsUploadingImage(true)
+    try {
+      const headers: any = {
+        'Content-Type': 'application/json',
+      }
+
+      // 백엔드 토큰이 있으면 Authorization 헤더 추가
+      if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
+      const response = await fetch('/api/proxy/api/v1/profile/image', {
+        method: 'PUT',
+        headers: headers,
+        body: JSON.stringify({
+          image_data: selectedImage
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '프로필 이미지 업로드 실패')
+      }
+
+      const result = await response.json()
+      console.log('프로필 이미지 업데이트 성공:', result)
+      
+      alert('프로필 이미지가 업데이트되었습니다!')
+      setSelectedImage(null)
+      
+      // 세션 새로고침 필요
+      window.location.reload()
+    } catch (error: any) {
+      console.error('프로필 이미지 업데이트 오류:', error)
+      alert(`이미지 업데이트에 실패했습니다: ${error.message}`)
+    } finally {
+      setIsUploadingImage(false)
+    }
+  }
+
+  // 기본 정보 업데이트
+  const handleBasicInfoUpdate = async () => {
+    setIsUpdatingBasicInfo(true)
+    try {
+      const headers: any = {
+        'Content-Type': 'application/json',
+      }
+
+      if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
+      const response = await fetch('/api/proxy/api/v1/profile/info', {
+        method: 'PUT',
+        headers: headers,
+        body: JSON.stringify({
+          name: basicInfo.name || null,
+          age: basicInfo.age ? parseInt(basicInfo.age) : null,
+          nationality: basicInfo.nationality || null
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '기본 정보 업데이트 실패')
+      }
+
+      const result = await response.json()
+      console.log('기본 정보 업데이트 성공:', result)
+      alert('기본 정보가 업데이트되었습니다!')
+      
+    } catch (error: any) {
+      console.error('기본 정보 업데이트 오류:', error)
+      alert(`기본 정보 업데이트에 실패했습니다: ${error.message}`)
+    } finally {
+      setIsUpdatingBasicInfo(false)
+    }
+  }
+
+  // 여행 취향 업데이트
+  const handleTravelPreferencesUpdate = async () => {
+    setIsUpdatingPreferences(true)
+    try {
+      const headers: any = {
+        'Content-Type': 'application/json',
+      }
+
+      if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
+      const response = await fetch('/api/proxy/api/v1/profile/preferences', {
+        method: 'PUT',
+        headers: headers,
+        body: JSON.stringify({
+          persona: travelPreferences.persona || null,
+          priority: travelPreferences.priority || null,
+          accommodation: travelPreferences.accommodation || null,
+          exploration: travelPreferences.exploration || null
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '여행 취향 업데이트 실패')
+      }
+
+      const result = await response.json()
+      console.log('여행 취향 업데이트 성공:', result)
+      alert('여행 취향이 업데이트되었습니다!')
+      
+    } catch (error: any) {
+      console.error('여행 취향 업데이트 오류:', error)
+      alert(`여행 취향 업데이트에 실패했습니다: ${error.message}`)
+    } finally {
+      setIsUpdatingPreferences(false)
+    }
   }
 
   // 로그아웃 핸들러
@@ -350,8 +518,14 @@ export default function ProfilePage() {
 
       {/* Profile Section */}
       <div className="flex flex-col items-center px-4 pb-8">
-        <div className="w-24 h-24 rounded-full bg-gray-300 mb-4 overflow-hidden">
-          {session.user?.image ? (
+        <div className="relative w-24 h-24 rounded-full bg-gray-300 mb-4 overflow-hidden">
+          {selectedImage ? (
+            <img
+              src={selectedImage}
+              alt="Selected Profile"
+              className="w-full h-full object-cover"
+            />
+          ) : session.user?.image ? (
             <img
               src={session.user.image}
               alt="Profile"
@@ -362,7 +536,46 @@ export default function ProfilePage() {
               {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
             </div>
           )}
+          
+          {/* 카메라 아이콘 */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="absolute bottom-0 right-0 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
         </div>
+
+        {/* 이미지 선택 후 업로드 버튼 */}
+        {selectedImage && (
+          <div className="flex space-x-2 mb-4">
+            <button
+              onClick={handleProfileImageUpload}
+              disabled={isUploadingImage}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+            >
+              {isUploadingImage ? '업로드 중...' : '저장'}
+            </button>
+            <button
+              onClick={() => setSelectedImage(null)}
+              className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+            >
+              취소
+            </button>
+          </div>
+        )}
+
+        {/* 숨겨진 파일 입력 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
 
         <h1 className="text-2xl font-bold text-blue-400 mb-2">
           {session.user?.name || session.user?.email || '사용자'}
@@ -373,12 +586,207 @@ export default function ProfilePage() {
           <span className="text-green-400 font-semibold">555</span>
         </div>
 
-        <Link href="/profile/edit">
-          <button className="w-64 bg-gray-200 text-gray-800 py-3 rounded-2xl font-medium hover:bg-gray-100 transition-colors">
-            Edit Profile
-          </button>
-        </Link>
+        {/* 편집 모드 토글 버튼 */}
+        <button
+          onClick={() => setIsEditing(!isEditing)}
+          className="w-64 bg-gray-200 text-gray-800 py-3 rounded-2xl font-medium hover:bg-gray-100 transition-colors mb-4"
+        >
+          {isEditing ? '편집 완료' : '프로필 편집'}
+        </button>
+
+        {/* 기본정보/여행취향 탭 (편집 모드일 때만 표시) */}
+        {isEditing && (
+          <div className="w-full max-w-sm mb-6">
+            <div className="flex space-x-2 bg-gray-800 p-1 rounded-xl">
+              <button
+                onClick={() => setEditTab('basic')}
+                className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                  editTab === 'basic'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-300 hover:text-white'
+                }`}
+              >
+                기본정보
+              </button>
+              <button
+                onClick={() => setEditTab('travel')}
+                className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                  editTab === 'travel'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-300 hover:text-white'
+                }`}
+              >
+                여행취향
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* 편집 모드 콘텐츠 */}
+      {isEditing && (
+        <div className="px-4 mb-8">
+          {editTab === 'basic' ? (
+            <div className="bg-gray-800 p-6 rounded-2xl">
+              <h3 className="text-lg font-semibold text-white mb-4">기본정보</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">이름</label>
+                  <input
+                    type="text"
+                    value={basicInfo.name}
+                    onChange={(e) => setBasicInfo({...basicInfo, name: e.target.value})}
+                    className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="이름을 입력하세요"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">이메일</label>
+                  <input
+                    type="email"
+                    value={session.user?.email || ''}
+                    className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="이메일을 입력하세요"
+                    disabled
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">나이</label>
+                  <input
+                    type="number"
+                    value={basicInfo.age}
+                    onChange={(e) => setBasicInfo({...basicInfo, age: e.target.value})}
+                    className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="나이를 입력하세요"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">국적</label>
+                  <input
+                    type="text"
+                    value={basicInfo.nationality}
+                    onChange={(e) => setBasicInfo({...basicInfo, nationality: e.target.value})}
+                    className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="국적을 입력하세요"
+                  />
+                </div>
+                <button
+                  onClick={handleBasicInfoUpdate}
+                  disabled={isUpdatingBasicInfo}
+                  className="w-full mt-6 bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  {isUpdatingBasicInfo ? '업데이트 중...' : '기본정보 저장'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-800 p-6 rounded-2xl">
+              <h3 className="text-lg font-semibold text-white mb-4">여행취향</h3>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3">여행 스타일</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: '럭셔리', value: 'luxury' },
+                      { label: '모던', value: 'modern' },
+                      { label: '자연활동', value: 'nature_activity' },
+                      { label: '맛집탐방', value: 'foodie' }
+                    ].map((style) => (
+                      <button
+                        key={style.value}
+                        onClick={() => setTravelPreferences({...travelPreferences, persona: style.value})}
+                        className={`p-3 border rounded-lg text-white transition-colors ${
+                          travelPreferences.persona === style.value
+                            ? 'bg-blue-600 border-blue-500'
+                            : 'bg-gray-700 border-gray-600 hover:bg-blue-600'
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3">여행 우선순위</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: '숙박', value: 'accommodation' },
+                      { label: '맛집', value: 'restaurants' },
+                      { label: '체험', value: 'experience' },
+                      { label: '쇼핑', value: 'shopping' }
+                    ].map((priority) => (
+                      <button
+                        key={priority.value}
+                        onClick={() => setTravelPreferences({...travelPreferences, priority: priority.value})}
+                        className={`p-3 border rounded-lg text-white transition-colors ${
+                          travelPreferences.priority === priority.value
+                            ? 'bg-blue-600 border-blue-500'
+                            : 'bg-gray-700 border-gray-600 hover:bg-blue-600'
+                        }`}
+                      >
+                        {priority.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3">숙박 스타일</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: '편안함', value: 'comfort' },
+                      { label: '힐링', value: 'healing' },
+                      { label: '전통', value: 'traditional' },
+                      { label: '커뮤니티', value: 'community' }
+                    ].map((accommodation) => (
+                      <button
+                        key={accommodation.value}
+                        onClick={() => setTravelPreferences({...travelPreferences, accommodation: accommodation.value})}
+                        className={`p-3 border rounded-lg text-white transition-colors ${
+                          travelPreferences.accommodation === accommodation.value
+                            ? 'bg-blue-600 border-blue-500'
+                            : 'bg-gray-700 border-gray-600 hover:bg-blue-600'
+                        }`}
+                      >
+                        {accommodation.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3">탐험 스타일</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: '핫플레이스', value: 'hot' },
+                      { label: '로컬', value: 'local' },
+                      { label: '밸런스', value: 'balance' },
+                      { label: '진정한 경험', value: 'authentic_experience' }
+                    ].map((exploration) => (
+                      <button
+                        key={exploration.value}
+                        onClick={() => setTravelPreferences({...travelPreferences, exploration: exploration.value})}
+                        className={`p-3 border rounded-lg text-white transition-colors ${
+                          travelPreferences.exploration === exploration.value
+                            ? 'bg-blue-600 border-blue-500'
+                            : 'bg-gray-700 border-gray-600 hover:bg-blue-600'
+                        }`}
+                      >
+                        {exploration.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handleTravelPreferencesUpdate}
+                  disabled={isUpdatingPreferences}
+                  className="w-full mt-6 bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  {isUpdatingPreferences ? '업데이트 중...' : '여행 취향 저장'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="px-4 mb-6">

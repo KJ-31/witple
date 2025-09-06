@@ -15,6 +15,7 @@ class User(Base):
     nationality = Column(String, nullable=True)
     phone_e164 = Column(String, nullable=True)
     points_balance = Column(Integer, nullable=True)
+    profile_image = Column(String, nullable=True)  # 프로필 이미지 URL
     created_at = Column(DateTime(timezone=False))  # 기존 스키마에 맞춤
     updated_at = Column(DateTime(timezone=False))
 
