@@ -34,10 +34,18 @@ def get_category_from_table(table_name: str) -> str:
 
 def format_attraction_data(attraction, category: str, table_name: str = None):
     """관광지 데이터 포맷팅"""
-    # image_urls가 JSON 리스트인 경우 첫 번째 이미지 사용
-    image_url = "/images/default.jpg"
+    # image_urls가 JSON 리스트인 경우 첫 번째 유효한 이미지 사용
+    image_url = None
     if attraction.image_urls and isinstance(attraction.image_urls, list) and len(attraction.image_urls) > 0:
-        image_url = attraction.image_urls[0]
+        # 유효한 이미지 URL 찾기 (None이 아니고 빈 문자열이 아닌 것)
+        for img_url in attraction.image_urls:
+            if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                image_url = img_url
+                break
+    
+    # 유효한 이미지가 없으면 None으로 설정 (프론트엔드에서 기본 UI 표시)
+    if not image_url:
+        image_url = None
     
     # 고유 ID 생성: 테이블명_id 형식으로 변경
     unique_id = f"{table_name}_{attraction.id}" if table_name else str(attraction.id)
