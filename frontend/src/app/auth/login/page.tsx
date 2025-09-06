@@ -23,10 +23,10 @@ export default function LoginPage() {
     }
   }, [searchParams])
 
-  // 이미 로그인된 사용자는 대시보드로 리다이렉트
+  // 이미 로그인된 사용자는 메인 페이지로 리다이렉트
   useEffect(() => {
     if (status === 'authenticated' && session) {
-      router.push('/dashboard')
+      router.push('/')
     }
   }, [status, session, router])
 
@@ -55,7 +55,7 @@ export default function LoginPage() {
       })
       
       if (result?.ok) {
-        router.push('/dashboard')
+        router.push('/')
       } else {
         setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.')
       }
@@ -141,7 +141,7 @@ export default function LoginPage() {
             
             <button
               type="button"
-              onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
+              onClick={() => signIn('google', { callbackUrl: '/' })}
               className="w-full flex justify-center items-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">

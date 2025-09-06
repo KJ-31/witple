@@ -25,9 +25,9 @@ export default function AuthCallback() {
       localStorage.setItem('token', token)
       setStatus('로그인 성공! 리다이렉트 중...')
       
-      // 대시보드로 리다이렉트
+      // 메인 페이지로 리다이렉트
       setTimeout(() => {
-        router.push('/dashboard')
+        router.push('/')
       }, 1500)
     } else {
       setStatus('인증 정보가 없습니다')
