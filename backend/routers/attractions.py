@@ -493,6 +493,102 @@ async def get_categories():
         )
 
 
+@router.get("/filtered-by-category")
+async def get_filtered_attractions_by_category(
+    region: Optional[str] = Query(None, description="지역 필터"),
+    page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
+    limit: int = Query(8, ge=1, le=50, description="카테고리당 결과 수"),
+    db: Session = Depends(get_db)
+):
+    """지역별로 카테고리별 그룹화된 관광지 목록을 가져옵니다."""
+    try:
+        if not region:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="지역을 선택해주세요."
+            )
+        
+        # 카테고리별로 그룹화된 결과
+        category_sections = []
+        
+        # 각 카테고리별로 데이터 조회
+        for table_name, table_model in CATEGORY_TABLES.items():
+            category = get_category_from_table(table_name)
+            
+            # 해당 카테고리에서 지역 필터 적용
+            query = db.query(table_model).filter(
+                or_(
+                    table_model.region.ilike(f"%{region}%"),
+                    table_model.region == region
+                )
+            )
+            
+            # 페이지네이션 적용
+            offset = page * limit
+            attractions = query.offset(offset).limit(limit).all()
+            
+            # 결과가 있는 카테고리만 포함
+            if attractions:
+                formatted_attractions = []
+                for attraction in attractions:
+                    formatted_attraction = format_attraction_data(attraction, category, table_name)
+                    formatted_attraction["city"] = {
+                        "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                        "name": attraction.city or "알 수 없음",
+                        "region": attraction.region or "알 수 없음"
+                    }
+                    formatted_attractions.append(formatted_attraction)
+                
+                # 카테고리 섹션 생성
+                category_sections.append({
+                    "category": category,
+                    "categoryName": get_category_korean_name(category),
+                    "attractions": formatted_attractions,
+                    "total": len(formatted_attractions)
+                })
+        
+        # 카테고리별 총 개수 계산
+        total_by_category = {}
+        for table_name, table_model in CATEGORY_TABLES.items():
+            category = get_category_from_table(table_name)
+            query = db.query(table_model).filter(
+                or_(
+                    table_model.region.ilike(f"%{region}%"),
+                    table_model.region == region
+                )
+            )
+            total_by_category[category] = query.count()
+        
+        return {
+            "region": region,
+            "categorySections": category_sections,
+            "totalByCategory": total_by_category,
+            "page": page,
+            "limit": limit,
+            "hasMore": any(total > (page + 1) * limit for total in total_by_category.values())
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"지역별 카테고리 관광지 조회 중 오류 발생: {str(e)}"
+        )
+
+
+def get_category_korean_name(category: str) -> str:
+    """카테고리 영어명을 한국어명으로 변환"""
+    category_map = {
+        "nature": "자연",
+        "restaurants": "맛집", 
+        "shopping": "쇼핑",
+        "accommodation": "숙박",
+        "humanities": "인문",
+        "leisure_sports": "레저"
+    }
+    return category_map.get(category, category)
+
+
 @router.get("/filtered")
 async def get_filtered_attractions(
     region: Optional[str] = Query(None, description="지역 필터"),

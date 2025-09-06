@@ -78,29 +78,63 @@ export default function Home() {
     setLoading(true)
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const params = new URLSearchParams({
-        page: pageNum.toString(),
-        limit: '3'
-      })
       
-      if (selectedRegion) params.append('region', selectedRegion)
-      if (selectedCategory) params.append('category', selectedCategory)
+      let filteredCitySections: CitySection[] = []
       
-      const url = `${API_BASE_URL}/api/v1/attractions/filtered?${params}`
-      console.log('Filtered attractions URL:', url)
-      
-      const response = await fetch(url)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const result = await response.json()
-      
-      // 필터링된 결과를 CitySection 형식으로 변환
-      const filteredCitySections: CitySection[] = []
-      
-      if (result.attractions && result.attractions.length > 0) {
+      // 지역만 선택된 경우: 카테고리별로 구분된 섹션 표시
+      if (selectedRegion && !selectedCategory) {
+        const params = new URLSearchParams({
+          region: selectedRegion,
+          page: pageNum.toString(),
+          limit: '8'
+        })
+        
+        const url = `${API_BASE_URL}/api/v1/attractions/filtered-by-category?${params}`
+        console.log('Filtered by category URL:', url)
+        
+        const response = await fetch(url)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const result = await response.json()
+        
+        // 카테고리별 섹션을 CitySection 형식으로 변환
+        result.categorySections.forEach((categorySection: any, index: number) => {
+          filteredCitySections.push({
+            id: `category-${selectedRegion}-${categorySection.category}-${index}`,
+            cityName: selectedRegion,
+            description: `${selectedRegion}의 ${categorySection.categoryName}`,
+            region: selectedRegion,
+            attractions: categorySection.attractions,
+            recommendationScore: 90 - index * 5
+          })
+        })
+        
+        setHasMore(result.hasMore)
+      } 
+      // 지역과 카테고리 모두 선택된 경우: 기존 방식 사용
+      else if (selectedRegion && selectedCategory) {
+        const params = new URLSearchParams({
+          page: pageNum.toString(),
+          limit: '3'
+        })
+        
+        params.append('region', selectedRegion)
+        params.append('category', selectedCategory)
+        
+        const url = `${API_BASE_URL}/api/v1/attractions/filtered?${params}`
+        console.log('Filtered attractions URL:', url)
+        
+        const response = await fetch(url)
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const result = await response.json()
+        
         // 지역별로 그룹화
         const groupedByRegion: { [key: string]: any[] } = {}
         
@@ -118,14 +152,14 @@ export default function Home() {
           filteredCitySections.push({
             id: `filtered-${region}-${index}`,
             cityName: cityName,
-            description: selectedCategory ? 
-              `${region}의 ${categories.find(c => c.id === selectedCategory)?.name || selectedCategory}` :
-              `${region}의 추천 여행지`,
+            description: `${region}의 ${categories.find(c => c.id === selectedCategory)?.name || selectedCategory}`,
             region: region,
-            attractions: attractions.slice(0, 8), // 최대 8개까지만
+            attractions: attractions.slice(0, 8),
             recommendationScore: 85 - index * 5
           })
         })
+        
+        setHasMore(result.hasMore)
       }
 
       if (pageNum === 0) {
@@ -134,7 +168,6 @@ export default function Home() {
         setCitySections(prev => [...prev, ...filteredCitySections])
       }
 
-      setHasMore(result.hasMore)
       setPage(pageNum)
     } catch (error) {
       console.error('필터링된 데이터 로드 오류:', error)
