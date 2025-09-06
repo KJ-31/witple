@@ -14,7 +14,7 @@ export default function CreatePostPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [showLocationOptions, setShowLocationOptions] = useState(false)
   const [isGettingLocation, setIsGettingLocation] = useState(false)
-  const [coordinates, setCoordinates] = useState<{lat: number, lng: number} | null>(null)
+  const [coordinates, setCoordinates] = useState<{ lat: number, lng: number } | null>(null)
   const [searchResults, setSearchResults] = useState<Array<{
     display_name: string
     lat: string
@@ -27,7 +27,7 @@ export default function CreatePostPage() {
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchResults, setShowSearchResults] = useState(false)
   const locationInputRef = useRef<HTMLInputElement>(null)
-  
+
   // 외부 클릭시 드롭다운 닫기
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -39,7 +39,7 @@ export default function CreatePostPage() {
         setShowSearchResults(false)
       }
     }
-    
+
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showLocationOptions, showSearchResults])
@@ -71,32 +71,32 @@ export default function CreatePostPage() {
       async (position) => {
         const { latitude, longitude } = position.coords
         setCoordinates({ lat: latitude, lng: longitude })
-        
+
         // 역 지오코딩으로 주소 가져오기
         try {
           const response = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=ko`
           )
           const data = await response.json()
-          
+
           if (data.display_name) {
             // 간소화된 주소 생성 (첫 번째, 마지막 정보만)
             const parts = data.display_name.split(',').map((part: string) => part.trim())
             const first = parts[0] || ''
             const last = parts[parts.length - 1] || ''
-            
+
             let simplifiedAddress = ''
             if (first === last || parts.length === 1) {
               simplifiedAddress = last
             } else {
               simplifiedAddress = `${first}, ${last}`
             }
-            
+
             setLocation(simplifiedAddress)
           } else {
             setLocation(`${latitude}, ${longitude}`)
           }
-          
+
           setShowLocationOptions(false)
         } catch (error) {
           console.error('주소 변환 실패:', error)
@@ -109,7 +109,7 @@ export default function CreatePostPage() {
       (error) => {
         console.error('위치 가져오기 실패:', error)
         let errorMessage = '위치를 가져올 수 없습니다.'
-        
+
         switch (error.code) {
           case error.PERMISSION_DENIED:
             errorMessage = '위치 접근 권한이 거부되었습니다. 브라우저 설정에서 위치 접근을 허용해주세요.'
@@ -121,7 +121,7 @@ export default function CreatePostPage() {
             errorMessage = '위치 요청 시간이 초과되었습니다.'
             break
         }
-        
+
         alert(errorMessage)
         setIsGettingLocation(false)
       },
@@ -146,17 +146,17 @@ export default function CreatePostPage() {
       const response = await fetch(
         `/api/places?query=${encodeURIComponent(query)}`
       )
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-      
+
       const data = await response.json()
-      
+
       if (data.error) {
         throw new Error(data.error)
       }
-      
+
       // 검색 결과를 표준 형식으로 변환
       const formattedResults = data.map((item: any) => ({
         display_name: item.display_name,
@@ -167,7 +167,7 @@ export default function CreatePostPage() {
         city: item.city,
         importance: item.importance
       }))
-      
+
       setSearchResults(formattedResults)
       setShowSearchResults(true)
     } catch (error) {
@@ -194,14 +194,14 @@ export default function CreatePostPage() {
     const parts = result.display_name.split(',').map((part: string) => part.trim())
     const first = parts[0] || ''
     const last = parts[parts.length - 1] || ''
-    
+
     let simplifiedAddress = ''
     if (first === last || parts.length === 1) {
       simplifiedAddress = last
     } else {
       simplifiedAddress = `${first}, ${last}`
     }
-    
+
     setLocation(simplifiedAddress)
     setCoordinates({ lat: parseFloat(result.lat), lng: parseFloat(result.lon) })
     setShowSearchResults(false)
@@ -394,9 +394,6 @@ export default function CreatePostPage() {
 
         {/* Location Input */}
         <div className="mb-6 location-dropdown">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            위치 (선택사항)
-          </label>
           <div className="relative">
             <input
               ref={locationInputRef}
@@ -415,7 +412,7 @@ export default function CreatePostPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            
+
             {/* Location Options Button */}
             <button
               type="button"
@@ -427,7 +424,7 @@ export default function CreatePostPage() {
               </svg>
             </button>
           </div>
-          
+
           {/* Location Options Dropdown */}
           {showLocationOptions && (
             <div className="mt-2 bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
@@ -453,7 +450,7 @@ export default function CreatePostPage() {
                   </div>
                 )}
               </button>
-              
+
               <button
                 type="button"
                 onClick={() => {
@@ -489,14 +486,14 @@ export default function CreatePostPage() {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">장소명을 입력하면 실시간으로 검색 결과가 나타납니다</p>
               </div>
-              
+
               {isSearching && (
                 <div className="p-4 flex items-center justify-center">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400 mr-2"></div>
                   <span className="text-gray-400 text-sm">검색 중...</span>
                 </div>
               )}
-              
+
               {!isSearching && searchResults.length > 0 && (
                 <div className="max-h-60 overflow-y-auto">
                   {searchResults.map((result, index) => (
@@ -519,12 +516,12 @@ export default function CreatePostPage() {
                             const parts = result.display_name.split(',').map((part: string) => part.trim())
                             const first = parts[0] || ''
                             const last = parts[parts.length - 1] || ''
-                            
+
                             // 첫 번째와 마지막이 같으면 하나만 표시
                             if (first === last || parts.length === 1) {
                               return last
                             }
-                            
+
                             return `${first}, ${last}`
                           })()}
                         </p>
@@ -533,7 +530,7 @@ export default function CreatePostPage() {
                   ))}
                 </div>
               )}
-              
+
               {!isSearching && searchResults.length === 0 && location.trim() && (
                 <div className="p-4 text-center">
                   <p className="text-gray-400 text-sm">&quot;{location}&quot;에 대한 검색 결과가 없습니다</p>
@@ -563,7 +560,7 @@ export default function CreatePostPage() {
               )}
             </div>
           )}
-          
+
           {/* Selected Location Display */}
           {location && coordinates && (
             <div className="mt-2 p-3 bg-gray-800 border border-gray-700 rounded-2xl">
@@ -574,12 +571,12 @@ export default function CreatePostPage() {
                       const parts = location.split(',').map((part: string) => part.trim())
                       const first = parts[0] || ''
                       const last = parts[parts.length - 1] || ''
-                      
+
                       // 첫 번째와 마지막이 같으면 하나만 표시
                       if (first === last || parts.length === 1) {
                         return last
                       }
-                      
+
                       return `${first}, ${last}`
                     })()}
                   </p>
