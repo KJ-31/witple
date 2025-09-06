@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 
 interface User {
@@ -26,6 +27,7 @@ interface Post {
 
 export default function FeedPage() {
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -152,14 +154,20 @@ export default function FeedPage() {
             <div className="flex items-center justify-between p-4">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-full overflow-hidden">
-                  <img
-                    src="/QK.jpg"
-                    alt={post.user.full_name || post.user.username}
-                    className="w-full h-full object-cover"
-                  />
+                  {(post.user as any).profile_image ? (
+                    <img
+                      src={(post.user as any).profile_image}
+                      alt={(post.user as any).name || post.user.email}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-blue-500 text-white text-sm font-bold">
+                      {((post.user as any).name || post.user.email || 'U')[0].toUpperCase()}
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <p className="font-semibold text-white">{post.user.full_name || post.user.username}</p>
+                  <p className="font-semibold text-white">{(post.user as any).name || post.user.email}</p>
                   {post.location && (
                     <p className="text-xs text-gray-400">{post.location}</p>
                   )}
@@ -320,12 +328,11 @@ export default function FeedPage() {
 
           <button
             onClick={() => {
-              // 임시로 로그인 상태를 확인 (실제 구현에서는 인증 상태를 확인)
-              const isLoggedIn = false // 여기서 실제 로그인 상태 확인
-              if (isLoggedIn) {
+              // NextAuth 세션 상태를 확인하여 로그인 여부 판단
+              if (status === 'authenticated' && session) {
                 router.push('/profile')
               } else {
-                router.push('/auth/register')
+                router.push('/auth/login')
               }
             }}
             className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"

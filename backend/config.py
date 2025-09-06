@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # AWS S3 설정
-    AWS_REGION: str = "ap-northeast-2"
-    S3_BUCKET_NAME: str = "user-posts"
+    AWS_REGION: str = os.getenv("AWS_REGION", "ap-northeast-2")
+    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "witple-user-uploads")
     
     class Config:
         env_file = ".env"
