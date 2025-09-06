@@ -933,6 +933,72 @@ export default function MapPage() {
     });
   };
 
+  // 서울 지하철 호선별 색상 매핑
+  const getSubwayLineColor = (lineName: string) => {
+    const colors: {[key: string]: string} = {
+      '1호선': '#003D84',
+      '2호선': '#00A651', 
+      '3호선': '#F36D22',
+      '4호선': '#00A4E5',
+      '5호선': '#8936AC',
+      '6호선': '#C5622E',
+      '7호선': '#697215',
+      '8호선': '#EB1C8C',
+      '9호선': '#C7A24B',
+      '경의중앙선': '#7DC4A4',
+      '공항철도': '#0090D2',
+      '경춘선': '#32C6A6',
+      '수인분당선': '#FABE00',
+      '신분당선': '#D31145',
+      '우이신설선': '#B7C450',
+      '서해선': '#8FC31F',
+      '김포골드라인': '#A9431E',
+      '신림선': '#6789CA',
+    };
+    
+    // 호선 번호 추출 (예: "지하철 2호선" → "2호선")
+    const match = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+    if (match) {
+      return colors[match[1]] || '#3E68FF';
+    }
+    return '#3E68FF';
+  };
+
+  // 서울 버스 색상 매핑  
+  const getBusColor = (lineName: string) => {
+    // 버스 번호 추출
+    const busNumber = lineName.replace(/[^0-9]/g, '');
+    const firstDigit = parseInt(busNumber.charAt(0));
+    
+    if (lineName.includes('간선') || (firstDigit >= 1 && firstDigit <= 7)) {
+      return '#3d5afe'; // 파란색 - 간선버스
+    } else if (lineName.includes('지선') || firstDigit === 0) {
+      return '#4caf50'; // 초록색 - 지선버스  
+    } else if (lineName.includes('순환') || firstDigit === 8) {
+      return '#ffa726'; // 주황색 - 순환버스
+    } else if (lineName.includes('광역') || firstDigit === 9) {
+      return '#f44336'; // 빨간색 - 광역버스
+    } else if (lineName.includes('마을')) {
+      return '#4caf50'; // 초록색 - 마을버스
+    }
+    return '#9e9e9e'; // 기본 회색
+  };
+
+  // 교통수단 이름 정리 (버스 번호만 추출)
+  const getCleanTransitName = (lineName: string) => {
+    // 버스인 경우 번호만 추출
+    if (lineName.includes('버스')) {
+      const busNumber = lineName.match(/\d+/);
+      return busNumber ? busNumber[0] + '번' : lineName;
+    }
+    // 지하철인 경우 호선 정보 추출
+    if (lineName.includes('지하철') || lineName.includes('호선')) {
+      const lineMatch = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+      return lineMatch ? lineMatch[1] : lineName;
+    }
+    return lineName;
+  };
+
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
@@ -1752,37 +1818,57 @@ export default function MapPage() {
                                           <div key={stepIndex}>
                                             {step.transitDetails ? (
                                               // 대중교통 구간
-                                              <div className="flex items-center space-x-3">
-                                                <div className="flex-shrink-0">
-                                                  <div className="bg-[#3E68FF] text-white px-3 py-1 rounded-full text-xs font-bold min-w-0">
-                                                    {step.transitDetails.line || step.transitDetails.vehicle}
-                                                  </div>
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="flex items-center space-x-2 text-sm">
-                                                    <span className="text-[#94A9C9] truncate">
-                                                      {step.transitDetails.departure_stop}
-                                                    </span>
-                                                    <svg className="w-4 h-4 text-[#3E68FF] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                                                    </svg>
-                                                    <span className="text-[#94A9C9] truncate">
-                                                      {step.transitDetails.arrival_stop}
-                                                    </span>
-                                                  </div>
-                                                  {step.transitDetails.departure_time && (
-                                                    <div className="flex items-center space-x-3 text-xs text-[#6FA0E6] mt-1">
-                                                      <span>출발: {step.transitDetails.departure_time}</span>
-                                                      {step.transitDetails.arrival_time && (
-                                                        <span>도착: {step.transitDetails.arrival_time}</span>
+                                              (() => {
+                                                const originalLine = step.transitDetails.line || step.transitDetails.vehicle || '';
+                                                const cleanName = getCleanTransitName(originalLine);
+                                                const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림');
+                                                const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine);
+                                                
+                                                let bgColor = '#3E68FF';
+                                                if (isSubway) {
+                                                  bgColor = getSubwayLineColor(originalLine);
+                                                } else if (isBus) {
+                                                  bgColor = getBusColor(originalLine);
+                                                }
+
+                                                return (
+                                                  <div className="flex items-center space-x-3">
+                                                    <div className="flex-shrink-0">
+                                                      <div 
+                                                        className="text-white px-3 py-1 rounded-full text-xs font-bold min-w-0" 
+                                                        style={{ backgroundColor: bgColor }}
+                                                      >
+                                                        {cleanName}
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                      <div className="flex items-center space-x-2 text-sm">
+                                                        <span className="text-[#94A9C9] truncate">
+                                                          {step.transitDetails.departure_stop}
+                                                        </span>
+                                                        <svg className="w-4 h-4 text-[#3E68FF] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                                        </svg>
+                                                        <span className="text-[#94A9C9] truncate">
+                                                          {step.transitDetails.arrival_stop}
+                                                        </span>
+                                                      </div>
+                                                      {/* 지하철만 시간 표시 */}
+                                                      {isSubway && step.transitDetails.departure_time && (
+                                                        <div className="flex items-center space-x-3 text-xs text-[#6FA0E6] mt-1">
+                                                          <span>출발: {step.transitDetails.departure_time}</span>
+                                                          {step.transitDetails.arrival_time && (
+                                                            <span>도착: {step.transitDetails.arrival_time}</span>
+                                                          )}
+                                                        </div>
                                                       )}
                                                     </div>
-                                                  )}
-                                                </div>
-                                                <div className="flex-shrink-0 text-xs text-[#94A9C9]">
-                                                  {step.duration}
-                                                </div>
-                                              </div>
+                                                    <div className="flex-shrink-0 text-xs text-[#94A9C9]">
+                                                      {step.duration}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })()
                                             ) : step.mode === 'WALKING' ? (
                                               // 도보 구간
                                               <div className="flex items-center space-x-3">
