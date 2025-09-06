@@ -10,6 +10,7 @@ import logging
 from typing import Dict, List, Tuple, Any
 import asyncio
 import asyncpg
+import json
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -308,7 +309,7 @@ class RecommendationEngine:
             # place_recommendations 테이블에서 간단히 데이터 가져오기
             query = """
                 SELECT place_id, table_name, name, region, city, latitude, longitude, 
-                       description, image_urls
+                       overview as description, image_urls
                 FROM place_recommendations 
                 ORDER BY RANDOM() 
                 LIMIT $1
@@ -417,8 +418,11 @@ class RecommendationEngine:
             # 사용자 선호도 벡터 생성
             user_vector = await self._create_user_vector(preferences, actions)
             
-            # 통합 테이블에서 장소 데이터 가져오기 (JOIN 없음)
-            query = "SELECT * FROM place_recommendations"
+            # place_features에서 장소 데이터와 벡터 가져오기 
+            query = """
+                SELECT place_id, table_name, name, region, city, latitude, longitude, vector
+                FROM place_features WHERE vector IS NOT NULL
+            """
             conditions = []
             params = []
             param_count = 0
@@ -434,23 +438,48 @@ class RecommendationEngine:
                 params.append(category)
             
             if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+                query += " AND " + " AND ".join(conditions)
             
             # 성능을 위해 전체가 아닌 샘플링 (큰 데이터셋인 경우)
-            query += " ORDER BY RANDOM() LIMIT 5000"
+            query += " ORDER BY RANDOM() LIMIT 1000"
             
             places = await conn.fetch(query, *params)
             
             if not places:
                 return []
             
-            # 벡터 추출 및 유사도 계산
-            place_vectors = [np.array(place['vector']) for place in places]
+            # 벡터 추출 및 유사도 계산 (JSON 문자열 처리)
+            place_vectors = []
+            valid_places = []
+            
+            for place in places:
+                try:
+                    # 벡터가 JSON 문자열로 저장된 경우 파싱
+                    if isinstance(place['vector'], str):
+                        vector_data = json.loads(place['vector'])
+                    else:
+                        vector_data = place['vector']
+                    
+                    # numpy 배열로 변환
+                    vector_array = np.array(vector_data, dtype=np.float32)
+                    
+                    # 벡터 차원 확인 (256차원이어야 함)
+                    if len(vector_array) == 256:
+                        place_vectors.append(vector_array)
+                        valid_places.append(place)
+                    
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    # 벡터 처리 실패시 해당 장소 제외
+                    continue
+            
+            if not place_vectors:
+                return []
+            
             similarity_scores = self.calculate_similarity_scores(user_vector, place_vectors)
             
             # 점수와 함께 결과 생성
             results = []
-            for i, place in enumerate(places):
+            for i, place in enumerate(valid_places):
                 place_dict = dict(place)
                 place_dict['similarity_score'] = similarity_scores[i]
                 results.append(place_dict)
@@ -508,8 +537,8 @@ class RecommendationEngine:
         all_texts = preference_texts + action_places
         combined_text = ' '.join(all_texts) if all_texts else "일반적인 여행지"
         
-        # BERT 벡터화
-        user_vector = self.bert_model.encode([combined_text])[0]
+        # BERT 벡터화 (256차원으로 자르기 - place_features와 동일하게)
+        user_vector = self.bert_model.encode([combined_text])[0][:256]
         
         return user_vector
 

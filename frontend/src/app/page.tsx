@@ -456,6 +456,7 @@ export default function Home() {
 
           <button
             onClick={() => {
+
               // NextAuth 세션 상태를 확인하여 로그인 여부 판단
               if (status === 'authenticated' && session) {
                 router.push('/profile')
