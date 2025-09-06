@@ -213,8 +213,8 @@ async def get_cities_by_category(
                     )
                 )
                 
-                # 각 카테고리에서 최대 4개씩 가져오기
-                attractions = query.limit(4).all()
+                # 각 카테고리에서 최대 10개씩 가져오기
+                attractions = query.limit(10).all()
                 
                 # 결과가 있는 카테고리만 포함
                 if attractions:
