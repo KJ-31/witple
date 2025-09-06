@@ -5,12 +5,28 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 
-interface TripCard {
+
+interface TripPlace {
+  name: string
+  order: number
+  latitude?: string
+  longitude?: string
+  address?: string
+}
+
+interface Trip {
   id: number
+  user_id: string
   title: string
-  dates: string
+  places?: TripPlace[]
+  start_date: string
+  end_date: string
   status: 'active' | 'completed' | 'planned'
-  image?: string
+  total_budget?: number
+  cover_image?: string
+  description?: string
+  created_at: string
+  updated_at?: string
 }
 
 interface Post {
@@ -43,6 +59,8 @@ export default function ProfilePage() {
   const [postsLoading, setPostsLoading] = useState(false)
   const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([])
   const [savedLoading, setSavedLoading] = useState(false)
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [tripsLoading, setTripsLoading] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -206,6 +224,37 @@ export default function ProfilePage() {
     }
   }, [])
 
+  // 여행 목록 로딩 함수
+  const loadTrips = useCallback(async () => {
+    try {
+      setTripsLoading(true)
+      const token = getToken()
+      
+      if (!token) {
+        console.log('토큰 없음 - 여행 목록 로딩 건너뛰기')
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/trips/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setTrips(data.trips || [])
+      } else {
+        console.error('여행 목록 로딩 실패:', response.status)
+      }
+    } catch (error) {
+      console.error('여행 목록 로딩 중 오류:', error)
+    } finally {
+      setTripsLoading(false)
+    }
+  }, [])
+
   // 로그인하지 않은 사용자는 로그인 페이지로 리다이렉트
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -219,8 +268,9 @@ export default function ProfilePage() {
       fetchUserProfile()
       fetchUserPosts()
       loadSavedLocations()
+      loadTrips()
     }
-  }, [session, fetchUserProfile, fetchUserPosts, loadSavedLocations])
+  }, [session, fetchUserProfile, fetchUserPosts, loadSavedLocations, loadTrips])
 
   // 세션에서 초기 폼 데이터 설정
   useEffect(() => {
@@ -532,39 +582,23 @@ export default function ProfilePage() {
     }
   }
 
-  // 목업 데이터
-  const trips: TripCard[] = [
-    {
-      id: 1,
-      title: '서울 시장 여행',
-      dates: '2025.08.14(수) - 08.16(금)',
-      status: 'active'
-    },
-    {
-      id: 2,
-      title: '전주 시장 여행',
-      dates: '2025.03.03(월) - 03.04(화)',
-      status: 'completed'
-    },
-    {
-      id: 3,
-      title: '부산 시장 여행',
-      dates: '2024.07.02(화) - 07.04(목)',
-      status: 'completed'
-    },
-    {
-      id: 4,
-      title: '강릉 시장 여행',
-      dates: '2023.07.01(목) - 07.03(토)',
-      status: 'completed'
-    },
-    {
-      id: 5,
-      title: '제주 시장 여행',
-      dates: '2025.08.14(수) - 08.16(금)',
-      status: 'planned'
+  // 날짜 포맷 함수
+  const formatDateRange = (startDate: string, endDate: string) => {
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    
+    const formatDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const weekdays = ['일', '월', '화', '수', '목', '금', '토']
+      const weekday = weekdays[date.getDay()]
+      
+      return `${year}.${month}.${day}(${weekday})`
     }
-  ]
+    
+    return `${formatDate(start)} - ${formatDate(end)}`
+  }
 
 
 
@@ -602,48 +636,90 @@ export default function ProfilePage() {
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-blue-500'
-      case 'completed': return 'bg-gray-400'
-      case 'planned': return 'bg-green-500'
-      default: return 'bg-gray-400'
-    }
-  }
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'active': return '여행 중'
-      case 'completed': return '완료됨'
-      case 'planned': return '예정됨'
-      default: return ''
-    }
-  }
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'trips':
+        if (tripsLoading) {
+          return (
+            <div className="flex justify-center items-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
+              <span className="ml-2 text-gray-400">여행 목록을 불러오는 중...</span>
+            </div>
+          )
+        }
+        
+        if (trips.length === 0) {
+          return (
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">✈️</div>
+              <p className="text-gray-400 text-lg mb-2">계획된 여행이 없습니다</p>
+              <p className="text-gray-500 text-sm">새로운 여행을 계획해보세요!</p>
+            </div>
+          )
+        }
+        
         return (
           <div className="space-y-4">
             {trips.map((trip) => (
-              <div
-                key={trip.id}
-                className={`relative p-4 rounded-2xl ${trip.status === 'active' ? 'bg-blue-500' : 'bg-gray-600'
-                  } text-white`}
-              >
-                {trip.status === 'active' && (
-                  <div className="absolute top-4 right-4">
-                    <span className="bg-red-500 text-white px-2 py-1 rounded-full text-xs">
-                      🚩
-                    </span>
+              <div key={trip.id} className="bg-gray-800 p-4 rounded-2xl relative">
+                {/* 상태 표시 - 모든 카드에 표시 */}
+                <div className="absolute top-4 right-4">
+                  <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
+                    trip.status === 'active' ? 'bg-red-500' : 
+                    trip.status === 'completed' ? 'bg-gray-500' : 
+                    'bg-green-500'
+                  }`}>
+                    {trip.status === 'active' && '🚩 진행중'}
+                    {trip.status === 'completed' && '✓ 완료됨'}
+                    {trip.status === 'planned' && '📋 예정됨'}
+                  </span>
+                </div>
+                
+                {/* 여행 제목 */}
+                <div className="mb-3">
+                  <h3 className="text-white text-lg font-semibold mb-1">{trip.title}</h3>
+                  <div className="flex items-center text-sm text-gray-400">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span>{formatDateRange(trip.start_date, trip.end_date)}</span>
+                  </div>
+                </div>
+
+                {/* 설명 */}
+                {trip.description && (
+                  <p className="text-gray-300 text-sm mb-3">{trip.description}</p>
+                )}
+
+                {/* 방문 장소 */}
+                {trip.places && trip.places.length > 0 && (
+                  <div className="mb-3">
+                    <div className="flex items-center mb-2">
+                      <svg className="w-4 h-4 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-sm text-gray-400">방문 장소</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {trip.places.slice(0, 3).map((place, index) => (
+                        <span key={index} className="inline-flex items-center text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                          <span className="w-4 h-4 mr-1 flex items-center justify-center bg-blue-500 text-white rounded-full text-xs font-bold">
+                            {place.order}
+                          </span>
+                          {place.name}
+                        </span>
+                      ))}
+                      {trip.places.length > 3 && (
+                        <span className="text-xs text-gray-400 flex items-center">
+                          +{trip.places.length - 3}개 더
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
-                <h3 className="text-lg font-semibold mb-2">{trip.title}</h3>
-                <p className="text-sm opacity-90">{trip.dates}</p>
-                <div className="mt-3 flex items-center space-x-2">
-                  <span className={`w-2 h-2 rounded-full ${getStatusColor(trip.status)}`}></span>
-                  <span className="text-xs">{getStatusText(trip.status)}</span>
-                </div>
+
               </div>
             ))}
           </div>

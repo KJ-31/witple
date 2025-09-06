@@ -184,3 +184,50 @@ class SavedLocationResponse(SavedLocationBase):
 class SavedLocationListResponse(BaseModel):
     locations: List[SavedLocationResponse]
     total: int
+
+
+# Trip status enum
+class TripStatus(str, Enum):
+    planned = "planned"
+    active = "active"
+    completed = "completed"
+
+
+# Trip Place schema (for JSON field)
+class TripPlace(BaseModel):
+    name: str
+    order: int
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
+    address: Optional[str] = None
+
+
+# Trip schemas
+class TripBase(BaseModel):
+    title: str
+    places: Optional[List[TripPlace]] = []
+    start_date: datetime
+    end_date: datetime
+    status: TripStatus = TripStatus.planned
+    total_budget: Optional[int] = None
+    cover_image: Optional[str] = None
+    description: Optional[str] = None
+
+
+class TripCreate(TripBase):
+    pass
+
+
+class TripResponse(TripBase):
+    id: int
+    user_id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class TripListResponse(BaseModel):
+    trips: List[TripResponse]
+    total: int
