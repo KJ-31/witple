@@ -2,9 +2,11 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 
 export default function CreatePostPage() {
   const router = useRouter()
+  const { data: session } = useSession()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [caption, setCaption] = useState('')
@@ -32,16 +34,43 @@ export default function CreatePostPage() {
       return
     }
 
+    console.log('=== 세션 상태 디버깅 ===')
+    console.log('전체 세션 객체:', session)
+    console.log('세션 사용자:', session?.user)
+    console.log('사용자 ID:', session?.user?.id)
+    console.log('사용자 이메일:', session?.user?.email)
+    console.log('백엔드 토큰:', (session as any)?.backendToken)
+    console.log('========================')
+
+    if (!session?.user?.id) {
+      alert('로그인이 필요합니다.')
+      router.push('/auth/login')
+      return
+    }
+
     setIsUploading(true)
 
     try {
+      console.log('=== 게시글 생성 디버깅 ===')
+      console.log('현재 세션 사용자 ID:', session.user.id)
+      console.log('현재 세션 사용자 이메일:', session.user.email)
+      console.log('백엔드 토큰:', (session as any)?.backendToken)
+
+      const headers: any = {
+        'Content-Type': 'application/json',
+      }
+
+      // 백엔드 토큰이 있으면 Authorization 헤더 추가
+      if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
       // API 호출로 포스트 생성
       const response = await fetch('/api/proxy/api/v1/posts/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: JSON.stringify({
+          user_id: session.user.id, // 명시적으로 user_id 전송
           caption: caption,
           location: location || null,
           image_data: selectedImage // Base64 이미지 데이터

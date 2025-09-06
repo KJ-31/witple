@@ -15,12 +15,15 @@ class User(Base):
     nationality = Column(String, nullable=True)
     phone_e164 = Column(String, nullable=True)
     points_balance = Column(Integer, nullable=True)
+    profile_image = Column(String, nullable=True)  # 프로필 이미지 URL
     created_at = Column(DateTime(timezone=False))  # 기존 스키마에 맞춤
     updated_at = Column(DateTime(timezone=False))
 
     # Relationships
     posts = relationship("Post", back_populates="user")
     oauth_accounts = relationship("OAuthAccount", back_populates="user")
+    preferences = relationship("UserPreference", back_populates="user")
+    preference_tags = relationship("UserPreferenceTag", back_populates="user")
 
 
 class OAuthAccount(Base):
@@ -62,3 +65,33 @@ class Post(Base):
 
     # Relationship to user
     user = relationship("User", back_populates="posts")
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    persona = Column(String, nullable=True)  # luxury, modern, nature_activity, foodie
+    priority = Column(String, nullable=True)  # accommodation, restaurants, experience, shopping
+    accommodation = Column(String, nullable=True)  # comfort, healing, traditional, community
+    exploration = Column(String, nullable=True)  # hot, local, balance, authentic_experience
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to user
+    user = relationship("User", back_populates="preferences")
+
+
+class UserPreferenceTag(Base):
+    __tablename__ = "user_preference_tags"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    tag = Column(String, nullable=False)
+    weight = Column(Integer, default=1)  # 태그의 가중치
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to user
+    user = relationship("User", back_populates="preference_tags")

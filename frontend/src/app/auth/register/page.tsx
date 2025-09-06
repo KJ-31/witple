@@ -4,14 +4,13 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { signIn } from 'next-auth/react'
-import { register } from './api'
+import { register, saveUserPreferences, login } from './api'
 
 interface TravelPreferences {
   travelStyle: string
   investment: string
   accommodation: string
   destination: string
-  experiences: string[]
 }
 
 export default function RegisterPage() {
@@ -26,8 +25,7 @@ export default function RegisterPage() {
     travelStyle: '',
     investment: '',
     accommodation: '',
-    destination: '',
-    experiences: []
+    destination: ''
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -47,14 +45,6 @@ export default function RegisterPage() {
     }))
   }
 
-  const handleExperienceToggle = (experience: string) => {
-    setPreferences(prev => ({
-      ...prev,
-      experiences: prev.experiences.includes(experience)
-        ? prev.experiences.filter(e => e !== experience)
-        : [...prev.experiences, experience]
-    }))
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,19 +58,34 @@ export default function RegisterPage() {
     }
 
     try {
-      // 기본 회원가입 + 선호도 데이터 (추후 백엔드 연동 시 사용)
+      // 1. 기본 회원가입
       console.log('회원가입 데이터:', { ...formData, preferences })
       await register(formData.email, formData.password, formData.full_name)
+      
+      // 2. 로그인하여 토큰 받기
+      const loginResponse = await login(formData.email, formData.password)
+      const token = loginResponse.access_token
+      
+      // 3. 선호도 저장
+      if (preferences.travelStyle && preferences.investment && preferences.accommodation && preferences.destination) {
+        await saveUserPreferences(preferences, token)
+        console.log('선호도 저장 완료')
+      }
+      
+      // 4. 토큰 저장
+      localStorage.setItem('token', token)
+      
       router.push('/auth/login?message=registration_success')
-    } catch (err) {
-      setError('회원가입에 실패했습니다. 다시 시도해주세요.')
+    } catch (err: any) {
+      console.error('회원가입 오류:', err)
+      setError(`회원가입에 실패했습니다: ${err.response?.data?.detail || err.message}`)
     } finally {
       setLoading(false)
     }
   }
 
   const nextStep = () => {
-    if (step < 6) setStep(step + 1)
+    if (step < 5) setStep(step + 1)
   }
 
   const prevStep = () => {
@@ -337,49 +342,6 @@ export default function RegisterPage() {
                 </label>
               ))}
             </div>
-          </div>
-        )
-
-      case 6:
-        return (
-          <div className="space-y-6">
-            <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">경험 키워드 👉</h3>
-              <p className="text-sm text-gray-600">관심 있는 여행 경험을 모두 선택해주세요 (중복 선택 가능)</p>
-            </div>
-            <div className="space-y-3">
-              {[
-                { id: 'nature', emoji: '🌳', label: '자연 속 힐링', desc: '국립공원, 산, 해변, 섬' },
-                { id: 'humanities', emoji: '📜', label: '역사와 문화', desc: '고궁, 성, 유명사찰, 문화유산' },
-                { id: 'art', emoji: '🎨', label: '예술과 감성', desc: '미술관, 박물관, 전시, 공연' },
-                { id: 'activity', emoji: '🤸', label: '액티비티', desc: '하이킹, 레포츠, 스포츠' },
-                { id: 'shopping', emoji: '🛍️', label: '쇼핑과 미식', desc: '쇼핑, 음식점' },
-                { id: 'accommodation', emoji: '🏨', label: '편안한 숙소', desc: '호캉스, 펜션, 한옥' },
-              ].map((option) => (
-                <label
-                  key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    preferences.experiences.includes(option.id)
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={preferences.experiences.includes(option.id)}
-                    onChange={() => handleExperienceToggle(option.id)}
-                    className="hidden"
-                  />
-                  <div className="flex items-center space-x-3">
-                    <span className="text-2xl">{option.emoji}</span>
-                    <div>
-                      <p className="font-medium text-gray-900">{option.label}</p>
-                      <p className="text-sm text-gray-600">{option.desc}</p>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
             <button
               type="submit"
               disabled={loading}
@@ -400,7 +362,7 @@ export default function RegisterPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step-1}/5)`}
+            {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step-1}/4)`}
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             또는{' '}
@@ -415,7 +377,7 @@ export default function RegisterPage() {
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div 
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${((step - 1) / 5) * 100}%` }}
+              style={{ width: `${((step - 1) / 4) * 100}%` }}
             ></div>
           </div>
         )}
@@ -429,7 +391,7 @@ export default function RegisterPage() {
           
           {renderStep()}
           
-          {step > 1 && step < 6 && (
+          {step > 1 && step < 5 && (
             <div className="flex justify-between space-x-4 mt-6">
               <button
                 type="button"
