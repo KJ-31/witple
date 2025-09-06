@@ -501,12 +501,51 @@ function SectionCarousel({
             >
               {/* 이미지 영역 */}
               <div className="aspect-[4/3] relative overflow-hidden">
-                {/* 실제 프로덕션에서는 Next.js Image 컴포넌트 사용 권장 */}
-                <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-                  <span className="text-white text-lg opacity-70">
-                    {attraction.name}
-                  </span>
-                </div>
+                {attraction.imageUrl && attraction.imageUrl !== "/images/default.jpg" && attraction.imageUrl !== null ? (
+                  <>
+                    {/* 이미지 로딩 인디케이터 */}
+                    <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+                    </div>
+                    
+                    <img 
+                      src={attraction.imageUrl} 
+                      alt={attraction.name}
+                      className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
+                      onLoad={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.opacity = '1';
+                        const loadingIndicator = target.previousElementSibling as HTMLElement;
+                        if (loadingIndicator) loadingIndicator.style.display = 'none';
+                      }}
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const loadingIndicator = target.previousElementSibling as HTMLElement;
+                        if (loadingIndicator) loadingIndicator.style.display = 'none';
+                        const fallback = target.nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                    
+                    {/* 이미지 로드 실패 시 대체 UI */}
+                    <div 
+                      className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center"
+                      style={{ display: 'none' }}
+                    >
+                      <span className="text-white text-lg opacity-70 text-center px-2">
+                        {attraction.name}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  /* 이미지가 없는 경우 기본 UI */
+                  <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                    <span className="text-white text-lg opacity-70 text-center px-2">
+                      {attraction.name}
+                    </span>
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300"></div>
 
                 {/* 카테고리 배지 */}
