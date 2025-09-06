@@ -12,13 +12,15 @@ interface GoogleMapProps {
     title?: string
     id?: string
   }>
+  onMapLoad?: (map: any) => void
 }
 
 const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   className = '',
   center = { lat: 37.5665, lng: 126.9780 },
   zoom = 13,
-  markers = []
+  markers = [],
+  onMapLoad
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
@@ -68,6 +70,11 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
 
           setMap(mapInstance)
           setIsLoaded(true)
+          
+          // 지도가 로드되면 부모 컴포넌트에 알림
+          if (onMapLoad) {
+            onMapLoad(mapInstance)
+          }
         }
       } catch (error) {
         console.error('Google Maps 로드 실패:', error)
