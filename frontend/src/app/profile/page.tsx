@@ -360,6 +360,10 @@ export default function ProfilePage() {
     }
   }
 
+  const handleLogout = async () => {
+    await signOut({ callbackUrl: '/' })
+  }
+
   // 목업 데이터
   const trips: TripCard[] = [
     {

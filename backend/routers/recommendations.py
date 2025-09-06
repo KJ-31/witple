@@ -176,59 +176,43 @@ async def get_mixed_recommendations(
                         place['recommendation_type'] = 'fallback'
                     return fallback_places
                 except:
-                    # 모든 것이 실패하면 더미 데이터 반환
+                    # 모든 것이 실패하면 실제 DB 데이터 반환
                     return [
                         {
-                            "place_id": 1,
-                            "table_name": "fallback",
-                            "name": "서울 경복궁",
-                            "region": "서울",
-                            "description": "대표적인 관광지",
-                            "latitude": 37.5796,
-                            "longitude": 126.9770,
+                            "place_id": 9628,  # 실제 DB에 존재하는 ID
+                            "table_name": "restaurants",
+                            "name": "해운대식당",
+                            "region": "전라남도",
+                            "description": "전라남도 장성군 장성역 인근 한식당",
+                            "latitude": 35.3021,
+                            "longitude": 126.7886,
                             "recommendation_type": "fallback",
                             "similarity_score": 0.5
                         }
                     ]
         else:
-            # 비로그인 상태: 더미 데이터 반환
-            dummy_places = [
-                {
-                    "place_id": 1,
-                    "table_name": "dummy",
-                    "name": "서울 명동",
-                    "region": "서울",
-                    "description": "쇼핑과 맛집의 메카",
-                    "latitude": 37.5636,
-                    "longitude": 126.9827,
-                    "recommendation_type": "popular",
-                    "similarity_score": 0.9
-                },
-                {
-                    "place_id": 2, 
-                    "table_name": "dummy",
-                    "name": "제주 한라산",
-                    "region": "제주",
-                    "description": "제주도의 상징적인 산",
-                    "latitude": 33.3617,
-                    "longitude": 126.5292,
-                    "recommendation_type": "popular",
-                    "similarity_score": 0.85
-                },
-                {
-                    "place_id": 3,
-                    "table_name": "dummy", 
-                    "name": "부산 해운대",
-                    "region": "부산",
-                    "description": "한국 최고의 해수욕장",
-                    "latitude": 35.1595,
-                    "longitude": 129.1604,
-                    "recommendation_type": "popular",
-                    "similarity_score": 0.8
-                }
-            ]
-            
-            return dummy_places[:limit]
+            # 비로그인 상태: 실제 DB에서 인기 장소 데이터 반환
+            try:
+                popular_places = await recommendation_engine.get_fallback_places(limit=limit)
+                for place in popular_places:
+                    place['recommendation_type'] = 'popular'
+                return popular_places
+            except Exception as e:
+                logger.error(f"Error getting popular places for guest: {str(e)}")
+                # 모든 것이 실패하면 더미 데이터 반환 (실제 DB의 place_id 사용)
+                return [
+                    {
+                        "place_id": 9628,  # 실제 DB에 존재하는 ID
+                        "table_name": "restaurants",
+                        "name": "해운대식당",
+                        "region": "전라남도",
+                        "description": "전라남도 장성군 장성역 인근 한식당",
+                        "latitude": 35.3021,
+                        "longitude": 126.7886,
+                        "recommendation_type": "popular",
+                        "similarity_score": 0.8
+                    }
+                ][:limit]
             
     except Exception as e:
         logger.error(f"Error getting mixed recommendations: {str(e)}")
