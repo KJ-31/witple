@@ -309,7 +309,7 @@ class RecommendationEngine:
             # place_recommendations 테이블에서 간단히 데이터 가져오기
             query = """
                 SELECT place_id, table_name, name, region, city, latitude, longitude, 
-                       description, image_urls
+                       overview as description, image_urls
                 FROM place_recommendations 
                 ORDER BY RANDOM() 
                 LIMIT $1
