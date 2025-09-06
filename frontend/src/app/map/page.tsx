@@ -1658,9 +1658,9 @@ export default function MapPage() {
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                               >
-                                <div className="flex items-center space-x-2 mb-2">
-                                  <h4 className="font-semibold text-white">{place.name}</h4>
-                                  <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
+                                <div className="mb-1">
+                                  <h4 className="font-semibold text-white mb-1">{place.name}</h4>
+                                  <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
                                     {getCategoryName(place.category)}
                                   </span>
                                 </div>
@@ -1739,9 +1739,9 @@ export default function MapPage() {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <h3 className="font-semibold text-white text-lg">{place.name}</h3>
-                            <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
+                          <div className="mb-3">
+                            <h3 className="font-semibold text-white text-lg mb-1">{place.name}</h3>
+                            <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
                               {getCategoryName(place.category)}
                             </span>
                           </div>
