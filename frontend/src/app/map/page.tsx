@@ -95,13 +95,16 @@ export default function MapPage() {
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
   
-  // 터치 드래그 상태
-  const [touchDragData, setTouchDragData] = useState<{
+  // Long press 상태
+  const [longPressData, setLongPressData] = useState<{
+    isLongPressing: boolean,
     isDragging: boolean,
     startY: number,
     currentY: number,
     dragElement: HTMLElement | null,
-    clone: HTMLElement | null
+    clone: HTMLElement | null,
+    timeout: NodeJS.Timeout | null,
+    preventClick: boolean
   } | null>(null)
   
   // 최적화 확인 모달 상태
@@ -119,7 +122,7 @@ export default function MapPage() {
   
   // 드래그 중일 때 body 스크롤 비활성화
   useEffect(() => {
-    if (touchDragData?.isDragging) {
+    if (longPressData?.isDragging) {
       document.body.style.overflow = 'hidden';
       document.body.style.position = 'fixed';
       document.body.style.width = '100%';
@@ -134,7 +137,7 @@ export default function MapPage() {
       document.body.style.position = '';
       document.body.style.width = '';
     };
-  }, [touchDragData?.isDragging]);
+  }, [longPressData?.isDragging]);
 
   // 화면 높이 측정
   useEffect(() => {
@@ -368,97 +371,143 @@ export default function MapPage() {
     (e.target as HTMLElement).style.opacity = '0.5';
   };
 
-  // 터치 이벤트 핸들러
-  const handleDragTouchStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
-    console.log('터치 드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+  // Long press 이벤트 핸들러
+  const handleLongPressStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    // 버튼에서는 long press 실행하지 않음 (휴지통 버튼만 제외)
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) {
+      return;
+    }
     
     const touch = e.touches[0];
     const element = e.currentTarget as HTMLElement;
-    // 전체 카드 요소를 찾기 (드래그 핸들의 부모 카드)
-    const cardElement = element.closest('[data-place-card]') as HTMLElement;
-    if (!cardElement) return;
-    
-    const rect = cardElement.getBoundingClientRect();
-    
-    // 카드 전체의 복사본 생성
-    const clone = cardElement.cloneNode(true) as HTMLElement;
-    clone.style.position = 'fixed';
-    clone.style.zIndex = '9999';
-    clone.style.opacity = '0.8';
-    clone.style.width = rect.width + 'px';
-    clone.style.height = rect.height + 'px';
-    clone.style.left = rect.left + 'px';
-    clone.style.top = rect.top + 'px';
-    clone.style.pointerEvents = 'none';
-    clone.style.transform = 'rotate(2deg)';
-    clone.style.boxShadow = '0 10px 25px rgba(0,0,0,0.4)';
-    document.body.appendChild(clone);
-    
-    setDraggedItem({ placeId: place.id, dayNumber, index });
-    setTouchDragData({
-      isDragging: true,
+    const cardElement = element;
+
+    // Long press 타이머 시작
+    const timeout = setTimeout(() => {
+      // Long press 확인됨 - 햅틱 피드백 추가
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+      
+      const rect = cardElement.getBoundingClientRect();
+      
+      // 카드 복사본 생성
+      const clone = cardElement.cloneNode(true) as HTMLElement;
+      clone.style.position = 'fixed';
+      clone.style.zIndex = '9999';
+      clone.style.opacity = '0.8';
+      clone.style.width = rect.width + 'px';
+      clone.style.height = rect.height + 'px';
+      clone.style.left = rect.left + 'px';
+      clone.style.top = rect.top + 'px';
+      clone.style.pointerEvents = 'none';
+      clone.style.transform = 'rotate(2deg) scale(1.05)';
+      clone.style.boxShadow = '0 15px 35px rgba(62, 104, 255, 0.4)';
+      clone.style.border = '2px solid #3E68FF';
+      document.body.appendChild(clone);
+      
+      setDraggedItem({ placeId: place.id, dayNumber, index });
+      setLongPressData(prev => ({
+        isLongPressing: true,
+        isDragging: true,
+        startY: touch.clientY,
+        currentY: touch.clientY,
+        dragElement: cardElement,
+        clone,
+        timeout: null,
+        preventClick: true
+      }));
+      
+      // 원본 요소 스타일 변경 - long press 시각 피드백
+      cardElement.style.opacity = '0.3';
+      cardElement.style.transform = 'scale(0.95)';
+      cardElement.style.transition = 'all 0.2s ease';
+    }, 400); // 400ms long press로 단축
+
+    setLongPressData({
+      isLongPressing: false,
+      isDragging: false,
       startY: touch.clientY,
       currentY: touch.clientY,
       dragElement: cardElement,
-      clone
+      clone: null,
+      timeout,
+      preventClick: false
     });
-    
-    // 원본 요소 스타일 변경
-    cardElement.style.opacity = '0.3';
   };
   
-  const handleDragTouchMove = (e: React.TouchEvent) => {
-    if (!touchDragData?.isDragging || !touchDragData.clone) return;
+  const handleLongPressMove = (e: React.TouchEvent) => {
+    if (!longPressData) return;
     
     const touch = e.touches[0];
+    const moveThreshold = 10; // 10px 이동하면 long press 취소
     
-    // 복사본 위치 업데이트
-    const deltaY = touch.clientY - touchDragData.startY;
-    const originalRect = touchDragData.dragElement!.getBoundingClientRect();
-    touchDragData.clone.style.left = originalRect.left + 'px';
-    touchDragData.clone.style.top = (originalRect.top + deltaY) + 'px';
-    
-    setTouchDragData(prev => prev ? {
-      ...prev,
-      currentY: touch.clientY
-    } : null);
-    
-    // 드롭 존 감지
-    const dropZones = document.querySelectorAll('[data-drop-zone]');
-    let targetFound = false;
-    
-    dropZones.forEach(zone => {
-      const zoneRect = zone.getBoundingClientRect();
-      if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
-        const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
-        const index = parseInt(zone.getAttribute('data-index') || '0');
-        setDragOverIndex({ day: dayNumber, index });
-        targetFound = true;
+    if (!longPressData.isDragging) {
+      // Long press 대기 중 - 너무 많이 움직이면 취소
+      const deltaY = Math.abs(touch.clientY - longPressData.startY);
+      if (deltaY > moveThreshold && longPressData.timeout) {
+        clearTimeout(longPressData.timeout);
+        setLongPressData(null);
+        return;
       }
-    });
-    
-    if (!targetFound) {
-      setDragOverIndex(null);
+    } else {
+      // 드래그 중
+      if (!longPressData.clone) return;
+      
+      const deltaY = touch.clientY - longPressData.startY;
+      const originalRect = longPressData.dragElement!.getBoundingClientRect();
+      longPressData.clone.style.left = originalRect.left + 'px';
+      longPressData.clone.style.top = (originalRect.top + deltaY) + 'px';
+      
+      setLongPressData(prev => prev ? {
+        ...prev,
+        currentY: touch.clientY
+      } : null);
+      
+      // 드롭 존 감지
+      const dropZones = document.querySelectorAll('[data-drop-zone]');
+      let targetFound = false;
+      
+      dropZones.forEach(zone => {
+        const zoneRect = zone.getBoundingClientRect();
+        if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
+          const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
+          const index = parseInt(zone.getAttribute('data-index') || '0');
+          setDragOverIndex({ day: dayNumber, index });
+          targetFound = true;
+        }
+      });
+      
+      if (!targetFound) {
+        setDragOverIndex(null);
+      }
     }
   };
   
-  const handleDragTouchEnd = (e: React.TouchEvent) => {
-    if (!touchDragData?.isDragging) return;
+  const handleLongPressEnd = (e: React.TouchEvent) => {
+    if (!longPressData) return;
+    
+    // Long press 타이머 정리
+    if (longPressData.timeout) {
+      clearTimeout(longPressData.timeout);
+    }
     
     // 복사본 제거
-    if (touchDragData.clone) {
-      document.body.removeChild(touchDragData.clone);
+    if (longPressData.clone) {
+      document.body.removeChild(longPressData.clone);
     }
     
     // 원본 요소 스타일 복원
-    if (touchDragData.dragElement) {
-      touchDragData.dragElement.style.opacity = '1';
+    if (longPressData.dragElement) {
+      longPressData.dragElement.style.opacity = '1';
+      longPressData.dragElement.style.transform = '';
+      longPressData.dragElement.style.transition = '';
     }
     
-    // 드롭 처리
-    if (dragOverIndex && draggedItem) {
-      console.log('터치 드롭:', dragOverIndex, draggedItem);
-      // 가짜 이벤트 객체 생성
+    // 드래그가 진행되었다면 드롭 처리
+    if (longPressData.isDragging && dragOverIndex && draggedItem) {
+      console.log('Long press 드롭:', dragOverIndex, draggedItem);
       const fakeEvent = {
         preventDefault: () => {},
         dataTransfer: { dropEffect: 'move' }
@@ -466,8 +515,11 @@ export default function MapPage() {
       handleDrop(fakeEvent, dragOverIndex.index, dragOverIndex.day);
     }
     
-    // 상태 초기화
-    setTouchDragData(null);
+    // preventClick을 잠시 유지한 후 초기화 (클릭 이벤트 방지)
+    setTimeout(() => {
+      setLongPressData(null);
+    }, 100);
+    
     setDraggedItem(null);
     setDragOverIndex(null);
   };
@@ -1459,8 +1511,33 @@ export default function MapPage() {
                           {/* 장소 카드 */}
                           <div
                             data-place-card="true"
-                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative"
+                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative cursor-pointer select-none group"
+                            onTouchStart={(e) => {
+                              handleLongPressStart(e, place, day, index);
+                            }}
+                            onTouchMove={(e) => {
+                              handleLongPressMove(e);
+                            }}
+                            onTouchEnd={(e) => {
+                              handleLongPressEnd(e);
+                            }}
+                            onTouchCancel={(e) => {
+                              handleLongPressEnd(e);
+                            }}
+                            style={{ 
+                              touchAction: 'none',
+                              userSelect: 'none',
+                              WebkitUserSelect: 'none',
+                              WebkitTouchCallout: 'none'
+                            } as React.CSSProperties}
                           >
+                            {/* Long press 힌트 */}
+                            <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-60 transition-opacity duration-200 pointer-events-none">
+                              <div className="bg-[#3E68FF]/80 text-white text-xs px-2 py-1 rounded-full whitespace-nowrap">
+                                길게 눌러서 이동
+                              </div>
+                            </div>
+                            
                             {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
                             <button
                               onClick={(e) => {
@@ -1479,6 +1556,12 @@ export default function MapPage() {
                               <div 
                                 className="flex-1 cursor-pointer pr-4" 
                                 onClick={(e) => {
+                                  // Long press 중이거나 preventClick이 true면 클릭 무시
+                                  if (longPressData?.preventClick || longPressData?.isLongPressing || longPressData?.isDragging) {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    return;
+                                  }
                                   e.stopPropagation();
                                   e.preventDefault();
                                   router.push(`/attraction/${place.id}`);
@@ -1491,50 +1574,6 @@ export default function MapPage() {
                                     {getCategoryName(place.category)}
                                   </span>
                                 </div>
-                              </div>
-                              
-                              {/* 드래그 핸들 */}
-                              <div 
-                                className="p-3 text-[#6FA0E6] hover:text-white cursor-grab active:cursor-grabbing transition-colors select-none" 
-                                title="드래그해서 순서 변경"
-                                draggable="true"
-                                onDragStart={(e) => {
-                                  console.log('드래그 시작!');
-                                  e.stopPropagation();
-                                  handleDragStart(e, place, day, index);
-                                }}
-                                onDragEnd={(e) => {
-                                  console.log('드래그 종료!');
-                                  e.stopPropagation();
-                                  handleDragEnd(e);
-                                }}
-                                onMouseDown={(e) => {
-                                  console.log('마우스 다운!');
-                                  e.stopPropagation();
-                                }}
-                                onTouchStart={(e) => {
-                                  console.log('터치 시작!');
-                                  e.stopPropagation();
-                                  handleDragTouchStart(e, place, day, index);
-                                }}
-                                onTouchMove={(e) => {
-                                  handleDragTouchMove(e);
-                                }}
-                                onTouchEnd={(e) => {
-                                  console.log('터치 종료!');
-                                  e.stopPropagation();
-                                  handleDragTouchEnd(e);
-                                }}
-                                style={{ 
-                                  touchAction: 'none',
-                                  userSelect: 'none',
-                                  WebkitUserSelect: 'none',
-                                  WebkitTouchCallout: 'none'
-                                } as React.CSSProperties}
-                              >
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-                                </svg>
                               </div>
                             </div>
                           </div>
