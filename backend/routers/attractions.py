@@ -12,23 +12,23 @@ router = APIRouter(tags=["attractions"])
 
 # 카테고리별 테이블 매핑
 CATEGORY_TABLES = {
-    "nature": Nature,
-    "restaurants": Restaurant, 
-    "shopping": Shopping,
+    "leisure_sports": LeisureSports,
     "accommodation": Accommodation,
-    "humanities": Humanities,
-    "leisure_sports": LeisureSports
+    "shopping": Shopping,
+    "nature": Nature,
+    "restaurants": Restaurant,
+    "humanities": Humanities
 }
 
 def get_category_from_table(table_name: str) -> str:
     """테이블명에서 카테고리 추출"""
     category_map = {
         "nature": "nature",
-        "restaurants": "food", 
+        "restaurants": "restaurants", 
         "shopping": "shopping",
         "accommodation": "accommodation",
-        "humanities": "culture",
-        "leisure_sports": "leisure"
+        "humanities": "humanities",
+        "leisure_sports": "leisure_sports"
     }
     return category_map.get(table_name, "tourist")
 
@@ -53,7 +53,8 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
         "latitude": float(attraction.latitude) if attraction.latitude else None,
         "longitude": float(attraction.longitude) if attraction.longitude else None,
         "phoneNumber": getattr(attraction, 'phone_number', None),
-        "parkingAvailable": getattr(attraction, 'parking_available', None)
+        "parkingAvailable": getattr(attraction, 'parking_available', None),
+        "sourceTable": table_name  # 원본 테이블 정보 추가
     }
     
     # 테이블별 특정 필드 추가
@@ -78,18 +79,32 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
     
     return data
 
-async def get_attractions_by_city(db: Session, city_name: str, limit: int = 4):
-    """도시별 관광지 조회"""
+async def get_attractions_by_city(db: Session, city_name: str, limit: int = 8):
+    """도시별 관광지 조회 - 각 카테고리에서 골고루 가져오기"""
     attractions = []
     
+    # 각 카테고리에서 1개씩 가져와서 다양성 확보
     for table_name, table_model in CATEGORY_TABLES.items():
         query_result = db.query(table_model).filter(
             table_model.city.ilike(f"%{city_name}%")
-        ).limit(2).all()  # 각 카테고리에서 2개씩
+        ).limit(1).all()  # 각 카테고리에서 1개씩
         
         category = get_category_from_table(table_name)
         for attraction in query_result:
             attractions.append(format_attraction_data(attraction, category, table_name))
+    
+    # 아직 limit에 도달하지 않았으면 추가로 더 가져오기
+    if len(attractions) < limit:
+        for table_name, table_model in CATEGORY_TABLES.items():
+            if len(attractions) >= limit:
+                break
+            query_result = db.query(table_model).filter(
+                table_model.city.ilike(f"%{city_name}%")
+            ).offset(1).limit(1).all()  # 두 번째부터 가져오기
+            
+            category = get_category_from_table(table_name)
+            for attraction in query_result:
+                attractions.append(format_attraction_data(attraction, category, table_name))
     
     return attractions[:limit]  # 최대 limit개까지만
 
@@ -115,7 +130,7 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
     paginated_cities = sorted_cities[offset:offset + limit]
     
     for index, (city, region) in enumerate(paginated_cities):
-        attractions = await get_attractions_by_city(db, city)
+        attractions = await get_attractions_by_city(db, city, limit=20)
         
         # 관광지가 있는 도시만 포함
         if attractions:
@@ -142,168 +157,6 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
             })
     
     return cities_data, len(sorted_cities)
-
-# 임시 여행 데이터 - 실제로는 DB에서 가져와야 함
-ATTRACTION_DATA = [
-    {
-        "id": "seoul",
-        "cityName": "서울",
-        "description": "과거와 현재가 공존하는",
-        "region": "capital",
-        "recommendationScore": 95,
-        "attractions": [
-            {
-                "id": "gyeongbokgung",
-                "name": "경복궁",
-                "description": "조선왕조의 정궁",
-                "imageUrl": "/images/gyeongbokgung.jpg",
-                "rating": 4.5,
-                "category": "culture"
-            },
-            {
-                "id": "myeongdong",
-                "name": "명동",
-                "description": "쇼핑과 맛집의 메카",
-                "imageUrl": "/images/myeongdong.jpg",
-                "rating": 4.2,
-                "category": "shopping"
-            },
-            {
-                "id": "namsan-tower",
-                "name": "남산타워",
-                "description": "서울의 야경 명소",
-                "imageUrl": "/images/namsan-tower.jpg",
-                "rating": 4.3,
-                "category": "tourist"
-            },
-            {
-                "id": "hongdae",
-                "name": "홍대",
-                "description": "젊음과 예술의 거리",
-                "imageUrl": "/images/hongdae.jpg",
-                "rating": 4.4,
-                "category": "culture"
-            }
-        ]
-    },
-    {
-        "id": "jeju",
-        "cityName": "제주도",
-        "description": "자연이 선사하는 힐링",
-        "region": "jeju",
-        "recommendationScore": 92,
-        "attractions": [
-            {
-                "id": "hallasan",
-                "name": "한라산",
-                "description": "제주도의 상징",
-                "imageUrl": "/images/hallasan.jpg",
-                "rating": 4.7,
-                "category": "nature"
-            },
-            {
-                "id": "seongsan-ilchulbong",
-                "name": "성산일출봉",
-                "description": "일출의 명소",
-                "imageUrl": "/images/seongsan-ilchulbong.jpg",
-                "rating": 4.6,
-                "category": "nature"
-            },
-            {
-                "id": "jeju-black-pork",
-                "name": "제주 흑돼지",
-                "description": "제주도만의 특별한 맛",
-                "imageUrl": "/images/jeju-black-pork.jpg",
-                "rating": 4.8,
-                "category": "food"
-            }
-        ]
-    },
-    {
-        "id": "busan",
-        "cityName": "부산",
-        "description": "바다와 산이 어우러진 영화의 도시",
-        "region": "southeast",
-        "recommendationScore": 88,
-        "attractions": [
-            {
-                "id": "haeundae-beach",
-                "name": "해운대 해수욕장",
-                "description": "한국 최고의 해수욕장",
-                "imageUrl": "/images/haeundae-beach.jpg",
-                "rating": 4.6,
-                "category": "nature"
-            },
-            {
-                "id": "jagalchi-market",
-                "name": "자갈치시장",
-                "description": "신선한 해산물 전통시장",
-                "imageUrl": "/images/jagalchi-market.jpg",
-                "rating": 4.4,
-                "category": "food"
-            },
-            {
-                "id": "gamcheon-village",
-                "name": "감천문화마을",
-                "description": "한국의 마추픽추",
-                "imageUrl": "/images/gamcheon-village.jpg",
-                "rating": 4.5,
-                "category": "culture"
-            }
-        ]
-    },
-    {
-        "id": "jeonju",
-        "cityName": "전주",
-        "description": "한국의 맛과 전통문화의 중심지",
-        "region": "southwest",
-        "recommendationScore": 82,
-        "attractions": [
-            {
-                "id": "jeonju-hanok-village",
-                "name": "전주 한옥마을",
-                "description": "전통 한옥 문화관광지",
-                "imageUrl": "/images/jeonju-hanok-village.jpg",
-                "rating": 4.5,
-                "category": "culture"
-            },
-            {
-                "id": "jeonju-bibimbap",
-                "name": "전주 비빔밥",
-                "description": "전주 대표 향토음식",
-                "imageUrl": "/images/jeonju-bibimbap.jpg",
-                "rating": 4.7,
-                "category": "food"
-            }
-        ]
-    },
-    {
-        "id": "gangneung",
-        "cityName": "강릉",
-        "description": "동해안의 보석",
-        "region": "northeast",
-        "recommendationScore": 78,
-        "attractions": [
-            {
-                "id": "anmok-beach",
-                "name": "안목해변",
-                "description": "커피거리로 유명한 해변",
-                "imageUrl": "/images/anmok-beach.jpg",
-                "rating": 4.3,
-                "category": "nature"
-            },
-            {
-                "id": "gyeongpo-beach",
-                "name": "경포해변",
-                "description": "넓은 백사장의 아름다운 해변",
-                "imageUrl": "/images/gyeongpo-beach.jpg",
-                "rating": 4.4,
-                "category": "nature"
-            }
-        ]
-    }
-]
-
 
 @router.get("/cities")
 async def get_recommended_cities(
@@ -406,7 +259,8 @@ async def get_city_details(city_id: str, db: Session = Depends(get_db)):
 async def get_attraction_details(attraction_id: str, db: Session = Depends(get_db)):
     """특정 관광지의 상세 정보를 가져옵니다."""
     try:
-        # 모든 테이블에서 해당 ID의 관광지 검색
+        # 모든 테이블에서 해당 ID의 관광지 검색 (모든 결과를 수집)
+        matching_attractions = []
         for table_name, table_model in CATEGORY_TABLES.items():
             attraction = db.query(table_model).filter(
                 table_model.id == int(attraction_id)
@@ -433,7 +287,11 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
                     "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
                 })
                 
-                return formatted_attraction
+                matching_attractions.append((table_name, formatted_attraction))
+        
+        # 매칭된 결과가 있으면 첫 번째 결과 반환 (원래 동작 복원)
+        if matching_attractions:
+            return matching_attractions[0][1]
         
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -453,11 +311,72 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
         )
 
 
+@router.get("/attractions/{table_name}/{attraction_id}")
+async def get_attraction_details_by_table(table_name: str, attraction_id: str, db: Session = Depends(get_db)):
+    """특정 테이블에서 관광지 상세 정보를 가져옵니다."""
+    try:
+        # 테이블명 검증
+        if table_name not in CATEGORY_TABLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"잘못된 테이블명: {table_name}"
+            )
+        
+        table_model = CATEGORY_TABLES[table_name]
+        attraction = db.query(table_model).filter(
+            table_model.id == int(attraction_id)
+        ).first()
+        
+        if not attraction:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="관광지를 찾을 수 없습니다."
+            )
+        
+        category = get_category_from_table(table_name)
+        formatted_attraction = format_attraction_data(attraction, category, table_name)
+        
+        # 추가 상세 정보 포함
+        formatted_attraction.update({
+            "city": {
+                "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
+                "name": attraction.city or "알 수 없음",
+                "region": attraction.region or "알 수 없음"
+            },
+            "detailedInfo": getattr(attraction, 'detailed_info', None),
+            "closedDays": getattr(attraction, 'closed_days', None),
+            "majorCategory": getattr(attraction, 'major_category', None),
+            "middleCategory": getattr(attraction, 'middle_category', None),
+            "minorCategory": getattr(attraction, 'minor_category', None),
+            "imageUrls": attraction.image_urls if attraction.image_urls else [],
+            "createdAt": attraction.created_at.isoformat() if attraction.created_at else None,
+            "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None,
+            "sourceTable": table_name  # 원본 테이블 정보 추가
+        })
+        
+        return formatted_attraction
+        
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="잘못된 관광지 ID입니다."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"관광지 상세 정보 조회 중 오류 발생: {str(e)}"
+        )
+
+
 @router.get("/search")
 async def search_attractions(
     q: str = Query(..., description="검색 키워드"),
     category: Optional[str] = Query(None, description="카테고리 필터"),
     region: Optional[str] = Query(None, description="지역 필터"),
+    page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
+    limit: int = Query(50, ge=1, le=200, description="페이지당 결과 수"),
     db: Session = Depends(get_db)
 ):
     """관광지 검색 기능"""
@@ -493,8 +412,12 @@ async def search_attractions(
             if region:
                 query = query.filter(table_model.region.ilike(f"%{region}%"))
             
-            # 검색 결과 조회 (최대 50개)
-            attractions = query.limit(50).all()
+            # 총 개수를 먼저 구하기
+            total_count = query.count()
+            
+            # 페이지네이션 적용하여 검색 결과 조회
+            offset = page * limit
+            attractions = query.offset(offset).limit(limit).all()
             
             # 결과 포맷팅
             table_category = get_category_from_table(table_name)
@@ -507,9 +430,28 @@ async def search_attractions(
                 }
                 results.append(formatted_attraction)
         
+        # 전체 결과 개수 계산 (모든 테이블의 매칭 결과 합계)
+        total_results = 0
+        for table_name, table_model in search_tables.items():
+            query = db.query(table_model)
+            search_filter = or_(
+                table_model.name.ilike(f"%{q}%"),
+                table_model.overview.ilike(f"%{q}%"),
+                table_model.address.ilike(f"%{q}%"),
+                table_model.city.ilike(f"%{q}%")
+            )
+            query = query.filter(search_filter)
+            if region:
+                query = query.filter(table_model.region.ilike(f"%{region}%"))
+            total_results += query.count()
+        
         return {
             "results": results,
             "total": len(results),
+            "totalAvailable": total_results,
+            "page": page,
+            "limit": limit,
+            "hasMore": (page + 1) * limit < total_results,
             "query": q,
             "filters": {
                 "category": category,

@@ -1,10 +1,10 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { GoogleMap } from '@/components'
 
-type CategoryKey = 'all' | 'tourist' | 'food' | 'culture' | 'nature' | 'shopping'
-
+type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
   id: string
   name: string
@@ -22,6 +22,8 @@ interface SelectedPlace {
   }
   cityName?: string
   isPinned?: boolean
+  latitude?: number
+  longitude?: number
 }
 
 interface AttractionData {
@@ -72,6 +74,7 @@ export default function MapPage() {
   // URL 파라미터 읽기
   const placesParam = searchParams.get('places')
   const dayNumbersParam = searchParams.get('dayNumbers')
+  const sourceTablesParam = searchParams.get('sourceTables')
   const startDateParam = searchParams.get('startDate')
   const endDateParam = searchParams.get('endDate')
   const daysParam = searchParams.get('days')
@@ -164,13 +167,24 @@ export default function MapPage() {
         setLoading(true)
         const placeIds = placesParam.split(',')
         const dayNumbers = dayNumbersParam.split(',').map(Number)
+        const sourceTables = sourceTablesParam ? sourceTablesParam.split(',') : []
         
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const places: SelectedPlace[] = []
         
+
         for (let i = 0; i < placeIds.length; i++) {
           try {
-            const response = await fetch(`${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`)
+            let apiUrl
+            if (sourceTables[i] && sourceTables[i] !== 'unknown') {
+              // 새로운 API 사용: /attractions/{table}/{id}
+              apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${sourceTables[i]}/${placeIds[i]}`
+            } else {
+              // 기존 API 사용: /attractions/{id}
+              apiUrl = `${API_BASE_URL}/api/v1/attractions/attractions/${placeIds[i]}`
+            }
+            
+            const response = await fetch(apiUrl)
             if (response.ok) {
               const attraction = await response.json()
               places.push({
@@ -178,15 +192,14 @@ export default function MapPage() {
                 dayNumber: dayNumbers[i] || 1,
                 isPinned: false
               })
+            } else {
             }
           } catch (error) {
-            console.error(`Failed to load place ${placeIds[i]}:`, error)
           }
         }
         
         setSelectedItineraryPlaces(places)
       } catch (error) {
-        console.error('선택된 장소들 로드 오류:', error)
         setError('선택된 장소들을 불러올 수 없습니다.')
       } finally {
         setLoading(false)
@@ -194,13 +207,13 @@ export default function MapPage() {
     }
 
     loadSelectedPlaces()
-  }, [placesParam, dayNumbersParam])
+  }, [placesParam, dayNumbersParam, sourceTablesParam])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = async (category: CategoryKey) => {
     try {
       setCategoryLoading(true)
-      const API_BASE_URL = 'http://localhost:8000'
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       let url = `${API_BASE_URL}/api/v1/attractions/search?q=&limit=50`
       
       // category 매개변수 대신 검색어로 카테고리 처리
@@ -208,11 +221,12 @@ export default function MapPage() {
         // 카테고리별 검색어 매핑
         const categorySearchMap: { [key in CategoryKey]: string } = {
           'all': '',
-          'tourist': '관광지',
-          'food': '맛집',
-          'culture': '문화',
           'nature': '자연',
-          'shopping': '쇼핑'
+          'restaurants': '맛집',
+          'shopping': '쇼핑',
+          'accommodation': '숙박',
+          'humanities': '인문',
+          'leisure_sports': '레저'
         }
         
         const searchTerm = categorySearchMap[category] || ''
@@ -227,7 +241,6 @@ export default function MapPage() {
       const data = await response.json()
       setCategoryPlaces(data.attractions || [])
     } catch (error) {
-      console.error('카테고리 장소 로드 오류:', error)
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
@@ -251,10 +264,11 @@ export default function MapPage() {
   // 카테고리 정의
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
-    { key: 'tourist' as CategoryKey, name: '관광', icon: '🏛️' },
-    { key: 'food' as CategoryKey, name: '맛집', icon: '🍽️' },
-    { key: 'culture' as CategoryKey, name: '문화', icon: '🎭' },
+    { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
+    { key: 'humanities' as CategoryKey, name: '인문', icon: '🏛️' },
+    { key: 'leisure_sports' as CategoryKey, name: '레저', icon: '⚽' },
     { key: 'nature' as CategoryKey, name: '자연', icon: '🌿' },
+    { key: 'restaurants' as CategoryKey, name: '맛집', icon: '🍽️' },
     { key: 'shopping' as CategoryKey, name: '쇼핑', icon: '🛍️' }
   ]
 
@@ -341,6 +355,28 @@ export default function MapPage() {
     })
   };
 
+  // 지도 마커 데이터 생성
+  const mapMarkers = useMemo(() => {
+    if (showItinerary && selectedItineraryPlaces.length > 0) {
+      return selectedItineraryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id
+        }))
+    } else if (!showItinerary && categoryPlaces.length > 0) {
+      return categoryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id
+        }))
+    }
+    return []
+  }, [showItinerary, selectedItineraryPlaces, categoryPlaces])
+
   // 유틸리티 함수
   const handleBack = () => router.back()
   const handleSearch = (e: React.FormEvent) => {
@@ -350,13 +386,12 @@ export default function MapPage() {
 
   const getCategoryName = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
-      tourist: '관광',
-      food: '맛집',
-      culture: '문화',
+      restaurants: '맛집',
+      humanities: '문화',
       nature: '자연',
       shopping: '쇼핑',
       accommodation: '숙박',
-      leisure: '레저'
+      leisure_sports: '레저'
     }
     return categoryMap[category] || category
   }
@@ -451,12 +486,13 @@ export default function MapPage() {
       </div>
 
       {/* Map Area */}
-      <div className="absolute top-0 left-0 right-0 bottom-0 bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-center text-white/70">
-          <div className="text-6xl mb-4">🗺️</div>
-          <p className="text-lg font-medium mb-2">지도 영역</p>
-          <p className="text-sm opacity-75">외부 지도 API 연동 예정</p>
-        </div>
+      <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
+        <GoogleMap
+          className="w-full h-full"
+          center={{ lat: 37.5665, lng: 126.9780 }}
+          zoom={13}
+          markers={mapMarkers}
+        />
       </div>
 
       {/* Bottom Sheet */}

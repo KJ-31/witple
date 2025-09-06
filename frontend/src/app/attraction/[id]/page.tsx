@@ -303,13 +303,12 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
 // 카테고리 한국어 변환 함수
 function getCategoryName(category: string): string {
   const categoryMap: { [key: string]: string } = {
-    tourist: '관광',
-    food: '맛집',
-    culture: '문화',
     nature: '자연',
+    restaurants: '맛집',
     shopping: '쇼핑',
     accommodation: '숙박',
-    leisure: '레저'
+    humanities: '인문',
+    leisure_sports: '레저'
   }
   return categoryMap[category] || category
 }

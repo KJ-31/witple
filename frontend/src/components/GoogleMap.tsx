@@ -1,0 +1,171 @@
+'use client'
+
+import React, { useEffect, useRef, useState, memo } from 'react'
+import { Loader } from '@googlemaps/js-api-loader'
+
+interface GoogleMapProps {
+  className?: string
+  center?: { lat: number; lng: number }
+  zoom?: number
+  markers?: Array<{
+    position: { lat: number; lng: number }
+    title?: string
+    id?: string
+  }>
+}
+
+const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
+  className = '',
+  center = { lat: 37.5665, lng: 126.9780 },
+  zoom = 13,
+  markers = []
+}) => {
+  const mapRef = useRef<HTMLDivElement>(null)
+  const [map, setMap] = useState<any>(null)
+  const [isLoaded, setIsLoaded] = useState(false)
+  const markersRef = useRef<any[]>([])
+
+  useEffect(() => {
+    const initMap = async () => {
+      // // 모바일 환경 감지
+      // const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      // console.log('Mobile device detected:', isMobile)
+      
+      console.log('All process.env NEXT_PUBLIC_* variables:')
+      Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC_')).forEach(key => {
+        console.log(`${key}:`, process.env[key])
+      })
+      
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+      
+      console.log('Google Maps API Key1:', apiKey ? 'Key loaded' : 'Key missing')
+      console.log('API Key type:', typeof apiKey)
+      console.log('API Key length:', apiKey?.length)
+      
+      if (!apiKey || apiKey === '') {
+        console.error('Google Maps API Key가 설정되지 않았습니다')
+        return
+      }
+
+      const loader = new Loader({
+        apiKey,
+        version: 'weekly',
+        libraries: ['places']
+      })
+
+      try {
+        const google = await loader.load()
+        
+        if (mapRef.current && (window as any).google) {
+          const mapInstance = new (window as any).google.maps.Map(mapRef.current, {
+            center,
+            zoom,
+            disableDefaultUI: true, // 모든 기본 UI 컨트롤 비활성화
+            // // 모바일 최적화 설정
+            // gestureHandling: 'greedy', // 터치 제스처 허용
+            // zoomControl: true, // 줌 컨트롤 활성화 (모바일에서 필요)
+            // mapTypeControl: false,
+            // scaleControl: false,
+            // streetViewControl: false,
+            // rotateControl: false,
+            // fullscreenControl: false,
+            // // 모바일 성능 최적화
+            // clickableIcons: false,
+            // keyboardShortcuts: false,
+          })
+
+          setMap(mapInstance)
+          setIsLoaded(true)
+        }
+      } catch (error) {
+        console.error('Google Maps 로드 실패:', error)
+        
+        // // 모바일에서의 특별한 에러 처리
+        // if (isMobile) {
+        //   console.error('모바일 환경에서 Google Maps 로드 실패:', error)
+        //   // 모바일에서 지도 로드 실패 시 대체 UI 표시
+        //   setIsLoaded(false)
+        // }
+      }
+    }
+
+    initMap()
+  }, [center, zoom])
+
+  useEffect(() => {
+    if (map && markers.length > 0 && (window as any).google) {
+      markersRef.current.forEach(marker => marker.setMap(null))
+      markersRef.current = []
+
+      markers.forEach((markerData) => {
+        const marker = new (window as any).google.maps.Marker({
+          position: markerData.position,
+          map,
+          title: markerData.title || '',
+          icon: {
+            path: (window as any).google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#3E68FF',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        })
+
+        if (markerData.title) {
+          const infoWindow = new (window as any).google.maps.InfoWindow({
+            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
+          })
+
+          marker.addListener('click', () => {
+            infoWindow.open(map, marker)
+          })
+        }
+
+        markersRef.current.push(marker)
+      })
+
+      if (markers.length > 0) {
+        const bounds = new (window as any).google.maps.LatLngBounds()
+        markers.forEach(marker => bounds.extend(marker.position))
+        map.fitBounds(bounds)
+      }
+    }
+  }, [map, markers])
+
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  
+  if (!apiKey || apiKey === '') {
+    return (
+      <div className={`bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center ${className}`}>
+        <div className="text-center text-white/70">
+          <div className="text-6xl mb-4">🗺️</div>
+          <p className="text-lg font-medium mb-2">Google Maps API Key가 필요합니다</p>
+          <p className="text-sm opacity-75">환경변수를 확인해주세요</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={className}>
+      <div
+        ref={mapRef}
+        style={{ width: '100%', height: '100%' }}
+        className="rounded-lg"
+      />
+      {!isLoaded && (
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center rounded-lg">
+          <div className="text-center text-white/70">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+            <p className="text-lg font-medium mb-2">지도 로딩 중...</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})
+
+GoogleMapComponent.displayName = 'GoogleMapComponent'
+
+export default GoogleMapComponent
