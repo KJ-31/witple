@@ -2,13 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // 환경별 백엔드 URL 설정
 const getBackendUrl = () => {
-  // 프로덕션 환경에서는 백엔드 서비스 이름 사용
+  // API_INTERNAL_URL이 설정되어 있으면 우선 사용 (도커컴포즈 환경)
+  if (process.env.API_INTERNAL_URL) {
+    return process.env.API_INTERNAL_URL;
+  }
+  
+  // 프로덕션 환경에서는 백엔드 서비스 이름 사용 (Kubernetes 환경)
   if (process.env.NODE_ENV === 'production') {
     return 'http://witple-backend-service:80'; // Kubernetes 서비스 이름
   }
   
-  // 개발 환경에서는 환경 변수 또는 기본값 사용
-  return process.env.API_INTERNAL_URL || 'http://localhost:8000';
+  // 개발 환경에서는 기본값 사용
+  return 'http://localhost:8000';
 };
 
 const API_INTERNAL_URL = getBackendUrl();
@@ -92,7 +97,7 @@ async function proxyRequest(
       body,
     });
 
-    console.log('=== PROXY RESPONSE ===');
+    console.log('==== PROXY RESPONSE ====');
     console.log('Response status:', response.status);
     console.log('Response statusText:', response.statusText);
     console.log('Response headers:', Object.fromEntries(response.headers.entries()));

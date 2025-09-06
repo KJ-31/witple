@@ -185,7 +185,7 @@ export default function RegisterPage() {
                 { id: 'luxury', emoji: '🏖️', label: '럭셔리 리조트 휴식', desc: '편안하고 여유로운 휴식' },
                 { id: 'city', emoji: '🌆', label: '도시 문화와 쇼핑', desc: '활기찬 도시 생활 체험' },
                 { id: 'nature', emoji: '⛰️', label: '대자연 속 모험', desc: '자연 속에서의 모험과 액티비티' },
-                { id: 'food', emoji: '🍽️', label: '현지 맛집 탐방', desc: '다양한 현지 음식 체험' },
+                { id: 'restaurants', emoji: '🍽️', label: '현지 맛집 탐방', desc: '다양한 현지 음식 체험' },
               ].map((option) => (
                 <label
                   key={option.id}
@@ -226,7 +226,7 @@ export default function RegisterPage() {
             <div className="space-y-3">
               {[
                 { id: 'accommodation', emoji: '😴', label: '숙소', desc: '편안하고 좋은 숙소' },
-                { id: 'food', emoji: '🍽️', label: '음식', desc: '맛있는 현지 음식과 고급 레스토랑' },
+                { id: 'restaurants', emoji: '🍽️', label: '음식', desc: '맛있는 현지 음식과 고급 레스토랑' },
                 { id: 'experience', emoji: '🎭', label: '경험', desc: '특별한 체험과 액티비티' },
                 { id: 'shopping', emoji: '🛍️', label: '쇼핑', desc: '기념품과 현지 특산품' },
               ].map((option) => (

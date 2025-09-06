@@ -63,7 +63,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(request: Request, db: Session = Depends(get_db)):
-    logger.info("Login endpoint called - Step 1")
+    logger.info("Login endpoint called - Step 1.")
     
     try:
         logger.info("Step 2: Getting request body")
