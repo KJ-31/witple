@@ -104,6 +104,12 @@ export default function MapPage() {
     clone: HTMLElement | null
   } | null>(null)
   
+  // 최적화 확인 모달 상태
+  const [optimizeConfirmModal, setOptimizeConfirmModal] = useState<{
+    isOpen: boolean,
+    dayNumber: number
+  }>({ isOpen: false, dayNumber: 0 })
+  
   // 드래그 중일 때 body 스크롤 비활성화
   useEffect(() => {
     if (touchDragData?.isDragging) {
@@ -1000,6 +1006,35 @@ export default function MapPage() {
     );
   };
 
+  // UI에서 장소 순서를 최적화된 순서로 변경
+  const updatePlacesOrder = (dayNumber: number, optimizedPlaces: SelectedPlace[]) => {
+    setSelectedItineraryPlaces(prev => {
+      // 다른 날짜의 장소들
+      const otherDayPlaces = prev.filter(p => p.dayNumber !== dayNumber);
+      
+      // 최적화된 장소들과 다른 날짜 장소들을 합쳐서 반환
+      const result = [...otherDayPlaces, ...optimizedPlaces];
+      
+      // 날짜순으로 정렬
+      return result.sort((a, b) => {
+        if ((a.dayNumber || 0) !== (b.dayNumber || 0)) {
+          return (a.dayNumber || 0) - (b.dayNumber || 0);
+        }
+        return 0;
+      });
+    });
+  };
+
+  // 최적화 확인 모달 열기
+  const openOptimizeConfirm = (dayNumber: number) => {
+    setOptimizeConfirmModal({ isOpen: true, dayNumber });
+  };
+
+  // 최적화 확인 모달 닫기
+  const closeOptimizeConfirm = () => {
+    setOptimizeConfirmModal({ isOpen: false, dayNumber: 0 });
+  };
+
   // 일차별 경로 최적화 실행
   const optimizeRouteForDay = async (dayNumber: number) => {
     const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
@@ -1056,6 +1091,9 @@ export default function MapPage() {
         const place = restPlaces.find(p => p.name === name);
         if (place) optimizedPlaces.push(place);
       }
+
+      // UI에서 장소 순서 업데이트
+      updatePlacesOrder(dayNumber, optimizedPlaces);
 
       const segments = [];
       for (let i = 0; i < optimizedPlaces.length - 1; i++) {
@@ -1356,7 +1394,7 @@ export default function MapPage() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setHighlightedDay(day);
-                              optimizeRouteForDay(day);
+                              openOptimizeConfirm(day);
                             }}
                             className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group"
                             title="최적화된 경로 보기"
@@ -1576,6 +1614,62 @@ export default function MapPage() {
           <div className="h-20"></div>
         </div>
       </div>
+
+      {/* 최적화 확인 모달 */}
+      {optimizeConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeOptimizeConfirm}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              {/* 경고 아이콘 */}
+              <div className="mx-auto w-12 h-12 bg-[#FF9800]/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-[#FF9800]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.732 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              
+              {/* 제목 */}
+              <h3 className="text-lg font-semibold text-white mb-2">
+                경로 최적화 확인
+              </h3>
+              
+              {/* 설명 */}
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                최적화 경로를 실행하면
+                <br/>
+                <span className="text-[#FF9800] font-medium">{optimizeConfirmModal.dayNumber}일차</span>의 장소 순서가 변경될 수 있습니다.
+                <br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">변경된 순서는 되돌릴 수 없습니다.</span>
+              </p>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeOptimizeConfirm}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    closeOptimizeConfirm();
+                    optimizeRouteForDay(optimizeConfirmModal.dayNumber);
+                  }}
+                  className="flex-1 py-2.5 px-4 bg-[#FF9800]/20 hover:bg-[#FF9800]/30 border border-[#FF9800]/50 hover:border-[#FF9800]/70 rounded-xl text-[#FF9800] hover:text-[#FFA726] transition-all duration-200 font-medium"
+                >
+                  확인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
