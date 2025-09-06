@@ -3,10 +3,12 @@
 import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { fetchRecommendedCities, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [loading, setLoading] = useState(false)
@@ -22,7 +24,7 @@ export default function Home() {
     loadingRef.current = true
     setLoading(true)
     try {
-      const { data, hasMore: moreData } = await fetchRecommendedCities(pageNum, 3)
+      const { data, hasMore: moreData } = await fetchRecommendedCities(pageNum, 30)
 
       if (pageNum === 0) {
         setCitySections(data)
@@ -40,10 +42,12 @@ export default function Home() {
     }
   }, [])
 
-  // 초기 데이터 로드
+  // 초기 데이터 로드 (세션이 로드된 후)
   useEffect(() => {
-    loadRecommendedCities(0)
-  }, [])
+    if (status !== 'loading') {
+      loadRecommendedCities(0)
+    }
+  }, [status])
 
   // 무한 스크롤 감지
   const lastElementRef = useCallback((node: HTMLDivElement | null) => {
@@ -117,6 +121,21 @@ export default function Home() {
           </button>
         </form>
       </div>
+
+      {/* 로그인 상태 표시 */}
+      {status !== 'loading' && (
+        <div className="px-4 mb-4 text-center">
+          {session ? (
+            <p className="text-[#3E68FF] text-sm bg-[#12345D]/70 px-4 py-2 rounded-full inline-block">
+              🎯 {session.user?.name || session.user?.email}님을 위한 맞춤 추천
+            </p>
+          ) : (
+            <p className="text-[#94A9C9] text-sm bg-[#12345D]/70 px-4 py-2 rounded-full inline-block">
+              📍 인기 여행지 추천 • 로그인하면 맞춤 추천을 받을 수 있어요
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 추천 도시별 명소 섹션 (무한 스크롤) */}
       <main className="px-4 pb-24 space-y-12">
@@ -205,9 +224,8 @@ export default function Home() {
 
           <button
             onClick={() => {
-              // 임시로 로그인 상태를 확인 (실제 구현에서는 인증 상태를 확인)
-              const isLoggedIn = false // 여기서 실제 로그인 상태 확인
-              if (isLoggedIn) {
+              // 실제 로그인 상태 확인
+              if (session) {
                 router.push('/profile')
               } else {
                 router.push('/auth/login')

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { signOut } from 'next-auth/react'
 
 interface TripCard {
   id: number
@@ -33,6 +34,10 @@ interface SavedItem {
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'trips' | 'posts' | 'saved'>('trips')
   const router = useRouter()
+
+  const handleLogout = async () => {
+    await signOut({ callbackUrl: '/' })
+  }
 
   // 목업 데이터
   const trips: TripCard[] = [
@@ -261,11 +266,19 @@ export default function ProfilePage() {
           <span className="text-green-400 font-semibold">555</span>
         </div>
 
-        <Link href="/profile/edit">
-          <button className="w-64 bg-gray-200 text-gray-800 py-3 rounded-2xl font-medium hover:bg-gray-100 transition-colors">
-            Edit Profile
+        <div className="space-y-3">
+          <Link href="/profile/edit">
+            <button className="w-64 bg-gray-200 text-gray-800 py-3 rounded-2xl font-medium hover:bg-gray-100 transition-colors">
+              Edit Profile
+            </button>
+          </Link>
+          <button 
+            onClick={handleLogout}
+            className="w-64 bg-red-600 text-white py-3 rounded-2xl font-medium hover:bg-red-700 transition-colors"
+          >
+            로그아웃
           </button>
-        </Link>
+        </div>
       </div>
 
       {/* Tab Navigation */}
