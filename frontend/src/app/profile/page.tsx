@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 
 interface TripCard {
   id: number
@@ -33,6 +34,31 @@ interface SavedItem {
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<'trips' | 'posts' | 'saved'>('trips')
   const router = useRouter()
+  const { data: session, status } = useSession()
+
+  // 로그인하지 않은 사용자는 로그인 페이지로 리다이렉트
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/auth/login')
+    }
+  }, [status, router])
+
+  // 로딩 중이면 로딩 화면 표시
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-400">프로필을 불러오는 중...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 로그인하지 않은 경우 아무것도 렌더링하지 않음 (리다이렉트 처리됨)
+  if (!session) {
+    return null
+  }
 
   // 목업 데이터
   const trips: TripCard[] = [
@@ -247,14 +273,22 @@ export default function ProfilePage() {
       {/* Profile Section */}
       <div className="flex flex-col items-center px-4 pb-8">
         <div className="w-24 h-24 rounded-full bg-gray-300 mb-4 overflow-hidden">
-          <img
-            src="/QK.jpg"
-            alt="Profile"
-            className="w-full h-full object-cover"
-          />
+          {session.user?.image ? (
+            <img
+              src={session.user.image}
+              alt="Profile"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-blue-500 text-white text-2xl font-bold">
+              {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
+            </div>
+          )}
         </div>
 
-        <h1 className="text-2xl font-bold text-blue-400 mb-2">김쿼카</h1>
+        <h1 className="text-2xl font-bold text-blue-400 mb-2">
+          {session.user?.name || session.user?.email || '사용자'}
+        </h1>
 
         <div className="flex items-center space-x-1 mb-6">
           <span className="text-green-400">🍃</span>
