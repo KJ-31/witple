@@ -12,13 +12,15 @@ interface GoogleMapProps {
     title?: string
     id?: string
   }>
+  onMapLoad?: (map: any) => void
 }
 
 const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   className = '',
   center = { lat: 37.5665, lng: 126.9780 },
   zoom = 13,
-  markers = []
+  markers = [],
+  onMapLoad
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
@@ -60,72 +62,67 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
           const mapInstance = new (window as any).google.maps.Map(mapRef.current, {
             center,
             zoom,
-            disableDefaultUI: true, // 모든 기본 UI 컨트롤 비활성화
-            // // 모바일 최적화 설정
-            // gestureHandling: 'greedy', // 터치 제스처 허용
-            // zoomControl: true, // 줌 컨트롤 활성화 (모바일에서 필요)
-            // mapTypeControl: false,
-            // scaleControl: false,
-            // streetViewControl: false,
-            // rotateControl: false,
-            // fullscreenControl: false,
-            // // 모바일 성능 최적화
-            // clickableIcons: false,
-            // keyboardShortcuts: false,
+            disableDefaultUI: true,
+            gestureHandling: 'greedy',
+            clickableIcons: false,
+            keyboardShortcuts: false,
           })
 
           setMap(mapInstance)
           setIsLoaded(true)
+          
+          // 지도가 로드되면 부모 컴포넌트에 알림
+          if (onMapLoad) {
+            onMapLoad(mapInstance)
+          }
         }
       } catch (error) {
         console.error('Google Maps 로드 실패:', error)
-        
-        // // 모바일에서의 특별한 에러 처리
-        // if (isMobile) {
-        //   console.error('모바일 환경에서 Google Maps 로드 실패:', error)
-        //   // 모바일에서 지도 로드 실패 시 대체 UI 표시
-        //   setIsLoaded(false)
-        // }
       }
     }
 
-    initMap()
-  }, [center, zoom])
+    // 지도가 아직 없을 때만 초기화
+    if (!map && mapRef.current) {
+      initMap()
+    }
+  }, [])
 
   useEffect(() => {
-    if (map && markers.length > 0 && (window as any).google) {
+    if (map && (window as any).google) {
+      // 기존 마커 제거
       markersRef.current.forEach(marker => marker.setMap(null))
       markersRef.current = []
 
-      markers.forEach((markerData) => {
-        const marker = new (window as any).google.maps.Marker({
-          position: markerData.position,
-          map,
-          title: markerData.title || '',
-          icon: {
-            path: (window as any).google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: '#3E68FF',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 2
+      if (markers.length > 0) {
+        markers.forEach((markerData) => {
+          const marker = new (window as any).google.maps.Marker({
+            position: markerData.position,
+            map,
+            title: markerData.title || '',
+            icon: {
+              path: (window as any).google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: '#3E68FF',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            }
+          })
+
+          if (markerData.title) {
+            const infoWindow = new (window as any).google.maps.InfoWindow({
+              content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
+            })
+
+            marker.addListener('click', () => {
+              infoWindow.open(map, marker)
+            })
           }
+
+          markersRef.current.push(marker)
         })
 
-        if (markerData.title) {
-          const infoWindow = new (window as any).google.maps.InfoWindow({
-            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
-          })
-
-          marker.addListener('click', () => {
-            infoWindow.open(map, marker)
-          })
-        }
-
-        markersRef.current.push(marker)
-      })
-
-      if (markers.length > 0) {
+        // 마커들이 있을 때만 bounds 조정
         const bounds = new (window as any).google.maps.LatLngBounds()
         markers.forEach(marker => bounds.extend(marker.position))
         map.fitBounds(bounds)
