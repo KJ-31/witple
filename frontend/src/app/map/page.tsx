@@ -1853,7 +1853,7 @@ export default function MapPage() {
                                 onMouseDown={(e) => e.stopPropagation()}
                               >
                                 <div className="mb-1">
-                                  <h4 className="font-semibold text-white mb-1">{place.name}</h4>
+                                  <h4 className="font-semibold text-white mb-1 text-sm">{place.name}</h4>
                                   <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
                                     {getCategoryName(place.category)}
                                   </span>
