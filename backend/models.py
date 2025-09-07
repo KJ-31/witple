@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -98,7 +98,7 @@ class UserPreferenceTag(Base):
     # Relationship to user
     user = relationship("User", back_populates="preference_tags")
 
-
+    
 class SavedLocation(Base):
     __tablename__ = "saved_locations"
 
@@ -114,7 +114,7 @@ class SavedLocation(Base):
     # Relationship to user
     user = relationship("User", back_populates="saved_locations")
 
-
+    
 class Trip(Base):
     __tablename__ = "trips"
 

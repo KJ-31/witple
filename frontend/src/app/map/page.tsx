@@ -1,8 +1,9 @@
 'use client'
 
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
+import { saveTrip } from '@/app/api'
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
@@ -90,23 +91,73 @@ export default function MapPage() {
   const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
+  const [routeSegments, setRouteSegments] = useState<{
+    origin: {lat: number, lng: number, name: string},
+    destination: {lat: number, lng: number, name: string},
+    distance: string,
+    duration: string,
+    transitDetails?: any
+  }[]>([])
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
   
-  // 터치 드래그 상태
-  const [touchDragData, setTouchDragData] = useState<{
+  // Long press 상태
+  const [longPressData, setLongPressData] = useState<{
+    isLongPressing: boolean,
     isDragging: boolean,
     startY: number,
     currentY: number,
     dragElement: HTMLElement | null,
-    clone: HTMLElement | null
+    clone: HTMLElement | null,
+    timeout: NodeJS.Timeout | null,
+    preventClick: boolean
   } | null>(null)
+  
+  // 최적화 확인 모달 상태
+  const [optimizeConfirmModal, setOptimizeConfirmModal] = useState<{
+    isOpen: boolean,
+    dayNumber: number
+  }>({ isOpen: false, dayNumber: 0 })
+  
+  // 삭제 확인 모달 상태
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean,
+    place: SelectedPlace | null,
+    dayNumber: number
+  }>({ isOpen: false, place: null, dayNumber: 0 })
+
+  // 일정 저장 모달 상태
+  const [saveItineraryModal, setSaveItineraryModal] = useState<{
+    isOpen: boolean
+    title: string
+    description: string
+    titleError: string
+  }>({ isOpen: false, title: '', description: '', titleError: '' })
+
+  // 저장 토스트 상태
+  const [saveToast, setSaveToast] = useState<{
+    show: boolean
+    message: string
+    type: 'success' | 'error'
+  }>({ show: false, message: '', type: 'success' })
+  
+  // 장소별 잠금 상태 관리
+  const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
+  
+  // 잠금 토글 함수
+  const toggleLockPlace = (placeId: string, dayNumber: number) => {
+    const key = `${placeId}_${dayNumber}`;
+    setLockedPlaces(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
   
   // 드래그 중일 때 body 스크롤 비활성화
   useEffect(() => {
-    if (touchDragData?.isDragging) {
+    if (longPressData?.isDragging) {
       document.body.style.overflow = 'hidden';
       document.body.style.position = 'fixed';
       document.body.style.width = '100%';
@@ -121,7 +172,7 @@ export default function MapPage() {
       document.body.style.position = '';
       document.body.style.width = '';
     };
-  }, [touchDragData?.isDragging]);
+  }, [longPressData?.isDragging]);
 
   // 화면 높이 측정
   useEffect(() => {
@@ -252,7 +303,7 @@ export default function MapPage() {
   }, [placesParam, dayNumbersParam, sourceTablesParam])
 
   // 카테고리별 장소 가져오기
-  const fetchPlacesByCategory = async (category: CategoryKey) => {
+  const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
     try {
       setCategoryLoading(true)
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
@@ -287,21 +338,21 @@ export default function MapPage() {
     } finally {
       setCategoryLoading(false)
     }
-  }
+  }, [])
 
   // 카테고리 선택 시 장소 가져오기
   useEffect(() => {
     if (!showItinerary) {
       fetchPlacesByCategory(selectedCategory)
     }
-  }, [selectedCategory, showItinerary])
+  }, [selectedCategory, showItinerary, fetchPlacesByCategory])
 
   // 초기 로딩 시 전체 장소 가져오기 (일정 보기 모드가 아닐 때만)
   useEffect(() => {
     if (!placesParam) {
       fetchPlacesByCategory('all')
     }
-  }, [])
+  }, [placesParam, fetchPlacesByCategory])
 
   // 카테고리 정의
   const categories = [
@@ -355,97 +406,143 @@ export default function MapPage() {
     (e.target as HTMLElement).style.opacity = '0.5';
   };
 
-  // 터치 이벤트 핸들러
-  const handleDragTouchStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
-    console.log('터치 드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
+  // Long press 이벤트 핸들러
+  const handleLongPressStart = (e: React.TouchEvent, place: SelectedPlace, dayNumber: number, index: number) => {
+    // 버튼에서는 long press 실행하지 않음 (휴지통 버튼만 제외)
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) {
+      return;
+    }
     
     const touch = e.touches[0];
     const element = e.currentTarget as HTMLElement;
-    // 전체 카드 요소를 찾기 (드래그 핸들의 부모 카드)
-    const cardElement = element.closest('[data-place-card]') as HTMLElement;
-    if (!cardElement) return;
-    
-    const rect = cardElement.getBoundingClientRect();
-    
-    // 카드 전체의 복사본 생성
-    const clone = cardElement.cloneNode(true) as HTMLElement;
-    clone.style.position = 'fixed';
-    clone.style.zIndex = '9999';
-    clone.style.opacity = '0.8';
-    clone.style.width = rect.width + 'px';
-    clone.style.height = rect.height + 'px';
-    clone.style.left = rect.left + 'px';
-    clone.style.top = rect.top + 'px';
-    clone.style.pointerEvents = 'none';
-    clone.style.transform = 'rotate(2deg)';
-    clone.style.boxShadow = '0 10px 25px rgba(0,0,0,0.4)';
-    document.body.appendChild(clone);
-    
-    setDraggedItem({ placeId: place.id, dayNumber, index });
-    setTouchDragData({
-      isDragging: true,
+    const cardElement = element;
+
+    // Long press 타이머 시작
+    const timeout = setTimeout(() => {
+      // Long press 확인됨 - 햅틱 피드백 추가
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+      
+      const rect = cardElement.getBoundingClientRect();
+      
+      // 카드 복사본 생성
+      const clone = cardElement.cloneNode(true) as HTMLElement;
+      clone.style.position = 'fixed';
+      clone.style.zIndex = '9999';
+      clone.style.opacity = '0.8';
+      clone.style.width = rect.width + 'px';
+      clone.style.height = rect.height + 'px';
+      clone.style.left = rect.left + 'px';
+      clone.style.top = rect.top + 'px';
+      clone.style.pointerEvents = 'none';
+      clone.style.transform = 'rotate(2deg) scale(1.05)';
+      clone.style.boxShadow = '0 15px 35px rgba(62, 104, 255, 0.4)';
+      clone.style.border = '2px solid #3E68FF';
+      document.body.appendChild(clone);
+      
+      setDraggedItem({ placeId: place.id, dayNumber, index });
+      setLongPressData(prev => ({
+        isLongPressing: true,
+        isDragging: true,
+        startY: touch.clientY,
+        currentY: touch.clientY,
+        dragElement: cardElement,
+        clone,
+        timeout: null,
+        preventClick: true
+      }));
+      
+      // 원본 요소 스타일 변경 - long press 시각 피드백
+      cardElement.style.opacity = '0.3';
+      cardElement.style.transform = 'scale(0.95)';
+      cardElement.style.transition = 'all 0.2s ease';
+    }, 400); // 400ms long press로 단축
+
+    setLongPressData({
+      isLongPressing: false,
+      isDragging: false,
       startY: touch.clientY,
       currentY: touch.clientY,
       dragElement: cardElement,
-      clone
+      clone: null,
+      timeout,
+      preventClick: false
     });
-    
-    // 원본 요소 스타일 변경
-    cardElement.style.opacity = '0.3';
   };
   
-  const handleDragTouchMove = (e: React.TouchEvent) => {
-    if (!touchDragData?.isDragging || !touchDragData.clone) return;
+  const handleLongPressMove = (e: React.TouchEvent) => {
+    if (!longPressData) return;
     
     const touch = e.touches[0];
+    const moveThreshold = 10; // 10px 이동하면 long press 취소
     
-    // 복사본 위치 업데이트
-    const deltaY = touch.clientY - touchDragData.startY;
-    const originalRect = touchDragData.dragElement!.getBoundingClientRect();
-    touchDragData.clone.style.left = originalRect.left + 'px';
-    touchDragData.clone.style.top = (originalRect.top + deltaY) + 'px';
-    
-    setTouchDragData(prev => prev ? {
-      ...prev,
-      currentY: touch.clientY
-    } : null);
-    
-    // 드롭 존 감지
-    const dropZones = document.querySelectorAll('[data-drop-zone]');
-    let targetFound = false;
-    
-    dropZones.forEach(zone => {
-      const zoneRect = zone.getBoundingClientRect();
-      if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
-        const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
-        const index = parseInt(zone.getAttribute('data-index') || '0');
-        setDragOverIndex({ day: dayNumber, index });
-        targetFound = true;
+    if (!longPressData.isDragging) {
+      // Long press 대기 중 - 너무 많이 움직이면 취소
+      const deltaY = Math.abs(touch.clientY - longPressData.startY);
+      if (deltaY > moveThreshold && longPressData.timeout) {
+        clearTimeout(longPressData.timeout);
+        setLongPressData(null);
+        return;
       }
-    });
-    
-    if (!targetFound) {
-      setDragOverIndex(null);
+    } else {
+      // 드래그 중
+      if (!longPressData.clone) return;
+      
+      const deltaY = touch.clientY - longPressData.startY;
+      const originalRect = longPressData.dragElement!.getBoundingClientRect();
+      longPressData.clone.style.left = originalRect.left + 'px';
+      longPressData.clone.style.top = (originalRect.top + deltaY) + 'px';
+      
+      setLongPressData(prev => prev ? {
+        ...prev,
+        currentY: touch.clientY
+      } : null);
+      
+      // 드롭 존 감지
+      const dropZones = document.querySelectorAll('[data-drop-zone]');
+      let targetFound = false;
+      
+      dropZones.forEach(zone => {
+        const zoneRect = zone.getBoundingClientRect();
+        if (touch.clientY >= zoneRect.top && touch.clientY <= zoneRect.bottom) {
+          const dayNumber = parseInt(zone.getAttribute('data-day') || '0');
+          const index = parseInt(zone.getAttribute('data-index') || '0');
+          setDragOverIndex({ day: dayNumber, index });
+          targetFound = true;
+        }
+      });
+      
+      if (!targetFound) {
+        setDragOverIndex(null);
+      }
     }
   };
   
-  const handleDragTouchEnd = (e: React.TouchEvent) => {
-    if (!touchDragData?.isDragging) return;
+  const handleLongPressEnd = (e: React.TouchEvent) => {
+    if (!longPressData) return;
+    
+    // Long press 타이머 정리
+    if (longPressData.timeout) {
+      clearTimeout(longPressData.timeout);
+    }
     
     // 복사본 제거
-    if (touchDragData.clone) {
-      document.body.removeChild(touchDragData.clone);
+    if (longPressData.clone) {
+      document.body.removeChild(longPressData.clone);
     }
     
     // 원본 요소 스타일 복원
-    if (touchDragData.dragElement) {
-      touchDragData.dragElement.style.opacity = '1';
+    if (longPressData.dragElement) {
+      longPressData.dragElement.style.opacity = '1';
+      longPressData.dragElement.style.transform = '';
+      longPressData.dragElement.style.transition = '';
     }
     
-    // 드롭 처리
-    if (dragOverIndex && draggedItem) {
-      console.log('터치 드롭:', dragOverIndex, draggedItem);
-      // 가짜 이벤트 객체 생성
+    // 드래그가 진행되었다면 드롭 처리
+    if (longPressData.isDragging && dragOverIndex && draggedItem) {
+      console.log('Long press 드롭:', dragOverIndex, draggedItem);
       const fakeEvent = {
         preventDefault: () => {},
         dataTransfer: { dropEffect: 'move' }
@@ -453,8 +550,11 @@ export default function MapPage() {
       handleDrop(fakeEvent, dragOverIndex.index, dragOverIndex.day);
     }
     
-    // 상태 초기화
-    setTouchDragData(null);
+    // preventClick을 잠시 유지한 후 초기화 (클릭 이벤트 방지)
+    setTimeout(() => {
+      setLongPressData(null);
+    }, 100);
+    
     setDraggedItem(null);
     setDragOverIndex(null);
   };
@@ -586,6 +686,11 @@ export default function MapPage() {
     })
   };
 
+  // 지도 인스턴스 설정을 useCallback으로 메모화
+  const handleMapLoad = useCallback((mapInstanceParam: any) => {
+    setMapInstance(mapInstanceParam)
+  }, [])
+
   // 지도 마커 데이터 생성
   const mapMarkers = useMemo(() => {
     if (showItinerary && selectedItineraryPlaces.length > 0) {
@@ -680,73 +785,109 @@ export default function MapPage() {
   } => {
     if (destinations.length === 0) return { order: [], totalDistance: 0, optimizedNames: [] };
     
-    const result = [];
+    // 최종 결과 배열을 미리 생성 (잠금된 위치는 고정)
+    const finalOrder = new Array(destinations.length).fill(-1);
+    const finalNames = new Array(destinations.length).fill('');
     const visited = new Array(destinations.length).fill(false);
-    let currentLocation = origin;
-    let totalDistance = 0;
-
-    const lockedWaypoints = constraints
-      .map((constraint, index) => ({ ...constraint, originalIndex: index }))
-      .filter(constraint => constraint.locked)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
-
-    for (const locked of lockedWaypoints) {
-      const index = locked.originalIndex;
-      if (!visited[index]) {
-        const distance = calculateDistance(
-          currentLocation.lat, currentLocation.lng,
-          destinations[index].lat, destinations[index].lng
-        );
-        
-        visited[index] = true;
-        result.push({
-          index,
-          name: destinationNames[index],
-          distance,
-          locked: true
-        });
-        totalDistance += distance;
-        currentLocation = destinations[index];
+    
+    // 1. 잠금된 장소들을 먼저 고정된 위치에 배치
+    constraints.forEach((constraint, index) => {
+      if (constraint.locked && constraint.order !== undefined) {
+        const fixedPosition = constraint.order - 1; // order는 1부터 시작하므로 -1
+        if (fixedPosition >= 0 && fixedPosition < destinations.length) {
+          finalOrder[fixedPosition] = index;
+          finalNames[fixedPosition] = destinationNames[index];
+          visited[index] = true;
+        }
+      }
+    });
+    
+    // 2. 잠금되지 않은 장소들을 가장 가까운 거리 순으로 배치
+    const unlockedIndices = [];
+    for (let i = 0; i < destinations.length; i++) {
+      if (!visited[i]) {
+        unlockedIndices.push(i);
       }
     }
-
-    while (result.length < destinations.length) {
+    
+    // 3. 빈 슬롯들을 찾기
+    const emptySlots = [];
+    for (let i = 0; i < finalOrder.length; i++) {
+      if (finalOrder[i] === -1) {
+        emptySlots.push(i);
+      }
+    }
+    
+    // 4. 최적화: 각 빈 슬롯에 대해 가장 적합한 장소 배치
+    let currentLocation = origin;
+    let totalDistance = 0;
+    
+    // 순서대로 처리하면서 거리 계산
+    for (let slotIndex = 0; slotIndex < emptySlots.length; slotIndex++) {
+      const slot = emptySlots[slotIndex];
+      
+      // 이전 위치까지의 경로를 따라 현재 위치 업데이트
+      if (slot > 0) {
+        const prevIndex = finalOrder[slot - 1];
+        if (prevIndex !== -1) {
+          currentLocation = destinations[prevIndex];
+        }
+      }
+      
+      // 가장 가까운 미방문 장소 찾기
       let nearestIndex = -1;
       let nearestDistance = Infinity;
-
-      for (let j = 0; j < destinations.length; j++) {
-        if (!visited[j] && !constraints[j].locked) {
+      
+      for (const unlockedIndex of unlockedIndices) {
+        if (!visited[unlockedIndex]) {
           const distance = calculateDistance(
             currentLocation.lat, currentLocation.lng,
-            destinations[j].lat, destinations[j].lng
+            destinations[unlockedIndex].lat, destinations[unlockedIndex].lng
           );
           
           if (distance < nearestDistance) {
             nearestDistance = distance;
-            nearestIndex = j;
+            nearestIndex = unlockedIndex;
           }
         }
       }
-
+      
+      // 가장 가까운 장소를 현재 슬롯에 배치
       if (nearestIndex !== -1) {
+        finalOrder[slot] = nearestIndex;
+        finalNames[slot] = destinationNames[nearestIndex];
         visited[nearestIndex] = true;
-        result.push({
-          index: nearestIndex,
-          name: destinationNames[nearestIndex],
-          distance: nearestDistance,
-          locked: false
-        });
         totalDistance += nearestDistance;
         currentLocation = destinations[nearestIndex];
-      } else {
-        break;
+      }
+    }
+    
+    // 전체 거리 재계산
+    totalDistance = 0;
+    let prevLocation = origin;
+    for (let i = 0; i < finalOrder.length; i++) {
+      const index = finalOrder[i];
+      if (index !== -1) {
+        const distance = calculateDistance(
+          prevLocation.lat, prevLocation.lng,
+          destinations[index].lat, destinations[index].lng
+        );
+        totalDistance += distance;
+        prevLocation = destinations[index];
       }
     }
 
+    console.log('제약 조건 최적화 결과:', {
+      finalOrder,
+      finalNames,
+      constraints,
+      totalDistance
+    });
+
     return { 
-      order: result.map(r => r.index), 
+      order: finalOrder.filter(index => index !== -1), 
       totalDistance, 
-      optimizedNames: result.map(r => r.name)
+      optimizedNames: finalNames.filter(name => name !== '')
     };
   };
 
@@ -768,14 +909,170 @@ export default function MapPage() {
 
   // 기존 경로 제거
   const clearRoute = () => {
-    directionsRenderers.forEach(renderer => renderer.setMap(null));
+    // 모든 기존 경로 렌더러 제거
+    directionsRenderers.forEach(renderer => {
+      if (renderer) {
+        renderer.setMap(null);
+        renderer.setDirections(null);
+      }
+    });
     setDirectionsRenderers([]);
-    sequenceMarkers.forEach(marker => marker.setMap(null));
+    
+    // 모든 기존 마커 제거
+    sequenceMarkers.forEach(marker => {
+      if (marker) {
+        marker.setMap(null);
+      }
+    });
     setSequenceMarkers([]);
+    
+    // 상태 메시지 제거
+    setRouteStatus(null);
+    
+    // 경로 구간 정보 초기화
+    setRouteSegments([]);
+    
+
+    console.log('모든 경로와 마커가 제거되었습니다');
   };
 
+  // 특정 일차와 구간에 해당하는 경로 정보 가져오기
+  const getRouteSegmentInfo = (dayNumber: number, fromPlaceId: string, toPlaceId: string) => {
+    return routeSegments.find(segment => {
+      // 일차별 장소들에서 해당 구간 찾기
+      const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
+      const fromIndex = dayPlaces.findIndex(place => place.id === fromPlaceId);
+      const toIndex = dayPlaces.findIndex(place => place.id === toPlaceId);
+      
+      return segment.origin.name === dayPlaces[fromIndex]?.name && 
+             segment.destination.name === dayPlaces[toIndex]?.name;
+    });
+  };
+
+  // 서울 지하철 호선별 색상 매핑
+  const getSubwayLineColor = (lineName: string) => {
+    const colors: {[key: string]: string} = {
+      '1호선': '#003D84',
+      '2호선': '#00A651', 
+      '3호선': '#F36D22',
+      '4호선': '#00A4E5',
+      '5호선': '#8936AC',
+      '6호선': '#C5622E',
+      '7호선': '#697215',
+      '8호선': '#EB1C8C',
+      '9호선': '#C7A24B',
+      '경의중앙선': '#7DC4A4',
+      '공항철도': '#0090D2',
+      '경춘선': '#32C6A6',
+      '수인분당선': '#FABE00',
+      '신분당선': '#D31145',
+      '우이신설선': '#B7C450',
+      '서해선': '#8FC31F',
+      '김포골드라인': '#A9431E',
+      '신림선': '#6789CA',
+    };
+    
+    // 호선 번호 추출 (예: "지하철 2호선" → "2호선")
+    const match = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+    if (match) {
+      return colors[match[1]] || '#3E68FF';
+    }
+    return '#3E68FF';
+  };
+
+  // 버스 색상 매핑 (서울, 경기, 인천 등 포함)
+  const getBusColor = (lineName: string) => {
+    // 경기도 버스
+    if (lineName.includes('경기')) {
+      if (lineName.includes('일반')) {
+        return '#4caf50'; // 초록색 - 경기 일반버스
+      } else if (lineName.includes('좌석') || lineName.includes('직행')) {
+        return '#f44336'; // 빨간색 - 경기 좌석/직행버스
+      }
+      return '#4caf50'; // 기본 경기버스는 초록색
+    }
+    
+    // 인천 버스
+    if (lineName.includes('인천')) {
+      return '#ffa726'; // 주황색 - 인천버스
+    }
+    
+    // 서울 버스 (기존 로직)
+    const busNumber = lineName.replace(/[^0-9]/g, '');
+    const firstDigit = parseInt(busNumber.charAt(0));
+    
+    if (lineName.includes('간선') || (firstDigit >= 1 && firstDigit <= 7)) {
+      return '#3d5afe'; // 파란색 - 간선버스
+    } else if (lineName.includes('지선') || firstDigit === 0) {
+      return '#4caf50'; // 초록색 - 지선버스  
+    } else if (lineName.includes('순환') || firstDigit === 8) {
+      return '#ffa726'; // 주황색 - 순환버스
+    } else if (lineName.includes('광역') || firstDigit === 9) {
+      return '#f44336'; // 빨간색 - 광역버스
+    } else if (lineName.includes('마을')) {
+      return '#4caf50'; // 초록색 - 마을버스
+    }
+    return '#9e9e9e'; // 기본 회색
+  };
+
+  // 교통수단 이름 정리 (버스 번호만 추출)
+  const getCleanTransitName = (transitDetails: any) => {
+    // step.transitDetails 객체에서 정보 추출
+    const lineName = transitDetails.line || '';
+    const shortName = transitDetails.short_name || '';
+    const vehicleName = transitDetails.vehicle || '';
+    const vehicleType = transitDetails.vehicle_type || '';
+    
+    // short_name이 있고 숫자로만 이루어져 있으면 버스 번호일 가능성이 높음
+    if (shortName && /^\d+$/.test(shortName)) {
+      return shortName + '번';
+    }
+    
+    // line name에서 버스 번호 추출 시도
+    if (lineName && (lineName.includes('버스') || lineName.includes('Bus') || vehicleType === 'BUS')) {
+      // 숫자만 추출해서 버스 번호로 표시
+      const busNumber = lineName.match(/\d+/);
+      if (busNumber) {
+        return busNumber[0] + '번';
+      }
+      
+      // short_name에서 번호 찾기
+      if (shortName) {
+        const shortBusNumber = shortName.match(/\d+/);
+        if (shortBusNumber) {
+          return shortBusNumber[0] + '번';
+        }
+      }
+      
+      // 숫자가 없는 경우 지역명과 버스 타입 제거
+      let cleanName = lineName
+        .replace(/서울\s*/, '')
+        .replace(/경기\s*/, '')
+        .replace(/인천\s*/, '')
+        .replace(/간선\s*/, '')
+        .replace(/지선\s*/, '')
+        .replace(/일반\s*/, '')
+        .replace(/광역\s*/, '')
+        .replace(/마을\s*/, '')
+        .replace(/순환\s*/, '')
+        .replace(/버스/, '')
+        .trim();
+      
+      return cleanName || '버스';
+    }
+    
+    // 지하철인 경우 호선 정보 추출
+    if (lineName && (lineName.includes('지하철') || lineName.includes('호선') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL')) {
+      const lineMatch = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+      return lineMatch ? lineMatch[1] : (shortName || lineName);
+    }
+    
+    return shortName || lineName || '알 수 없음';
+  };
+
+
   // 순서 마커 생성 (START, 1, 2, 3, END)
-  const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[]) => {
+  const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
     
     const newSequenceMarkers = [];
@@ -791,7 +1088,7 @@ export default function MapPage() {
         
         const markerColor = i === 0 ? '#4CAF50' : 
                            i === allPoints.length - 1 ? '#F44336' : 
-                           '#2196F3';
+                           isOptimized ? '#FF9800' : '#2196F3'; // 최적화된 경로는 주황색
         
         const marker = new (window as any).google.maps.Marker({
           position: coords,
@@ -822,6 +1119,7 @@ export default function MapPage() {
                   i === allPoints.length - 1 ? '최종 목적지입니다' : 
                   `${i === 1 ? '첫 번째' : i === 2 ? '두 번째' : i === 3 ? '세 번째' : `${i}번째`} 방문할 장소입니다`}
               </p>
+              ${isOptimized && i > 0 && i < allPoints.length - 1 ? '<p style="margin: 5px 0 0 0; font-size: 10px; color: #FF9800; font-weight: bold;">🔄 최적화된 순서</p>' : ''}
             </div>
           `
         });
@@ -839,8 +1137,63 @@ export default function MapPage() {
     setSequenceMarkers(newSequenceMarkers);
   };
 
-  // 최적화된 경로 렌더링
-  const renderOptimizedRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+  // 기본 동선 렌더링 (순서대로)
+  const renderBasicRoute = async (dayNumber: number) => {
+    const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
+    
+    if (dayPlaces.length < 2) {
+      updateStatus(`${dayNumber}일차에 경로를 계획할 장소가 충분하지 않습니다 (최소 2개 필요)`, 'error');
+      return;
+    }
+
+    try {
+      // 먼저 모든 기존 경로와 마커 완전히 제거
+      clearRoute();
+      // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      updateStatus(`${dayNumber}일차 기본 동선 표시 중...`, 'loading');
+
+      // 순서대로 경로 구간 생성
+      const segments = [];
+      for (let i = 0; i < dayPlaces.length - 1; i++) {
+        const current = dayPlaces[i];
+        const next = dayPlaces[i + 1];
+        
+        if (!current.latitude || !current.longitude || !next.latitude || !next.longitude) {
+          continue;
+        }
+        
+        segments.push({
+          origin: { 
+            lat: current.latitude, 
+            lng: current.longitude, 
+            name: current.name 
+          },
+          destination: { 
+            lat: next.latitude, 
+            lng: next.longitude, 
+            name: next.name 
+          }
+        });
+      }
+
+      if (segments.length === 0) {
+        updateStatus('좌표 정보가 없어서 경로를 표시할 수 없습니다', 'error');
+        return;
+      }
+
+      console.log(`${dayNumber}일차 기본 동선:`, segments);
+      await renderRoute(segments, false); // 기본 동선
+
+    } catch (error) {
+      console.error(`${dayNumber}일차 Basic route error:`, error);
+      updateStatus(`${dayNumber}일차 기본 동선 표시 중 오류가 발생했습니다.`, 'error');
+    }
+  };
+
+  // 경로 렌더링 (기본 동선 또는 최적화 경로)
+  const renderRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     if (!(window as any).google?.maps?.DirectionsService) {
       console.error('Google Maps DirectionsService not available');
       return;
@@ -851,6 +1204,7 @@ export default function MapPage() {
     let allResults = [];
     let totalDistance = 0;
     let totalDuration = 0;
+    let segmentDetails = [];
 
     try {
       for (let i = 0; i < segments.length; i++) {
@@ -879,8 +1233,48 @@ export default function MapPage() {
         allResults.push(result);
         
         const leg = result.routes[0].legs[0];
-        totalDistance += leg.distance?.value || 0;
-        totalDuration += leg.duration?.value || 0;
+        const distance = leg.distance?.value || 0;
+        const duration = leg.duration?.value || 0;
+        
+        totalDistance += distance;
+        totalDuration += duration;
+
+        // 구간 정보 저장
+        segmentDetails.push({
+          origin: segment.origin,
+          destination: segment.destination,
+          distance: leg.distance?.text || '알 수 없음',
+          duration: leg.duration?.text || '알 수 없음',
+          transitDetails: leg.steps?.map((step: any) => {
+            // 교통수단 정보 디버깅을 위한 로그
+            if (step.transit) {
+              console.log('Transit step data:', {
+                line_name: step.transit.line?.name,
+                line_short_name: step.transit.line?.short_name,
+                vehicle_name: step.transit.line?.vehicle?.name,
+                vehicle_type: step.transit.line?.vehicle?.type,
+                full_step: step.transit
+              });
+            }
+            
+            return {
+              instruction: step.instructions?.replace(/<[^>]*>/g, ''), // HTML 태그 제거
+              mode: step.travel_mode,
+              distance: step.distance?.text,
+              duration: step.duration?.text,
+              transitDetails: step.transit ? {
+                line: step.transit.line?.name,
+                short_name: step.transit.line?.short_name, // 짧은 이름 추가
+                vehicle: step.transit.line?.vehicle?.name,
+                vehicle_type: step.transit.line?.vehicle?.type, // 차량 타입 추가
+                departure_stop: step.transit.departure_stop?.name,
+                arrival_stop: step.transit.arrival_stop?.name,
+                departure_time: step.transit.departure_time?.text,
+                arrival_time: step.transit.arrival_time?.text
+              } : null
+            };
+          })
+        });
       }
     } catch (err) {
       console.log('경로 계산 실패:', err);
@@ -899,7 +1293,7 @@ export default function MapPage() {
       const renderer = new (window as any).google.maps.DirectionsRenderer({
         draggable: false,
         polylineOptions: {
-          strokeColor: '#34A853', // 대중교통용 초록색
+          strokeColor: isOptimized ? '#FF9800' : '#34A853', // 최적화는 주황색, 기본은 초록색
           strokeWeight: 6,
           strokeOpacity: 0.8
         },
@@ -915,19 +1309,79 @@ export default function MapPage() {
     }
 
     setDirectionsRenderers(newRenderers);
-    await createSequenceMarkers(segments);
+    await createSequenceMarkers(segments, isOptimized);
+
+    // 구간 정보를 상태에 저장
+    setRouteSegments(segmentDetails);
 
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
     
-    const routeTypeText = isOptimized ? '최적화된 경로!' : '경로 계획 완료!';
+    const routeTypeText = isOptimized ? '최적화된 경로!' : '기본 동선 표시 완료!';
     updateStatus(
       `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
       'success'
     );
   };
 
-  // 일차별 경로 최적화 실행
+  // UI에서 장소 순서를 최적화된 순서로 변경
+  const updatePlacesOrder = (dayNumber: number, optimizedPlaces: SelectedPlace[]) => {
+    setSelectedItineraryPlaces(prev => {
+      // 다른 날짜의 장소들
+      const otherDayPlaces = prev.filter(p => p.dayNumber !== dayNumber);
+      
+      // 최적화된 장소들과 다른 날짜 장소들을 합쳐서 반환
+      const result = [...otherDayPlaces, ...optimizedPlaces];
+      
+      // 날짜순으로 정렬
+      return result.sort((a, b) => {
+        if ((a.dayNumber || 0) !== (b.dayNumber || 0)) {
+          return (a.dayNumber || 0) - (b.dayNumber || 0);
+        }
+        return 0;
+      });
+    });
+  };
+
+  // 최적화 확인 모달 열기
+  const openOptimizeConfirm = (dayNumber: number) => {
+    setOptimizeConfirmModal({ isOpen: true, dayNumber });
+  };
+
+  // 최적화 확인 모달 닫기
+  const closeOptimizeConfirm = () => {
+    setOptimizeConfirmModal({ isOpen: false, dayNumber: 0 });
+  };
+
+  // 삭제 확인 모달 열기
+  const openDeleteConfirm = (place: SelectedPlace, dayNumber: number) => {
+    setDeleteConfirmModal({ isOpen: true, place, dayNumber });
+  };
+
+  // 삭제 확인 모달 닫기
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmModal({ isOpen: false, place: null, dayNumber: 0 });
+  };
+
+  // 일정 저장 모달 열기
+  const openSaveItinerary = () => {
+    setSaveItineraryModal({ isOpen: true, title: '', description: '', titleError: '' });
+  };
+
+  // 일정 저장 모달 닫기
+  const closeSaveItinerary = () => {
+    setSaveItineraryModal({ isOpen: false, title: '', description: '', titleError: '' });
+  };
+
+  // 실제 삭제 실행
+  const confirmDelete = () => {
+    if (deleteConfirmModal.place) {
+      handleRemoveFromItinerary(deleteConfirmModal.place.id, deleteConfirmModal.dayNumber);
+      closeDeleteConfirm();
+    }
+  };
+
+  // 일차별 경로 최적화 실행 (제약 조건 포함)
   const optimizeRouteForDay = async (dayNumber: number) => {
     const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
     
@@ -937,8 +1391,12 @@ export default function MapPage() {
     }
 
     try {
-      updateStatus(`${dayNumber}일차 경로 최적화 중...`, 'loading');
+      // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
+      // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      updateStatus(`${dayNumber}일차 경로 최적화 중...`, 'loading');
 
       // 첫 번째 장소를 출발지로, 나머지를 목적지로 설정
       const [firstPlace, ...restPlaces] = dayPlaces;
@@ -961,17 +1419,35 @@ export default function MapPage() {
         return;
       }
 
+      // 잠금 제약 조건 생성 (현재 순서 기준)
+      const constraints = restPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map((place, index) => {
+          const key = `${place.id}_${dayNumber}`;
+          const isLocked = lockedPlaces[key] || false;
+          return {
+            locked: isLocked,
+            order: isLocked ? index + 1 : undefined // 잠금된 경우 현재 순서를 유지 (첫번째 장소 제외하고 1부터 시작)
+          };
+        });
+
+      const lockedCount = constraints.filter(c => c.locked).length;
+
       console.log(`${dayNumber}일차 최적화 시작:`, {
         origin: firstPlace.name,
-        destinations: destinationNames
+        destinations: destinationNames,
+        constraints: constraints,
+        lockedCount: lockedCount,
+        lockedPlaces: lockedPlaces
       });
 
-      const optimized = optimizeRouteOrder(originCoords, destinationCoords, destinationNames);
+      // 제약 조건이 있는 최적화 실행
+      const optimized = optimizeRouteOrderWithConstraints(originCoords, destinationCoords, destinationNames, constraints);
       
       console.log(`${dayNumber}일차 최적화된 순서:`, optimized.optimizedNames);
       console.log(`${dayNumber}일차 예상 총 거리:`, optimized.totalDistance.toFixed(1), 'km');
 
-      updateStatus(`${dayNumber}일차 경로 최적화 완료! 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
+      updateStatus(`${dayNumber}일차 경로 최적화 완료! (${lockedCount}개 순서 고정) 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
 
       // 최적화된 순서대로 장소 객체 재구성
       const optimizedPlaces = [firstPlace];
@@ -979,6 +1455,9 @@ export default function MapPage() {
         const place = restPlaces.find(p => p.name === name);
         if (place) optimizedPlaces.push(place);
       }
+
+      // UI에서 장소 순서 업데이트
+      updatePlacesOrder(dayNumber, optimizedPlaces);
 
       const segments = [];
       for (let i = 0; i < optimizedPlaces.length - 1; i++) {
@@ -999,7 +1478,7 @@ export default function MapPage() {
       }
 
       console.log(`${dayNumber}일차 최적화된 경로 구간:`, segments);
-      await renderOptimizedRoute(segments, true);
+      await renderRoute(segments, true);
 
     } catch (error) {
       console.error(`${dayNumber}일차 Route optimization error:`, error);
@@ -1125,6 +1604,28 @@ export default function MapPage() {
         </div>
       )}
 
+      {/* 저장 토스트 */}
+      {saveToast.show && (
+        <div className={`absolute left-4 right-4 z-50 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 ${
+          routeStatus ? 'top-48' : 'top-32'
+        } ${
+          saveToast.type === 'success' ? 'bg-green-900/80 text-green-100' : 'bg-red-900/80 text-red-100'
+        }`}>
+          <div className="flex items-center space-x-2">
+            {saveToast.type === 'success' ? (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span className="text-sm font-medium">{saveToast.message}</span>
+          </div>
+        </div>
+      )}
+
       {/* Map Area */}
       <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
         <GoogleMap
@@ -1132,7 +1633,7 @@ export default function MapPage() {
           center={{ lat: 37.5665, lng: 126.9780 }}
           zoom={13}
           markers={mapMarkers}
-          onMapLoad={setMapInstance}
+          onMapLoad={handleMapLoad}
         />
       </div>
 
@@ -1232,48 +1733,71 @@ export default function MapPage() {
                     highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
                   }`}>
                     <div 
-                      className="flex items-center mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
+                      className="flex items-center justify-between mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
                       onClick={() => {
                         setHighlightedDay(highlightedDay === day ? null : day);
-                        // 2개 이상의 장소가 있으면 경로 최적화 실행
-                        if (groupedPlaces[day].length >= 2) {
-                          optimizeRouteForDay(day);
-                        }
                       }}
                     >
-                      <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
-                        highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
-                      }`}>
-                        <span className="text-white text-sm font-bold">{day}</span>
+                      <div className="flex items-center">
+                        <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
+                          highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
+                        }`}>
+                          <span className="text-white text-sm font-bold">{day}</span>
+                        </div>
+                        <h3 className={`text-lg font-semibold transition-colors duration-200 ${
+                          highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
+                        }`}>
+                          {day}일차
+                          {startDateParam && (
+                            <span className="text-sm text-[#94A9C9] ml-2">
+                              ({new Date(new Date(startDateParam).getTime() + (day - 1) * 24 * 60 * 60 * 1000).toLocaleDateString('ko-KR', { 
+                                month: 'short', 
+                                day: 'numeric' 
+                              })})
+                            </span>
+                          )}
+                        </h3>
                       </div>
-                      <h3 className={`text-lg font-semibold transition-colors duration-200 ${
-                        highlightedDay === day ? 'text-[#3E68FF]' : 'text-white'
-                      }`}>
-                        {day}일차
-                        {startDateParam && (
-                          <span className="text-sm text-[#94A9C9] ml-2">
-                            ({new Date(new Date(startDateParam).getTime() + (day - 1) * 24 * 60 * 60 * 1000).toLocaleDateString('ko-KR', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            })})
-                          </span>
-                        )}
-                      </h3>
                       
-                      {/* 경로 표시 아이콘 (2개 이상일 때) */}
+                      {/* 경로 버튼들 (2개 이상일 때만 표시) */}
                       {groupedPlaces[day].length >= 2 && (
-                        <div className="ml-3 text-[#6FA0E6] flex items-center space-x-1">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                          </svg>
-                          <span className="text-xs">경로 보기</span>
+                        <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedDay(day);
+                              renderBasicRoute(day);
+                            }}
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#34A853]/10 hover:bg-[#34A853]/20 border border-[#34A853]/30 hover:border-[#34A853]/50 rounded-lg transition-all duration-200 group"
+                            title="순서대로 기본 동선 보기"
+                          >
+                            <svg className="w-3 h-3 text-[#34A853] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            </svg>
+                            <span className="text-[#34A853] group-hover:text-[#4CAF50] text-xs font-medium transition-colors">기본 동선</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedDay(day);
+                              openOptimizeConfirm(day);
+                            }}
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group"
+                            title="최적화된 경로 보기"
+                          >
+                            <svg className="w-3 h-3 text-[#FF9800] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span className="text-[#FF9800] group-hover:text-[#FFA726] text-xs font-medium transition-colors">최적화 경로</span>
+                          </button>
                         </div>
                       )}
                     </div>
                     
                     <div className="space-y-3 ml-5">
                       {groupedPlaces[day].map((place, index) => (
-                        <div key={`place-container-${place.id}-${day}-${index}`}>
+                        <React.Fragment key={`place-container-${place.id}-${day}-${index}`}>
+                        <div>
                           {/* 드롭 존 - 위쪽 */}
                           <div
                             data-drop-zone="true"
@@ -1292,88 +1816,227 @@ export default function MapPage() {
                           {/* 장소 카드 */}
                           <div
                             data-place-card="true"
-                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors"
+                            className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative cursor-pointer select-none group"
+                            onTouchStart={(e) => {
+                              handleLongPressStart(e, place, day, index);
+                            }}
+                            onTouchMove={(e) => {
+                              handleLongPressMove(e);
+                            }}
+                            onTouchEnd={(e) => {
+                              handleLongPressEnd(e);
+                            }}
+                            onTouchCancel={(e) => {
+                              handleLongPressEnd(e);
+                            }}
+                            style={{ 
+                              touchAction: 'none',
+                              userSelect: 'none',
+                              WebkitUserSelect: 'none',
+                              WebkitTouchCallout: 'none'
+                            } as React.CSSProperties}
                           >
-                          <div className="flex items-start justify-between">
-                            <div 
-                              className="flex-1 cursor-pointer" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                router.push(`/attraction/${place.id}`);
-                              }}
-                              onMouseDown={(e) => e.stopPropagation()}
-                            >
-                              <div className="flex items-center space-x-2 mb-2">
-                                <h4 className="font-semibold text-white">{place.name}</h4>
-                                <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
-                                  {getCategoryName(place.category)}
-                                </span>
+                            {/* Long press 말풍선 힌트 */}
+                            <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
+                              <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
+                                꾹 눌러 이동
                               </div>
                             </div>
                             
-                            {/* 액션 버튼들 */}
-                            <div className="flex items-center gap-2 ml-3">
-                              {/* 드래그 핸들 */}
+                            {/* 잠금 버튼 - 휴지통 왼쪽 */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleLockPlace(place.id, day);
+                              }}
+                              className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
+                                lockedPlaces[`${place.id}_${day}`] 
+                                  ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
+                                  : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
+                              }`}
+                              title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
+                            >
+                              {lockedPlaces[`${place.id}_${day}`] ? (
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-[#FF9800]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+
+                            {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openDeleteConfirm(place, day);
+                              }}
+                              className="absolute -top-2 -right-2 w-8 h-8 bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border border-[#3E68FF]/30 hover:border-[#3E68FF]/50 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10"
+                              title="일정에서 제거"
+                            >
+                              <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+                            </button>
+
+                            <div className="flex items-start justify-between">
                               <div 
-                                className="p-3 text-[#6FA0E6] hover:text-white cursor-grab active:cursor-grabbing transition-colors select-none" 
-                                title="드래그해서 순서 변경"
-                                draggable="true"
-                                onDragStart={(e) => {
-                                  console.log('드래그 시작!');
-                                  e.stopPropagation();
-                                  handleDragStart(e, place, day, index);
-                                }}
-                                onDragEnd={(e) => {
-                                  console.log('드래그 종료!');
-                                  e.stopPropagation();
-                                  handleDragEnd(e);
-                                }}
-                                onMouseDown={(e) => {
-                                  console.log('마우스 다운!');
-                                  e.stopPropagation();
-                                }}
-                                onTouchStart={(e) => {
-                                  console.log('터치 시작!');
-                                  e.stopPropagation();
-                                  handleDragTouchStart(e, place, day, index);
-                                }}
-                                onTouchMove={(e) => {
-                                  handleDragTouchMove(e);
-                                }}
-                                onTouchEnd={(e) => {
-                                  console.log('터치 종료!');
-                                  e.stopPropagation();
-                                  handleDragTouchEnd(e);
-                                }}
-                                style={{ 
-                                  touchAction: 'none',
-                                  userSelect: 'none',
-                                  WebkitUserSelect: 'none',
-                                  WebkitTouchCallout: 'none'
-                                } as React.CSSProperties}
-                              >
-                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-                                </svg>
-                              </div>
-                              
-                              <button
+                                className="flex-1 cursor-pointer pr-4" 
                                 onClick={(e) => {
+                                  // Long press 중이거나 preventClick이 true면 클릭 무시
+                                  if (longPressData?.preventClick || longPressData?.isLongPressing || longPressData?.isDragging) {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    return;
+                                  }
                                   e.stopPropagation();
-                                  handleRemoveFromItinerary(place.id, day);
+                                  e.preventDefault();
+                                  router.push(`/attraction/${place.id}`);
                                 }}
-                                className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded-full transition-colors"
-                                title="일정에서 제거"
+                                onMouseDown={(e) => e.stopPropagation()}
                               >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
+                                <div className="mb-1">
+                                  <h4 className="font-semibold text-white mb-1 text-sm">{place.name}</h4>
+                                  <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
+                                    {getCategoryName(place.category)}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
+
+                        {/* 구간 정보 (마지막 장소가 아닐 때만 표시) */}
+                        {index < groupedPlaces[day].length - 1 && (
+                          (() => {
+                            const nextPlace = groupedPlaces[day][index + 1];
+                            const segmentInfo = getRouteSegmentInfo(day, place.id, nextPlace.id);
+                            
+                            if (segmentInfo) {
+                              return (
+                                <div className="my-4">
+                                  <div className="flex items-center justify-center mb-3">
+                                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
+                                    <div className="mx-4 flex items-center space-x-2 text-sm">
+                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
+                                      <span className="text-[#94A9C9]">·</span>
+                                      <span className="text-[#34D399] font-medium">{segmentInfo.duration}</span>
+                                    </div>
+                                    <div className="flex-1 h-px bg-gradient-to-r from-[#3E68FF]/30 via-transparent to-transparent"></div>
+                                  </div>
+                                  
+                                  {/* 상세 교통수단 정보 */}
+                                  {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
+                                    <div className="bg-[#0B1220]/90 backdrop-blur-sm border border-[#3E68FF]/20 rounded-xl p-4 mx-2">
+                                      <div className="space-y-3">
+                                        {segmentInfo.transitDetails.map((step: any, stepIndex: number) => (
+                                          <div key={stepIndex}>
+                                            {step.transitDetails ? (
+                                              // 대중교통 구간
+                                              (() => {
+                                                const originalLine = step.transitDetails.line || step.transitDetails.vehicle || '';
+                                                const cleanName = getCleanTransitName(step.transitDetails);
+                                                const vehicleType = step.transitDetails.vehicle_type || '';
+                                                const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL';
+                                                const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine) || vehicleType === 'BUS';
+                                                
+                                                let bgColor = '#3E68FF';
+                                                if (isSubway) {
+                                                  bgColor = getSubwayLineColor(originalLine);
+                                                } else if (isBus) {
+                                                  bgColor = getBusColor(originalLine);
+                                                }
+
+                                                return (
+                                                  <div className="flex items-center space-x-3">
+                                                    <div className="flex-shrink-0">
+                                                      <div 
+                                                        className="text-white px-3 py-1 rounded-full text-xs font-bold min-w-0 flex items-center space-x-1" 
+                                                        style={{ backgroundColor: bgColor }}
+                                                      >
+                                                        <span className="text-sm">
+                                                          {isBus ? '🚌' : isSubway ? '🚇' : '🚍'}
+                                                        </span>
+                                                        <span>{cleanName}</span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                      <div className="flex items-center space-x-2 text-sm">
+                                                        <span className="text-[#94A9C9] truncate">
+                                                          {step.transitDetails.departure_stop}
+                                                        </span>
+                                                        <svg className="w-4 h-4 text-[#3E68FF] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                                        </svg>
+                                                        <span className="text-[#94A9C9] truncate">
+                                                          {step.transitDetails.arrival_stop}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex-shrink-0 text-xs text-[#94A9C9]">
+                                                      {step.duration}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })()
+                                            ) : step.mode === 'WALKING' ? (
+                                              // 도보 구간
+                                              (() => {
+                                                // 마지막 도보 구간인지 확인
+                                                const isLastStep = stepIndex === segmentInfo.transitDetails.length - 1;
+                                                const walkingText = isLastStep ? `${segmentInfo.destination.name}까지 도보` : (step.instruction || '도보 이동');
+                                                
+                                                return (
+                                                  <div className="flex items-center space-x-3">
+                                                    <div className="flex-shrink-0">
+                                                      <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
+                                                        <span className="text-sm">🚶</span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex-1 text-sm text-[#94A9C9]">
+                                                      <div className="truncate">
+                                                        {walkingText}
+                                                      </div>
+                                                      <div className="text-xs text-[#6FA0E6] mt-1">
+                                                        {step.distance} · {step.duration}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })()
+                                            ) : (
+                                              // 기타 교통수단
+                                              <div className="flex items-center space-x-3">
+                                                <div className="flex-shrink-0 text-xs text-[#94A9C9] bg-[#1F3C7A]/30 px-2 py-1 rounded">
+                                                  {step.mode}
+                                                </div>
+                                                <div className="flex-1 text-sm text-[#94A9C9] truncate">
+                                                  {step.instruction}
+                                                </div>
+                                                <div className="flex-shrink-0 text-xs text-[#6FA0E6]">
+                                                  {step.duration}
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            {/* 구간 사이 구분선 (마지막이 아닐 때) */}
+                                            {stepIndex < segmentInfo.transitDetails.length - 1 && (
+                                              <div className="h-px bg-[#3E68FF]/10 my-2 mx-4"></div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()
+                        )}
+                        </React.Fragment>
                       ))}
                       
                       {/* 마지막 드롭 존 */}
@@ -1445,9 +2108,9 @@ export default function MapPage() {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <h3 className="font-semibold text-white text-lg">{place.name}</h3>
-                            <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
+                          <div className="mb-3">
+                            <h3 className="font-semibold text-white text-lg mb-1">{place.name}</h3>
+                            <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
                               {getCategoryName(place.category)}
                             </span>
                           </div>
@@ -1473,10 +2136,253 @@ export default function MapPage() {
             </div>
           )}
           
-          {/* 하단 여백 */}
-          <div className="h-20"></div>
+          {/* 일정 저장하기 버튼 */}
+          {showItinerary && selectedItineraryPlaces.length > 0 && (
+            <div className="px-4 pb-8 pt-4">
+              <button
+                onClick={openSaveItinerary}
+                className="
+                  w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
+                  bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50 hover:text-white cursor-pointer
+                "
+              >
+                여행 일정 저장하기
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* 최적화 확인 모달 */}
+      {optimizeConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeOptimizeConfirm}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              {/* 경고 아이콘 */}
+              <div className="mx-auto w-12 h-12 bg-[#FF9800]/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-[#FF9800]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.732 18.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              
+              {/* 제목 */}
+              <h3 className="text-lg font-semibold text-white mb-2">
+                경로 최적화 확인
+              </h3>
+              
+              {/* 설명 */}
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                최적화 경로를 실행하면
+                <br/>
+                <span className="text-[#FF9800] font-medium">{optimizeConfirmModal.dayNumber}일차</span>의 장소 순서가 변경될 수 있습니다.
+                <br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">변경된 순서는 되돌릴 수 없습니다.</span>
+              </p>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeOptimizeConfirm}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    closeOptimizeConfirm();
+                    optimizeRouteForDay(optimizeConfirmModal.dayNumber);
+                  }}
+                  className="flex-1 py-2.5 px-4 bg-[#FF9800]/20 hover:bg-[#FF9800]/30 border border-[#FF9800]/50 hover:border-[#FF9800]/70 rounded-xl text-[#FF9800] hover:text-[#FFA726] transition-all duration-200 font-medium"
+                >
+                  확인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteConfirmModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeDeleteConfirm}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              {/* 삭제 아이콘 */}
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              
+              {/* 제목 */}
+              <h3 className="text-lg font-semibold text-white mb-2">
+                장소 삭제 확인
+              </h3>
+              
+              {/* 설명 */}
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                <span className="text-white font-medium">&ldquo;{deleteConfirmModal.place?.name}&rdquo;</span>을(를)
+                <br/>
+                일정에서 삭제하시겠습니까?
+                <br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 장소는 복구할 수 없습니다.</span>
+              </p>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeDeleteConfirm}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일정 저장 모달 */}
+      {saveItineraryModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeSaveItinerary}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              
+              {/* 입력 필드들 */}
+              <div className="space-y-4 mb-6">
+                {/* 제목 입력 */}
+                <div className="text-left">
+                  <label className="text-sm text-[#94A9C9] mb-2 block">제목</label>
+                  <input
+                    type="text"
+                    placeholder="여행 일정 제목을 입력하세요"
+                    value={saveItineraryModal.title}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSaveItineraryModal(prev => ({ 
+                        ...prev, 
+                        title: value,
+                        titleError: value.trim() ? '' : '제목을 입력해주세요'
+                      }));
+                    }}
+                    onBlur={() => {
+                      if (!saveItineraryModal.title.trim()) {
+                        setSaveItineraryModal(prev => ({ 
+                          ...prev, 
+                          titleError: '제목을 입력해주세요'
+                        }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 bg-[#1F3C7A]/30 border rounded-xl text-white placeholder-[#94A9C9] focus:outline-none transition-colors ${
+                      saveItineraryModal.titleError 
+                        ? 'border-red-500/50 focus:border-red-500/70' 
+                        : 'border-[#1F3C7A]/50 focus:border-[#3E68FF]/50'
+                    }`}
+                  />
+                  {saveItineraryModal.titleError && (
+                    <p className="text-red-400 text-xs mt-1">{saveItineraryModal.titleError}</p>
+                  )}
+                </div>
+                
+                {/* 설명 입력 */}
+                <div className="text-left">
+                  <label className="text-sm text-[#94A9C9] mb-2 block">설명</label>
+                  <textarea
+                    placeholder="여행 일정에 대한 설명을 입력하세요"
+                    value={saveItineraryModal.description}
+                    onChange={(e) => setSaveItineraryModal(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 h-20 bg-[#1F3C7A]/30 border border-[#1F3C7A]/50 rounded-xl text-white placeholder-[#94A9C9] focus:outline-none focus:border-[#3E68FF]/50 transition-colors resize-none"
+                  />
+                </div>
+              </div>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeSaveItinerary}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={async () => {
+                    // 제목이 비어있으면 에러 메시지 표시
+                    if (!saveItineraryModal.title.trim()) {
+                      setSaveItineraryModal(prev => ({ 
+                        ...prev, 
+                        titleError: '제목을 입력해주세요'
+                      }));
+                      return;
+                    }
+                    
+                    try {
+                      // API로 DB에 저장
+                      const tripData = {
+                        title: saveItineraryModal.title.trim(),
+                        description: saveItineraryModal.description.trim() || undefined,
+                        places: selectedItineraryPlaces,
+                        startDate: startDateParam || undefined,
+                        endDate: endDateParam || undefined,
+                        days: daysParam ? parseInt(daysParam) : undefined
+                      };
+                      
+                      console.log('저장할 데이터:', tripData);
+                      
+                      await saveTrip(tripData);
+                      
+                      // 토스트 메시지 표시
+                      setSaveToast({ show: true, message: '일정이 저장되었습니다!', type: 'success' });
+                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
+                      
+                      closeSaveItinerary();
+                    } catch (error) {
+                      console.error('일정 저장 실패:', error);
+                      // 에러 토스트 표시
+                      setSaveToast({ show: true, message: '일정 저장에 실패했습니다. 다시 시도해주세요.', type: 'error' });
+                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
+                    }
+                  }}
+                  disabled={!saveItineraryModal.title.trim()}
+                  className={`flex-1 py-2.5 px-4 border rounded-xl transition-all duration-200 font-medium ${
+                    saveItineraryModal.title.trim()
+                      ? 'bg-[#3E68FF]/20 hover:bg-[#3E68FF]/30 border-[#3E68FF]/50 hover:border-[#3E68FF]/70 text-[#3E68FF] hover:text-[#6FA0E6] cursor-pointer'
+                      : 'bg-[#1F3C7A]/30 border-[#1F3C7A]/50 text-[#94A9C9] cursor-not-allowed'
+                  }`}
+                >
+                  저장하기
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
