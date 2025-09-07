@@ -7,7 +7,7 @@ import redis
 import logging
 import os
 from database import engine, Base
-from routers import auth, users, posts, attractions, recommendations, profile
+from routers import auth, users, posts, attractions, profile, trips, recommendations
 from config import settings
 
 # 로깅 설정
@@ -74,6 +74,7 @@ app.include_router(posts.router, prefix="/api/v1/posts", tags=["posts"])
 app.include_router(attractions.router, prefix="/api/v1/attractions", tags=["attractions"])
 app.include_router(recommendations.router, prefix="/api/v1", tags=["recommendations"])
 app.include_router(profile.router, prefix="/api/v1/profile", tags=["profile"])
+app.include_router(trips.router, prefix="/api/v1/trips", tags=["trips"])
 
 
 @app.get("/")

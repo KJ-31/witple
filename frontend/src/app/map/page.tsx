@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
+import { saveTrip } from '@/app/api'
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
@@ -135,11 +136,12 @@ export default function MapPage() {
     titleError: string
   }>({ isOpen: false, title: '', description: '', titleError: '' })
 
-  // 저장 성공 토스트 상태
+  // 저장 토스트 상태
   const [saveToast, setSaveToast] = useState<{
     show: boolean
     message: string
-  }>({ show: false, message: '' })
+    type: 'success' | 'error'
+  }>({ show: false, message: '', type: 'success' })
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -1604,15 +1606,23 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* 저장 성공 토스트 */}
+      {/* 저장 토스트 */}
       {saveToast.show && (
-        <div className={`absolute left-4 right-4 z-50 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 bg-green-900/80 text-green-100 ${
+        <div className={`absolute left-4 right-4 z-50 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 ${
           routeStatus ? 'top-48' : 'top-32'
+        } ${
+          saveToast.type === 'success' ? 'bg-green-900/80 text-green-100' : 'bg-red-900/80 text-red-100'
         }`}>
           <div className="flex items-center space-x-2">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
+            {saveToast.type === 'success' ? (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            )}
             <span className="text-sm font-medium">{saveToast.message}</span>
           </div>
         </div>
@@ -2324,7 +2334,7 @@ export default function MapPage() {
                   취소
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     // 제목이 비어있으면 에러 메시지 표시
                     if (!saveItineraryModal.title.trim()) {
                       setSaveItineraryModal(prev => ({ 
@@ -2334,18 +2344,32 @@ export default function MapPage() {
                       return;
                     }
                     
-                    // DB 저장 로직 (나중에 구현)
-                    console.log('저장할 데이터:', {
-                      title: saveItineraryModal.title.trim(),
-                      description: saveItineraryModal.description.trim() || null,
-                      places: selectedItineraryPlaces
-                    });
-                    
-                    // 토스트 메시지 표시
-                    setSaveToast({ show: true, message: '일정이 저장되었습니다!' });
-                    setTimeout(() => setSaveToast({ show: false, message: '' }), 3000);
-                    
-                    closeSaveItinerary();
+                    try {
+                      // API로 DB에 저장
+                      const tripData = {
+                        title: saveItineraryModal.title.trim(),
+                        description: saveItineraryModal.description.trim() || undefined,
+                        places: selectedItineraryPlaces,
+                        startDate: startDateParam || undefined,
+                        endDate: endDateParam || undefined,
+                        days: daysParam ? parseInt(daysParam) : undefined
+                      };
+                      
+                      console.log('저장할 데이터:', tripData);
+                      
+                      await saveTrip(tripData);
+                      
+                      // 토스트 메시지 표시
+                      setSaveToast({ show: true, message: '일정이 저장되었습니다!', type: 'success' });
+                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
+                      
+                      closeSaveItinerary();
+                    } catch (error) {
+                      console.error('일정 저장 실패:', error);
+                      // 에러 토스트 표시
+                      setSaveToast({ show: true, message: '일정 저장에 실패했습니다. 다시 시도해주세요.', type: 'error' });
+                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
+                    }
                   }}
                   disabled={!saveItineraryModal.title.trim()}
                   className={`flex-1 py-2.5 px-4 border rounded-xl transition-all duration-200 font-medium ${
