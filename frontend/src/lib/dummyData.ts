@@ -52,8 +52,8 @@ export const fetchRecommendations = async (
   limit: number = 30  // 3개 섹션 × 10개 카드
 ): Promise<{ data: any[], hasMore: boolean }> => {
   try {
-    // 직접 localhost:8000으로 호출해보기 (개발환경)
-    const API_BASE_URL = 'http://localhost:8000'
+    // 프록시를 통해 API 호출 (모든 환경에서 동작)
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
     
     // 인증 토큰 가져오기
     const token = await getAuthToken()
