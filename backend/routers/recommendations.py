@@ -248,6 +248,239 @@ async def record_recommendation_feedback(
         logger.error(f"Error recording feedback: {str(e)}")
         raise HTTPException(status_code=500, detail="피드백 기록 중 오류가 발생했습니다.")
 
+@router.get("/personalized-regions")
+async def get_personalized_region_categories(
+    current_user = Depends(get_current_user_optional),
+    limit: int = Query(5, ge=1, le=10, description="지역 개수 제한")
+):
+    """
+    개인화된 지역별 카테고리 추천
+    - 로그인: 개인화 추천으로 상위 지역 선별 → 각 지역별 카테고리별 구분
+    - 비로그인: 인기 지역 기반 카테고리별 구분
+    """
+    try:
+        if current_user and hasattr(current_user, 'user_id'):
+            # 로그인 상태: 개인화 추천 기반
+            user_id = str(current_user.user_id)
+            
+            # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴
+            personalized_places = await recommendation_engine.get_personalized_recommendations(
+                user_id=user_id,
+                limit=100  # 충분한 데이터를 가져와서 지역별 분석
+            )
+            
+            # 2. 지역별로 그룹핑하여 상위 지역들 선별
+            region_scores = {}
+            region_places = {}
+            
+            for place in personalized_places:
+                region = place.get('region', '기타')
+                score = place.get('similarity_score', 0.5)
+                
+                if region not in region_scores:
+                    region_scores[region] = []
+                    region_places[region] = []
+                
+                region_scores[region].append(score)
+                region_places[region].append(place)
+            
+            # 3. 지역별 평균 점수로 정렬하여 상위 지역 선별
+            top_regions = []
+            for region, scores in region_scores.items():
+                avg_score = sum(scores) / len(scores)
+                top_regions.append((region, avg_score, region_places[region]))
+            
+            top_regions.sort(key=lambda x: x[1], reverse=True)
+            selected_regions = top_regions[:limit]
+            
+            # 4. 각 지역별로 카테고리별 구분
+            result_data = []
+            for region, avg_score, places in selected_regions:
+                # 카테고리별 그룹핑
+                category_groups = {}
+                for place in places[:30]:  # 지역당 최대 30개 장소
+                    category = place.get('table_name', 'nature')
+                    if category not in category_groups:
+                        category_groups[category] = []
+                    category_groups[category].append(place)
+                
+                # 카테고리별 섹션 생성
+                category_sections = []
+                category_names = {
+                    'nature': '자연',
+                    'restaurants': '맛집', 
+                    'shopping': '쇼핑',
+                    'accommodation': '숙박',
+                    'humanities': '인문',
+                    'leisure_sports': '레저'
+                }
+                
+                for category, category_places in category_groups.items():
+                    if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
+                        # 각 장소를 Attraction 형태로 변환
+                        formatted_attractions = []
+                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                            if place.get('place_id') and place.get('table_name'):
+                                # 이미지 URL 처리
+                                image_url = None
+                                image_urls = place.get('image_urls')
+                                if image_urls:
+                                    if isinstance(image_urls, list) and len(image_urls) > 0:
+                                        # 유효한 이미지 URL 찾기
+                                        for img_url in image_urls:
+                                            if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                image_url = img_url
+                                                break
+                                    elif isinstance(image_urls, str):
+                                        # JSON 배열 형태의 문자열인 경우 파싱
+                                        if image_urls.startswith('[') and image_urls.endswith(']'):
+                                            try:
+                                                import json
+                                                parsed_urls = json.loads(image_urls)
+                                                if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                                                    for img_url in parsed_urls:
+                                                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                            image_url = img_url
+                                                            break
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif image_urls.strip() and image_urls != "/images/default.jpg":
+                                            image_url = image_urls
+                                
+                                formatted_attractions.append({
+                                    'id': f"{place['table_name']}_{place['place_id']}",
+                                    'name': place.get('name', '이름 없음'),
+                                    'description': place.get('description', '설명 없음'),
+                                    'imageUrl': image_url,
+                                    'rating': round((place.get('similarity_score', 0.5) + 0.3) * 5 * 10) / 10,
+                                    'category': category
+                                })
+                        
+                        if formatted_attractions:  # 변환된 장소가 있는 경우만
+                            category_sections.append({
+                                'category': category,
+                                'categoryName': category_names.get(category, category),
+                                'attractions': formatted_attractions,
+                                'total': len(formatted_attractions)
+                            })
+                
+                if category_sections:  # 카테고리가 있는 지역만 추가
+                    result_data.append({
+                        'id': f'personalized-{region}',
+                        'cityName': region,
+                        'description': f'{region}의 맞춤 추천 여행지',
+                        'region': region,
+                        'recommendationScore': int(avg_score * 100),
+                        'attractions': [],  # 카테고리별로 구분되므로 비어있음
+                        'categorySections': category_sections
+                    })
+            
+            return {'data': result_data, 'hasMore': False}
+            
+        else:
+            # 비로그인 상태: 인기 장소 기반으로 지역별 카테고리 구성
+            popular_places = await recommendation_engine.get_fallback_places(limit=100)
+            
+            # 지역별로 그룹핑
+            region_groups = {}
+            for place in popular_places:
+                region = place.get('region', '기타')
+                if region not in region_groups:
+                    region_groups[region] = []
+                region_groups[region].append(place)
+            
+            # 상위 지역들 선별
+            sorted_regions = sorted(region_groups.items(), key=lambda x: len(x[1]), reverse=True)
+            selected_regions = sorted_regions[:limit]
+            
+            # 각 지역별로 카테고리별 구분
+            result_data = []
+            category_names = {
+                'nature': '자연',
+                'restaurants': '맛집', 
+                'shopping': '쇼핑',
+                'accommodation': '숙박',
+                'humanities': '인문',
+                'leisure_sports': '레저'
+            }
+            
+            for region, places in selected_regions:
+                # 카테고리별 그룹핑
+                category_groups = {}
+                for place in places[:30]:  # 지역당 최대 30개 장소
+                    category = place.get('table_name', 'nature')
+                    if category not in category_groups:
+                        category_groups[category] = []
+                    category_groups[category].append(place)
+                
+                # 카테고리별 섹션 생성
+                category_sections = []
+                for category, category_places in category_groups.items():
+                    if len(category_places) > 0:
+                        # 각 장소를 Attraction 형태로 변환
+                        formatted_attractions = []
+                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                            if place.get('place_id') and place.get('table_name'):
+                                # 이미지 URL 처리
+                                image_url = None
+                                image_urls = place.get('image_urls')
+                                if image_urls:
+                                    if isinstance(image_urls, list) and len(image_urls) > 0:
+                                        # 유효한 이미지 URL 찾기
+                                        for img_url in image_urls:
+                                            if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                image_url = img_url
+                                                break
+                                    elif isinstance(image_urls, str):
+                                        # JSON 배열 형태의 문자열인 경우 파싱
+                                        if image_urls.startswith('[') and image_urls.endswith(']'):
+                                            try:
+                                                import json
+                                                parsed_urls = json.loads(image_urls)
+                                                if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                                                    for img_url in parsed_urls:
+                                                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                            image_url = img_url
+                                                            break
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif image_urls.strip() and image_urls != "/images/default.jpg":
+                                            image_url = image_urls
+                                
+                                formatted_attractions.append({
+                                    'id': f"{place['table_name']}_{place['place_id']}",
+                                    'name': place.get('name', '이름 없음'),
+                                    'description': place.get('description', '설명 없음'),
+                                    'imageUrl': image_url,
+                                    'rating': round((place.get('similarity_score', 0.7) + 0.3) * 5 * 10) / 10,
+                                    'category': category
+                                })
+                        
+                        if formatted_attractions:  # 변환된 장소가 있는 경우만
+                            category_sections.append({
+                                'category': category,
+                                'categoryName': category_names.get(category, category),
+                                'attractions': formatted_attractions,
+                                'total': len(formatted_attractions)
+                            })
+                
+                if category_sections:  # 카테고리가 있는 지역만 추가
+                    result_data.append({
+                        'id': f'popular-{region}',
+                        'cityName': region,
+                        'description': f'{region}의 인기 여행지',
+                        'region': region,
+                        'recommendationScore': 85,  # 기본 인기 점수
+                        'attractions': [],  # 카테고리별로 구분되므로 비어있음
+                        'categorySections': category_sections
+                    })
+            
+            return {'data': result_data, 'hasMore': False}
+            
+    except Exception as e:
+        logger.error(f"Error getting personalized region categories: {str(e)}")
+        raise HTTPException(status_code=500, detail="개인화 지역별 카테고리 추천 조회 중 오류가 발생했습니다.")
+
 @router.get("/stats")
 async def get_recommendation_stats(
     current_user: dict = Depends(get_current_user)
