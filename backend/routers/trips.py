@@ -66,9 +66,9 @@ async def get_trip(
     return trip
 
 
-@router.post("/", response_model=TripResponse)
+@router.post("/")
 async def create_trip(
-    trip_data: TripCreate,
+    trip_data: dict,  # 프론트엔드 데이터를 직접 받음
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -76,16 +76,14 @@ async def create_trip(
     try:
         # feat 브랜치의 최적화된 places 저장 방식 적용
         simplified_places = []
-        if trip_data.places:
+        places = trip_data.get("places", [])
+        if places:
             # 일차별로 그룹핑하여 각 일차마다 order를 1부터 시작
             day_counters = {}  # 각 일차별 카운터
             
-            for place in trip_data.places:
-                # place가 dict인지 Pydantic 모델인지 확인
-                place_dict = place.dict() if hasattr(place, 'dict') else place
-                
-                place_id = place_dict.get("id", "")
-                day_number = place_dict.get("dayNumber", 1)
+            for place in places:
+                place_id = place.get("id", "")
+                day_number = place.get("dayNumber", 1)
                 
                 # 일차별 카운터 관리
                 if day_number not in day_counters:
@@ -106,41 +104,44 @@ async def create_trip(
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number],  # 일차별로 1부터 시작
-                    # 추가 필요한 필드들 유지
-                    "name": place_dict.get("name"),
-                    "address": place_dict.get("address"),
-                    "lat": place_dict.get("lat"),
-                    "lng": place_dict.get("lng")
+                    "order": day_counters[day_number]  # 일차별로 1부터 시작
                 }
                 simplified_places.append(simplified_place)
         
         places_json = json.dumps(simplified_places) if simplified_places else None
         
+        # 날짜 문자열을 datetime으로 변환 (프론트엔드에서 camelCase로 보냄)
+        start_date = None
+        end_date = None
+        
+        if trip_data.get("startDate"):
+            start_date = datetime.fromisoformat(trip_data["startDate"])
+        if trip_data.get("endDate"):
+            end_date = datetime.fromisoformat(trip_data["endDate"])
+        
         # Trip 생성
         trip = Trip(
             user_id=current_user.user_id,
-            title=trip_data.title,
+            title=trip_data.get("title", ""),
             places=places_json,
-            start_date=trip_data.start_date,
-            end_date=trip_data.end_date,
-            status=trip_data.status.value if hasattr(trip_data, 'status') and trip_data.status else "planning",
-            total_budget=trip_data.total_budget if hasattr(trip_data, 'total_budget') else None,
-            cover_image=trip_data.cover_image if hasattr(trip_data, 'cover_image') else None,
-            description=trip_data.description
+            start_date=start_date,
+            end_date=end_date,
+            status="planning",  # 기본 상태
+            total_budget=trip_data.get("total_budget"),
+            cover_image=trip_data.get("cover_image"),
+            description=trip_data.get("description")
         )
         
         db.add(trip)
         db.commit()
         db.refresh(trip)
         
-        # places를 파싱하여 반환
-        if trip.places:
-            trip.places = json.loads(trip.places)
-        else:
-            trip.places = []
-        
-        return trip
+        # 성공 응답 반환
+        return {
+            "message": "여행이 성공적으로 저장되었습니다.",
+            "trip_id": trip.id,
+            "title": trip.title
+        }
         
     except Exception as e:
         db.rollback()
@@ -198,11 +199,7 @@ async def update_trip(
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number],
-                    "name": place_dict.get("name"),
-                    "address": place_dict.get("address"),
-                    "lat": place_dict.get("lat"),
-                    "lng": place_dict.get("lng")
+                    "order": day_counters[day_number]
                 }
                 simplified_places.append(simplified_place)
         
