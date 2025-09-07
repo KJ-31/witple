@@ -31,6 +31,16 @@ def get_place_name(db: Session, table_name: str, place_id: str):
         return "Unknown Place"
 
 
+def get_status_display(status: str):
+    """여행 상태를 한국어로 변환"""
+    status_map = {
+        'planned': '📋 예정됨',
+        'active': '🚩 진행중',
+        'completed': '✓ 완료됨'
+    }
+    return status_map.get(status, status)
+
+
 @router.get("/")
 async def get_user_trips(
     status_filter: Optional[TripStatus] = None,
@@ -68,6 +78,7 @@ async def get_user_trips(
             "start_date": trip.start_date.isoformat() if trip.start_date else None,
             "end_date": trip.end_date.isoformat() if trip.end_date else None,
             "status": trip.status,
+            "status_display": get_status_display(trip.status),
             "created_at": trip.created_at.isoformat() if trip.created_at else None
         })
     
@@ -110,6 +121,7 @@ async def get_trip(
         "start_date": trip.start_date.isoformat() if trip.start_date else None,
         "end_date": trip.end_date.isoformat() if trip.end_date else None,
         "status": trip.status,
+        "status_display": get_status_display(trip.status),
         "created_at": trip.created_at.isoformat() if trip.created_at else None
     }
 
@@ -174,7 +186,7 @@ async def create_trip(
             places=places_json,
             start_date=start_date,
             end_date=end_date,
-            status="planning",  # 기본 상태
+            status="planned",  # 기본 상태 (프론트엔드와 매칭)
             total_budget=trip_data.get("total_budget"),
             cover_image=trip_data.get("cover_image"),
             description=trip_data.get("description")
