@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -95,3 +95,23 @@ class UserPreferenceTag(Base):
 
     # Relationship to user
     user = relationship("User", back_populates="preference_tags")
+
+
+class Trip(Base):
+    __tablename__ = "trips"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    places = Column(Text, nullable=True)  # 기존 테이블은 text 타입
+    start_date = Column(DateTime(timezone=False), nullable=True)  # timestamp 타입
+    end_date = Column(DateTime(timezone=False), nullable=True)    # timestamp 타입
+    status = Column(String, nullable=True)
+    total_budget = Column(Integer, nullable=True)
+    cover_image = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to user
+    user = relationship("User")
