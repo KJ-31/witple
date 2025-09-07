@@ -1023,8 +1023,6 @@ export default function MapPage() {
     const vehicleName = transitDetails.vehicle || '';
     const vehicleType = transitDetails.vehicle_type || '';
     
-    console.log('Cleaning transit name:', { lineName, shortName, vehicleName, vehicleType });
-    
     // short_name이 있고 숫자로만 이루어져 있으면 버스 번호일 가능성이 높음
     if (shortName && /^\d+$/.test(shortName)) {
       return shortName + '번';
