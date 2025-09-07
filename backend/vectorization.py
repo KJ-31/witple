@@ -4,8 +4,58 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
 import pickle
-from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
-from sklearn.preprocessing import MinMaxScaler
+# Custom implementations to replace sklearn
+def cosine_similarity(X, Y):
+    """코사인 유사도 계산"""
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    # X가 1차원인 경우 2차원으로 변환
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    
+    # 코사인 유사도 계산
+    dot_product = np.dot(X, Y.T)
+    norm_X = np.linalg.norm(X, axis=1, keepdims=True)
+    norm_Y = np.linalg.norm(Y, axis=1, keepdims=True)
+    
+    return dot_product / (norm_X * norm_Y.T)
+
+def euclidean_distances(X, Y):
+    """유클리드 거리 계산"""
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    
+    # 거리 계산
+    return np.sqrt(((X[:, np.newaxis, :] - Y[np.newaxis, :, :]) ** 2).sum(axis=2))
+
+class MinMaxScaler:
+    """MinMax 스케일러"""
+    def __init__(self):
+        self.min_ = None
+        self.scale_ = None
+        
+    def fit(self, X):
+        X = np.array(X)
+        self.min_ = np.min(X, axis=0)
+        self.scale_ = np.max(X, axis=0) - self.min_
+        # 0으로 나누는 것을 방지
+        self.scale_[self.scale_ == 0] = 1
+        return self
+    
+    def transform(self, X):
+        X = np.array(X)
+        return (X - self.min_) / self.scale_
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
 import logging
 from typing import Dict, List, Tuple, Any
 import asyncio
