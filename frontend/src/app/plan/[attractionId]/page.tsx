@@ -57,6 +57,11 @@ export default function PlanCalendar({ params }: PlanCalendarProps) {
       try {
         setLoading(true)
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+        // attractionId가 유효한지 확인
+        if (!params.attractionId || params.attractionId === 'undefined') {
+          throw new Error('유효하지 않은 관광지 ID입니다.')
+        }
+        
         const response = await fetch(`${API_BASE_URL}/api/v1/attractions/${params.attractionId}`)
         
         if (!response.ok) {
