@@ -40,6 +40,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://frontend:3000",
+        "https://witple.kro.kr",
         "https://k8s-witple-witplefr-01ff6c628a-1226095041.ap-northeast-2.elb.amazonaws.com",
         "http://k8s-witple-witplefr-01ff6c628a-1226095041.ap-northeast-2.elb.amazonaws.com"
     ],
