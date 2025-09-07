@@ -71,7 +71,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # 라우터 등록
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(posts.router, prefix="/api/v1/posts", tags=["posts"])
+app.include_router(posts.router, prefix="/api/v1", tags=["posts"])
 app.include_router(attractions.router, prefix="/api/v1/attractions", tags=["attractions"])
 app.include_router(recommendations.router, prefix="/api/v1", tags=["recommendations"])
 app.include_router(profile.router, prefix="/api/v1/profile", tags=["profile"])
