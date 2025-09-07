@@ -126,6 +126,20 @@ export default function MapPage() {
     place: SelectedPlace | null,
     dayNumber: number
   }>({ isOpen: false, place: null, dayNumber: 0 })
+
+  // 일정 저장 모달 상태
+  const [saveItineraryModal, setSaveItineraryModal] = useState<{
+    isOpen: boolean
+    title: string
+    description: string
+    titleError: string
+  }>({ isOpen: false, title: '', description: '', titleError: '' })
+
+  // 저장 성공 토스트 상태
+  const [saveToast, setSaveToast] = useState<{
+    show: boolean
+    message: string
+  }>({ show: false, message: '' })
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -1349,6 +1363,16 @@ export default function MapPage() {
     setDeleteConfirmModal({ isOpen: false, place: null, dayNumber: 0 });
   };
 
+  // 일정 저장 모달 열기
+  const openSaveItinerary = () => {
+    setSaveItineraryModal({ isOpen: true, title: '', description: '', titleError: '' });
+  };
+
+  // 일정 저장 모달 닫기
+  const closeSaveItinerary = () => {
+    setSaveItineraryModal({ isOpen: false, title: '', description: '', titleError: '' });
+  };
+
   // 실제 삭제 실행
   const confirmDelete = () => {
     if (deleteConfirmModal.place) {
@@ -1580,6 +1604,19 @@ export default function MapPage() {
         </div>
       )}
 
+      {/* 저장 성공 토스트 */}
+      {saveToast.show && (
+        <div className={`absolute left-4 right-4 z-50 p-3 rounded-lg backdrop-blur-sm transition-all duration-300 bg-green-900/80 text-green-100 ${
+          routeStatus ? 'top-48' : 'top-32'
+        }`}>
+          <div className="flex items-center space-x-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium">{saveToast.message}</span>
+          </div>
+        </div>
+      )}
 
       {/* Map Area */}
       <div className="absolute top-0 left-0 right-0" style={{ bottom: `${bottomSheetHeight}px` }}>
@@ -2091,8 +2128,20 @@ export default function MapPage() {
             </div>
           )}
           
-          {/* 하단 여백 */}
-          <div className="h-20"></div>
+          {/* 일정 저장하기 버튼 */}
+          {showItinerary && selectedItineraryPlaces.length > 0 && (
+            <div className="px-4 pb-8 pt-4">
+              <button
+                onClick={openSaveItinerary}
+                className="
+                  w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
+                  bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50 hover:text-white cursor-pointer
+                "
+              >
+                여행 일정 저장하기
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2198,6 +2247,114 @@ export default function MapPage() {
                   className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
                 >
                   삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일정 저장 모달 */}
+      {saveItineraryModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeSaveItinerary}
+          />
+          
+          {/* 모달 컨텐츠 */}
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              
+              {/* 입력 필드들 */}
+              <div className="space-y-4 mb-6">
+                {/* 제목 입력 */}
+                <div className="text-left">
+                  <label className="text-sm text-[#94A9C9] mb-2 block">제목</label>
+                  <input
+                    type="text"
+                    placeholder="여행 일정 제목을 입력하세요"
+                    value={saveItineraryModal.title}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSaveItineraryModal(prev => ({ 
+                        ...prev, 
+                        title: value,
+                        titleError: value.trim() ? '' : '제목을 입력해주세요'
+                      }));
+                    }}
+                    onBlur={() => {
+                      if (!saveItineraryModal.title.trim()) {
+                        setSaveItineraryModal(prev => ({ 
+                          ...prev, 
+                          titleError: '제목을 입력해주세요'
+                        }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 bg-[#1F3C7A]/30 border rounded-xl text-white placeholder-[#94A9C9] focus:outline-none transition-colors ${
+                      saveItineraryModal.titleError 
+                        ? 'border-red-500/50 focus:border-red-500/70' 
+                        : 'border-[#1F3C7A]/50 focus:border-[#3E68FF]/50'
+                    }`}
+                  />
+                  {saveItineraryModal.titleError && (
+                    <p className="text-red-400 text-xs mt-1">{saveItineraryModal.titleError}</p>
+                  )}
+                </div>
+                
+                {/* 설명 입력 */}
+                <div className="text-left">
+                  <label className="text-sm text-[#94A9C9] mb-2 block">설명</label>
+                  <textarea
+                    placeholder="여행 일정에 대한 설명을 입력하세요"
+                    value={saveItineraryModal.description}
+                    onChange={(e) => setSaveItineraryModal(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 h-20 bg-[#1F3C7A]/30 border border-[#1F3C7A]/50 rounded-xl text-white placeholder-[#94A9C9] focus:outline-none focus:border-[#3E68FF]/50 transition-colors resize-none"
+                  />
+                </div>
+              </div>
+              
+              {/* 버튼들 */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeSaveItinerary}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    // 제목이 비어있으면 에러 메시지 표시
+                    if (!saveItineraryModal.title.trim()) {
+                      setSaveItineraryModal(prev => ({ 
+                        ...prev, 
+                        titleError: '제목을 입력해주세요'
+                      }));
+                      return;
+                    }
+                    
+                    // DB 저장 로직 (나중에 구현)
+                    console.log('저장할 데이터:', {
+                      title: saveItineraryModal.title.trim(),
+                      description: saveItineraryModal.description.trim() || null,
+                      places: selectedItineraryPlaces
+                    });
+                    
+                    // 토스트 메시지 표시
+                    setSaveToast({ show: true, message: '일정이 저장되었습니다!' });
+                    setTimeout(() => setSaveToast({ show: false, message: '' }), 3000);
+                    
+                    closeSaveItinerary();
+                  }}
+                  disabled={!saveItineraryModal.title.trim()}
+                  className={`flex-1 py-2.5 px-4 border rounded-xl transition-all duration-200 font-medium ${
+                    saveItineraryModal.title.trim()
+                      ? 'bg-[#3E68FF]/20 hover:bg-[#3E68FF]/30 border-[#3E68FF]/50 hover:border-[#3E68FF]/70 text-[#3E68FF] hover:text-[#6FA0E6] cursor-pointer'
+                      : 'bg-[#1F3C7A]/30 border-[#1F3C7A]/50 text-[#94A9C9] cursor-not-allowed'
+                  }`}
+                >
+                  저장하기
                 </button>
               </div>
             </div>
