@@ -4,7 +4,7 @@ import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'reac
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { fetchRecommendations, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
+import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
 
 export default function Home() {
   const router = useRouter()
@@ -33,17 +33,13 @@ export default function Home() {
     try {
       let data: CitySection[], hasMore: boolean
 
-      // 로그인 상태에 따라 다른 API 호출
-      if (status === 'authenticated' && session) {
-        // 로그인 상태: 추천 알고리즘 데이터 사용
-        console.log('로그인 상태: 추천 알고리즘 데이터 로드')
-        const result = await fetchRecommendations(30)
+      // 로그인 상태에 따라 다른 API 사용
+      if (session) {
+        const result = await fetchPersonalizedRegionCategories(5) // 5개 지역
         data = result.data
         hasMore = result.hasMore
       } else {
-        // 비로그인 상태: 지역별 카테고리별 구분된 데이터 사용
-        console.log('비로그인 상태: 지역별 카테고리별 데이터 로드')
-        const result = await fetchCitiesByCategory(pageNum, 3)
+        const result = await fetchCitiesByCategory(pageNum, 5) // 기존 고정 데이터
         data = result.data
         hasMore = result.hasMore
       }
@@ -402,7 +398,6 @@ export default function Home() {
               title={`${citySection.description}`}
               cityName={citySection.cityName}
               attractions={citySection.attractions}
-              recommendationScore={citySection.recommendationScore}
               categorySections={citySection.categorySections}
               onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
             />
@@ -505,14 +500,12 @@ function SectionCarousel({
   title,
   cityName,
   attractions,
-  recommendationScore,
   categorySections,
   onAttractionClick,
 }: {
   title: string
   cityName: string
   attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
-  recommendationScore: number
   categorySections?: Array<{category: string; categoryName: string; attractions: any[]; total: number}>
   onAttractionClick: (attractionId: string) => void
 }) {
@@ -526,12 +519,6 @@ function SectionCarousel({
           </h2>
           <div className="flex items-center mt-2 space-x-2">
             <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
-            <div className="flex items-center">
-              <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-              </svg>
-              <span className="text-sm text-[#6FA0E6]">{recommendationScore}% 추천</span>
-            </div>
           </div>
         </div>
       </div>

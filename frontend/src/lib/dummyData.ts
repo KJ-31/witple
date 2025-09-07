@@ -49,10 +49,10 @@ const getAuthToken = async (): Promise<string | null> => {
 
 // 실제 백엔드 추천 API에서 데이터 가져오기
 export const fetchRecommendations = async (
-  limit: number = 30  // 3개 섹션 × 10개 카드
+  limit: number = 60  // 더 많은 데이터로 안정적인 섹션 생성
 ): Promise<{ data: any[], hasMore: boolean }> => {
   try {
-    // 프록시를 통해 API 호출 (모든 환경에서 동작)
+    // Docker 환경에서는 프록시 사용, 개발환경에서는 localhost 사용
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
     
     // 인증 토큰 가져오기
@@ -69,7 +69,7 @@ export const fetchRecommendations = async (
       headers['Authorization'] = `Bearer ${token}`
     }
     
-    const url = `${API_BASE_URL}/api/v1/recommendations/mixed?limit=${limit}`
+    const url = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?limit=${limit}`
     
     const response = await fetch(url, {
       method: 'GET',
@@ -106,8 +106,8 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
     return []
   }
   
-  const MAX_SECTIONS = 3 // 최대 3개 섹션만 생성
-  const MIN_ITEMS_PER_SECTION = 5 // 섹션당 최소 5개 아이템
+  const MAX_SECTIONS = 5 // 최대 5개 섹션으로 증가
+  const MIN_ITEMS_PER_SECTION = 1 // 섹션당 최소 1개 아이템으로 완화
   
   // 지역별로 그룹핑
   const regionGroups: { [key: string]: any[] } = {}
@@ -128,8 +128,8 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
     if (sections.length >= MAX_SECTIONS) break
     if (places.length < MIN_ITEMS_PER_SECTION) continue // 너무 적은 아이템은 제외
     
-    // 최대 10개까지만 가져오기
-    const sectionPlaces = places.slice(0, 10)
+    // 최대 6개까지만 가져오기 (더 많은 지역 섹션을 위해)
+    const sectionPlaces = places.slice(0, 6)
     
     const attractions: Attraction[] = sectionPlaces.map(place => ({
       id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
@@ -167,7 +167,7 @@ const transformRecommendationsToSections = (recommendations: any[]): CitySection
     )
     
     if (remainingPlaces.length > 0) {
-      const mixedPlaces = remainingPlaces.slice(0, 10)
+      const mixedPlaces = remainingPlaces.slice(0, 6)
       const attractions: Attraction[] = mixedPlaces.map(place => ({
         id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
         name: place.name || '이름 없음',
@@ -246,6 +246,58 @@ const fetchRecommendedCitiesFallback = async (
   } catch (error) {
     console.error('Fallback API 호출 오류:', error)
     return { data: [], hasMore: false }
+  }
+}
+
+// 개인화된 지역별 카테고리 추천 데이터 가져오기
+export const fetchPersonalizedRegionCategories = async (
+  limit: number = 5
+): Promise<{ data: CitySection[], hasMore: boolean }> => {
+  try {
+    // Docker 환경에서는 프록시 사용, 개발환경에서는 localhost 사용
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+    
+    // 인증 토큰 가져오기
+    const token = await getAuthToken()
+    
+    // 헤더 설정
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+    
+    // 토큰이 있으면 Authorization 헤더 추가
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    
+    const url = `${API_BASE_URL}/api/v1/recommendations/personalized-regions?limit=${limit}`
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers
+    })
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`)
+    }
+    
+    const result = await response.json()
+    
+    return {
+      data: result.data,
+      hasMore: result.hasMore || false
+    }
+  } catch (error) {
+    console.error('개인화 지역별 카테고리 추천 API 호출 오류:', error)
+    console.error('Error details:', error)
+    
+    // 빈 데이터 반환 대신 기존 API fallback 제거
+    return {
+      data: [],
+      hasMore: false
+    }
   }
 }
 
