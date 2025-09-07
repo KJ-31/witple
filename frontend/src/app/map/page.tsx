@@ -262,7 +262,7 @@ export default function MapPage() {
         for (let i = 0; i < placeIds.length; i++) {
           try {
             let apiUrl
-            if (sourceTables[i] && sourceTables[i] !== 'unknown') {
+            if (sourceTables[i] && sourceTables[i] !== 'unknown' && sourceTables[i] !== 'undefined') {
               // ID에서 숫자 부분만 추출 (예: leisure_sports_577 -> 577)
               const numericId = placeIds[i].split('_').pop()
               if (numericId && !isNaN(Number(numericId))) {

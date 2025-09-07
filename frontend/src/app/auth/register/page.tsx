@@ -61,20 +61,20 @@ export default function RegisterPage() {
       // 1. 기본 회원가입
       console.log('회원가입 데이터:', { ...formData, preferences })
       await register(formData.email, formData.password, formData.full_name)
-      
+
       // 2. 로그인하여 토큰 받기
       const loginResponse = await login(formData.email, formData.password)
       const token = loginResponse.access_token
-      
+
       // 3. 선호도 저장
       if (preferences.travelStyle && preferences.investment && preferences.accommodation && preferences.destination) {
         await saveUserPreferences(preferences, token)
         console.log('선호도 저장 완료')
       }
-      
+
       // 4. 토큰 저장
       localStorage.setItem('token', token)
-      
+
       router.push('/auth/login?message=registration_success')
     } catch (err: any) {
       console.error('회원가입 오류:', err)
@@ -146,17 +146,17 @@ export default function RegisterPage() {
               >
                 다음 단계 → 여행 취향 알아보기
               </button>
-              
-              <div className="relative">
+
+              {/* <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-gray-300" />
                 </div>
                 <div className="relative flex justify-center text-sm">
                   <span className="px-2 bg-gray-50 text-gray-500">또는</span>
                 </div>
-              </div>
-              
-              <button
+              </div> */}
+
+              {/* <button
                 type="button"
                 onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
                 className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -168,7 +168,7 @@ export default function RegisterPage() {
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
                 Google로 계속하기
-              </button>
+              </button> */}
             </div>
           </div>
         )
@@ -189,11 +189,10 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    preferences.travelStyle === option.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.travelStyle === option.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -232,11 +231,10 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    preferences.investment === option.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.investment === option.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -275,11 +273,10 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    preferences.accommodation === option.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.accommodation === option.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -318,11 +315,10 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                    preferences.destination === option.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.destination === option.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -362,7 +358,7 @@ export default function RegisterPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step-1}/4)`}
+            {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step - 1}/4)`}
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             또는{' '}
@@ -375,7 +371,7 @@ export default function RegisterPage() {
         {/* 진행 표시줄 */}
         {step > 1 && (
           <div className="w-full bg-gray-200 rounded-full h-2">
-            <div 
+            <div
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
               style={{ width: `${((step - 1) / 4) * 100}%` }}
             ></div>
@@ -388,9 +384,9 @@ export default function RegisterPage() {
               {error}
             </div>
           )}
-          
+
           {renderStep()}
-          
+
           {step > 1 && step < 5 && (
             <div className="flex justify-between space-x-4 mt-6">
               <button

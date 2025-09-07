@@ -164,6 +164,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
+        // attractionId가 유효한지 확인
+        if (!params.attractionId || params.attractionId === 'undefined') {
+          throw new Error('유효하지 않은 관광지 ID입니다.')
+        }
+        
         // 선택된 관광지 정보 가져오기
         const attractionResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/${params.attractionId}`)
         if (!attractionResponse.ok) {

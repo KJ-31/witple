@@ -24,6 +24,8 @@ class User(Base):
     oauth_accounts = relationship("OAuthAccount", back_populates="user")
     preferences = relationship("UserPreference", back_populates="user")
     preference_tags = relationship("UserPreferenceTag", back_populates="user")
+    saved_locations = relationship("SavedLocation", back_populates="user")
+    trips = relationship("Trip", back_populates="user")
 
 
 class OAuthAccount(Base):
@@ -96,22 +98,38 @@ class UserPreferenceTag(Base):
     # Relationship to user
     user = relationship("User", back_populates="preference_tags")
 
+    
+class SavedLocation(Base):
+    __tablename__ = "saved_locations"
 
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    name = Column(String, nullable=False)  # 장소명
+    address = Column(String, nullable=True)  # 주소
+    latitude = Column(String, nullable=True)  # 위도
+    longitude = Column(String, nullable=True)  # 경도
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to user
+    user = relationship("User", back_populates="saved_locations")
+
+    
 class Trip(Base):
     __tablename__ = "trips"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
-    title = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    places = Column(Text, nullable=True)  # 기존 테이블은 text 타입
-    start_date = Column(DateTime(timezone=False), nullable=True)  # timestamp 타입
-    end_date = Column(DateTime(timezone=False), nullable=True)    # timestamp 타입
-    status = Column(String, nullable=True)
-    total_budget = Column(Integer, nullable=True)
-    cover_image = Column(String, nullable=True)
+    title = Column(String, nullable=False)  # 여행 제목
+    places = Column(Text, nullable=True)  # 장소들 (JSON 형태로 저장: [{"name": "장소명", "order": 1, "latitude": "37.5", "longitude": "127.0"}])
+    start_date = Column(DateTime(timezone=False), nullable=False)  # 시작 날짜
+    end_date = Column(DateTime(timezone=False), nullable=False)  # 종료 날짜
+    status = Column(String, default='planned')  # planned, active, completed
+    total_budget = Column(Integer, nullable=True)  # 총 예산
+    cover_image = Column(String, nullable=True)  # 커버 이미지 URL
+    description = Column(Text, nullable=True)  # 여행 설명
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationship to user
-    user = relationship("User")
+    user = relationship("User", back_populates="trips")
