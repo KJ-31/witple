@@ -625,7 +625,7 @@ function AttractionCard({
             </div>
             
             <img 
-              src={attraction.imageUrl} 
+              src={attraction.imageUrl}
               alt={attraction.name}
               className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
               onLoad={(e) => {

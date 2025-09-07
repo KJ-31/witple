@@ -317,12 +317,39 @@ async def get_personalized_region_categories(
                 
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
-                        category_sections.append({
-                            'category': category,
-                            'categoryName': category_names.get(category, category),
-                            'attractions': category_places[:8],  # 카테고리당 최대 8개
-                            'total': len(category_places)
-                        })
+                        # 각 장소를 Attraction 형태로 변환
+                        formatted_attractions = []
+                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                            if place.get('place_id') and place.get('table_name'):
+                                # 이미지 URL 처리
+                                image_url = None
+                                image_urls = place.get('image_urls')
+                                if image_urls:
+                                    if isinstance(image_urls, list) and len(image_urls) > 0:
+                                        # 유효한 이미지 URL 찾기
+                                        for img_url in image_urls:
+                                            if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                image_url = img_url
+                                                break
+                                    elif isinstance(image_urls, str) and image_urls.strip() and image_urls != "/images/default.jpg":
+                                        image_url = image_urls
+                                
+                                formatted_attractions.append({
+                                    'id': f"{place['table_name']}_{place['place_id']}",
+                                    'name': place.get('name', '이름 없음'),
+                                    'description': place.get('description', '설명 없음'),
+                                    'imageUrl': image_url,
+                                    'rating': round((place.get('similarity_score', 0.5) + 0.3) * 5 * 10) / 10,
+                                    'category': category
+                                })
+                        
+                        if formatted_attractions:  # 변환된 장소가 있는 경우만
+                            category_sections.append({
+                                'category': category,
+                                'categoryName': category_names.get(category, category),
+                                'attractions': formatted_attractions,
+                                'total': len(formatted_attractions)
+                            })
                 
                 if category_sections:  # 카테고리가 있는 지역만 추가
                     result_data.append({
@@ -377,12 +404,39 @@ async def get_personalized_region_categories(
                 category_sections = []
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:
-                        category_sections.append({
-                            'category': category,
-                            'categoryName': category_names.get(category, category),
-                            'attractions': category_places[:8],  # 카테고리당 최대 8개
-                            'total': len(category_places)
-                        })
+                        # 각 장소를 Attraction 형태로 변환
+                        formatted_attractions = []
+                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                            if place.get('place_id') and place.get('table_name'):
+                                # 이미지 URL 처리
+                                image_url = None
+                                image_urls = place.get('image_urls')
+                                if image_urls:
+                                    if isinstance(image_urls, list) and len(image_urls) > 0:
+                                        # 유효한 이미지 URL 찾기
+                                        for img_url in image_urls:
+                                            if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                image_url = img_url
+                                                break
+                                    elif isinstance(image_urls, str) and image_urls.strip() and image_urls != "/images/default.jpg":
+                                        image_url = image_urls
+                                
+                                formatted_attractions.append({
+                                    'id': f"{place['table_name']}_{place['place_id']}",
+                                    'name': place.get('name', '이름 없음'),
+                                    'description': place.get('description', '설명 없음'),
+                                    'imageUrl': image_url,
+                                    'rating': round((place.get('similarity_score', 0.7) + 0.3) * 5 * 10) / 10,
+                                    'category': category
+                                })
+                        
+                        if formatted_attractions:  # 변환된 장소가 있는 경우만
+                            category_sections.append({
+                                'category': category,
+                                'categoryName': category_names.get(category, category),
+                                'attractions': formatted_attractions,
+                                'total': len(formatted_attractions)
+                            })
                 
                 if category_sections:  # 카테고리가 있는 지역만 추가
                     result_data.append({
