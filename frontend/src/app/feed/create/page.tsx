@@ -70,7 +70,6 @@ export default function CreatePostPage() {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-          user_id: session.user.id, // 명시적으로 user_id 전송
           caption: caption,
           location: location || null,
           image_data: selectedImage // Base64 이미지 데이터
