@@ -50,16 +50,26 @@ async def create_trip(
     새 여행 일정을 생성합니다.
     """
     try:
-        # places를 간단한 형태로 변환
+        # places를 최소한의 정보만 저장 (효율적인 방식)
         simplified_places = []
         if trip_data.places:
             for i, place in enumerate(trip_data.places, 1):
+                place_id = place.get("id", "")
+                
+                # id에서 테이블명과 실제 ID 분리 (예: leisure_sports_950 -> leisure_sports, 950)
+                table_name = ""
+                actual_id = ""
+                if "_" in place_id:
+                    parts = place_id.rsplit("_", 1)  # 마지막 언더스코어로 분리
+                    if len(parts) == 2:
+                        table_name = parts[0]
+                        actual_id = parts[1]
+                
                 simplified_place = {
-                    "name": place.get("name", ""),
-                    "order": i,
-                    "latitude": str(place.get("latitude", "")),
-                    "longitude": str(place.get("longitude", "")),
-                    "address": place.get("address", "")
+                    "table_name": table_name,
+                    "id": actual_id,
+                    "dayNumber": place.get("dayNumber", 1),
+                    "order": i
                 }
                 simplified_places.append(simplified_place)
         
