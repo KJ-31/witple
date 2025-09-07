@@ -53,8 +53,18 @@ async def create_trip(
         # places를 최소한의 정보만 저장 (효율적인 방식)
         simplified_places = []
         if trip_data.places:
+            # 일차별로 그룹핑하여 각 일차마다 order를 1부터 시작
+            day_counters = {}  # 각 일차별 카운터
+            
             for i, place in enumerate(trip_data.places, 1):
                 place_id = place.get("id", "")
+                day_number = place.get("dayNumber", 1)
+                
+                # 일차별 카운터 관리
+                if day_number not in day_counters:
+                    day_counters[day_number] = 1
+                else:
+                    day_counters[day_number] += 1
                 
                 # id에서 테이블명과 실제 ID 분리 (예: leisure_sports_950 -> leisure_sports, 950)
                 table_name = ""
@@ -68,8 +78,8 @@ async def create_trip(
                 simplified_place = {
                     "table_name": table_name,
                     "id": actual_id,
-                    "dayNumber": place.get("dayNumber", 1),
-                    "order": i
+                    "dayNumber": day_number,
+                    "order": day_counters[day_number]  # 일차별로 1부터 시작
                 }
                 simplified_places.append(simplified_place)
         
