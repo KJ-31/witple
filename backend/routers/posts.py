@@ -20,7 +20,7 @@ from auth_utils import get_current_user
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["posts"])
+router = APIRouter(prefix="/posts", tags=["posts"])
 
 # S3 클라이언트 초기화
 s3_client_config = {
