@@ -2359,7 +2359,12 @@ export default function MapPage() {
                       
                       // 토스트 메시지 표시
                       setSaveToast({ show: true, message: '일정이 저장되었습니다!', type: 'success' });
-                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
+                      
+                      // 저장 성공 후 프로필 페이지로 이동
+                      setTimeout(() => {
+                        setSaveToast({ show: false, message: '', type: 'success' });
+                        router.push('/profile');
+                      }, 1500);
                       
                       closeSaveItinerary();
                     } catch (error) {
