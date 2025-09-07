@@ -65,7 +65,7 @@ export default function CreatePostPage() {
         headers['Authorization'] = `Bearer ${(session as any).backendToken}`
       }
 
-      // API 호출로 포스트 생성
+      // API 호출로 포스트 생성 (끝에 슬래시 추가하여 리다이렉트 방지)
       const response = await fetch('/api/proxy/api/v1/posts/', {
         method: 'POST',
         headers: headers,
