@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Optional
 from datetime import datetime
 import json
@@ -12,7 +13,25 @@ from routers.auth import get_current_user
 router = APIRouter()
 
 
-@router.get("/", response_model=TripListResponse)
+def get_place_name(db: Session, table_name: str, place_id: str):
+    """테이블명과 ID를 통해 장소명을 조회"""
+    try:
+        # 안전한 테이블명 검증 (SQL 인젝션 방지)
+        valid_tables = ['accommodation', 'humanities', 'leisure_sports', 'nature', 'restaurants', 'shopping']
+        if table_name not in valid_tables:
+            return "Unknown Place"
+        
+        # 동적 쿼리 실행
+        query = text(f"SELECT name FROM {table_name} WHERE id = :place_id")
+        result = db.execute(query, {"place_id": place_id}).fetchone()
+        
+        return result[0] if result else "Unknown Place"
+    except Exception as e:
+        print(f"Error getting place name: {e}")
+        return "Unknown Place"
+
+
+@router.get("/")
 async def get_user_trips(
     status_filter: Optional[TripStatus] = None,
     limit: int = 20,
@@ -29,17 +48,33 @@ async def get_user_trips(
     trips = query.offset(offset).limit(limit).all()
     total = query.count()
     
-    # places JSON 필드 파싱
+    # trips를 dict로 변환하여 반환
+    trips_list = []
     for trip in trips:
+        places = []
         if trip.places:
-            trip.places = json.loads(trip.places)
-        else:
-            trip.places = []
+            places_data = json.loads(trip.places)
+            # 각 장소에 대해 실제 장소명을 조회하여 추가
+            for place in places_data:
+                place_name = get_place_name(db, place.get('table_name', ''), place.get('id', ''))
+                place['name'] = place_name
+                places.append(place)
+        
+        trips_list.append({
+            "id": trip.id,
+            "title": trip.title,
+            "description": trip.description,
+            "places": places,
+            "start_date": trip.start_date.isoformat() if trip.start_date else None,
+            "end_date": trip.end_date.isoformat() if trip.end_date else None,
+            "status": trip.status,
+            "created_at": trip.created_at.isoformat() if trip.created_at else None
+        })
     
-    return TripListResponse(trips=trips, total=total)
+    return {"trips": trips_list, "total": total}
 
 
-@router.get("/{trip_id}", response_model=TripResponse)
+@router.get("/{trip_id}")
 async def get_trip(
     trip_id: int,
     db: Session = Depends(get_db),
@@ -57,13 +92,26 @@ async def get_trip(
             detail="여행을 찾을 수 없습니다."
         )
     
-    # places JSON 필드 파싱
+    # places JSON 필드 파싱 및 장소명 조회
+    places = []
     if trip.places:
-        trip.places = json.loads(trip.places)
-    else:
-        trip.places = []
+        places_data = json.loads(trip.places)
+        # 각 장소에 대해 실제 장소명을 조회하여 추가
+        for place in places_data:
+            place_name = get_place_name(db, place.get('table_name', ''), place.get('id', ''))
+            place['name'] = place_name
+            places.append(place)
     
-    return trip
+    return {
+        "id": trip.id,
+        "title": trip.title,
+        "description": trip.description,
+        "places": places,
+        "start_date": trip.start_date.isoformat() if trip.start_date else None,
+        "end_date": trip.end_date.isoformat() if trip.end_date else None,
+        "status": trip.status,
+        "created_at": trip.created_at.isoformat() if trip.created_at else None
+    }
 
 
 @router.post("/")
