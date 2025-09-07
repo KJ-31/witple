@@ -85,7 +85,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
     if (!map && mapRef.current) {
       initMap()
     }
-  }, [])
+  }, [center, zoom, map, onMapLoad])
 
   useEffect(() => {
     if (map && (window as any).google) {

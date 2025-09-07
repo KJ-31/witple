@@ -12,11 +12,20 @@ const apiClient = axios.create({
 
 // 요청 인터셉터
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('token')
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`
+      // NextAuth 세션에서 토큰 가져오기
+      const { getSession } = await import('next-auth/react')
+      const session = await getSession()
+      
+      if (session && (session as any).backendToken) {
+        config.headers.Authorization = `Bearer ${(session as any).backendToken}`
+      } else {
+        // fallback: localStorage에서 토큰 찾기
+        const token = localStorage.getItem('token')
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+        }
       }
     }
     return config
@@ -69,6 +78,19 @@ export const getCurrentUser = async () => {
 // 사용자 API
 export const getUsers = async () => {
   const response = await apiClient.get('/api/v1/users/')
+  return response.data
+}
+
+// 여행 일정 API
+export const saveTrip = async (tripData: {
+  title: string
+  description?: string | null
+  places: any[]
+  startDate?: string
+  endDate?: string
+  days?: number
+}) => {
+  const response = await apiClient.post('/api/v1/trips/', tripData)
   return response.data
 }
 
