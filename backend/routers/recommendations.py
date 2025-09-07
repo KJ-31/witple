@@ -331,8 +331,21 @@ async def get_personalized_region_categories(
                                             if img_url and img_url.strip() and img_url != "/images/default.jpg":
                                                 image_url = img_url
                                                 break
-                                    elif isinstance(image_urls, str) and image_urls.strip() and image_urls != "/images/default.jpg":
-                                        image_url = image_urls
+                                    elif isinstance(image_urls, str):
+                                        # JSON 배열 형태의 문자열인 경우 파싱
+                                        if image_urls.startswith('[') and image_urls.endswith(']'):
+                                            try:
+                                                import json
+                                                parsed_urls = json.loads(image_urls)
+                                                if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                                                    for img_url in parsed_urls:
+                                                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                            image_url = img_url
+                                                            break
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif image_urls.strip() and image_urls != "/images/default.jpg":
+                                            image_url = image_urls
                                 
                                 formatted_attractions.append({
                                     'id': f"{place['table_name']}_{place['place_id']}",
@@ -418,8 +431,21 @@ async def get_personalized_region_categories(
                                             if img_url and img_url.strip() and img_url != "/images/default.jpg":
                                                 image_url = img_url
                                                 break
-                                    elif isinstance(image_urls, str) and image_urls.strip() and image_urls != "/images/default.jpg":
-                                        image_url = image_urls
+                                    elif isinstance(image_urls, str):
+                                        # JSON 배열 형태의 문자열인 경우 파싱
+                                        if image_urls.startswith('[') and image_urls.endswith(']'):
+                                            try:
+                                                import json
+                                                parsed_urls = json.loads(image_urls)
+                                                if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                                                    for img_url in parsed_urls:
+                                                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                            image_url = img_url
+                                                            break
+                                            except json.JSONDecodeError:
+                                                pass
+                                        elif image_urls.strip() and image_urls != "/images/default.jpg":
+                                            image_url = image_urls
                                 
                                 formatted_attractions.append({
                                     'id': f"{place['table_name']}_{place['place_id']}",
