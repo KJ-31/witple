@@ -4,14 +4,65 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
 import pickle
-from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
-from sklearn.preprocessing import MinMaxScaler
+# Custom implementations to replace sklearn
+def cosine_similarity(X, Y):
+    """코사인 유사도 계산"""
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    # X가 1차원인 경우 2차원으로 변환
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    
+    # 코사인 유사도 계산
+    dot_product = np.dot(X, Y.T)
+    norm_X = np.linalg.norm(X, axis=1, keepdims=True)
+    norm_Y = np.linalg.norm(Y, axis=1, keepdims=True)
+    
+    return dot_product / (norm_X * norm_Y.T)
+
+def euclidean_distances(X, Y):
+    """유클리드 거리 계산"""
+    X = np.array(X)
+    Y = np.array(Y)
+    
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    if Y.ndim == 1:
+        Y = Y.reshape(1, -1)
+    
+    # 거리 계산
+    return np.sqrt(((X[:, np.newaxis, :] - Y[np.newaxis, :, :]) ** 2).sum(axis=2))
+
+class MinMaxScaler:
+    """MinMax 스케일러"""
+    def __init__(self):
+        self.min_ = None
+        self.scale_ = None
+        
+    def fit(self, X):
+        X = np.array(X)
+        self.min_ = np.min(X, axis=0)
+        self.scale_ = np.max(X, axis=0) - self.min_
+        # 0으로 나누는 것을 방지
+        self.scale_[self.scale_ == 0] = 1
+        return self
+    
+    def transform(self, X):
+        X = np.array(X)
+        return (X - self.min_) / self.scale_
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
 import logging
 from typing import Dict, List, Tuple, Any
 import asyncio
 import asyncpg
 import json
 from dotenv import load_dotenv
+from services.weight_calculator import tag_weight_calculator
 
 # .env 파일 로드
 load_dotenv()
@@ -229,7 +280,7 @@ class RecommendationEngine:
         self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
     async def get_user_preferences(self, user_id: str) -> Dict:
-        """사용자 선호도 가져오기"""
+        """사용자 선호도 가져오기 (새로운 가중치 계산 시스템 적용)"""
         conn = await asyncpg.connect(self.db_url)
         
         try:
@@ -241,16 +292,28 @@ class RecommendationEngine:
                 ORDER BY created_at DESC LIMIT 1
             """, user_id)
             
-            # 태그 선호도
+            # 태그 선호도 (기존 가중치와 함께)
             tag_prefs = await conn.fetch("""
                 SELECT tag, weight
                 FROM user_preference_tags
                 WHERE user_id = $1
             """, user_id)
             
+            # 태그 데이터를 weight_calculator 형식으로 변환
+            user_tags = []
+            for tag in tag_prefs:
+                user_tags.append({
+                    'tag': tag['tag'],
+                    'frequency': int(tag['weight'])  # 기존 weight를 frequency로 사용
+                })
+            
+            # 새로운 가중치 계산 시스템 적용
+            calculated_tags = tag_weight_calculator.calculate_all_user_weights(user_tags) if user_tags else []
+            
             return {
                 'basic': dict(basic_prefs) if basic_prefs else None,
-                'tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []
+                'tags': calculated_tags,  # 계산된 가중치가 포함된 태그
+                'original_tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []  # 원본 태그도 보관
             }
             
         finally:
@@ -512,9 +575,17 @@ class RecommendationEngine:
             finally:
                 await conn.close()
         
-        # 태그 선호도 추가
+        # 태그 선호도 추가 (가중치 반영)
         for tag_pref in preferences['tags']:
-            preference_texts.append(tag_pref['tag'])
+            tag_name = tag_pref['tag']
+            calculated_weight = tag_pref['calculated_weight']
+            
+            # 가중치에 따라 텍스트 반복 (높은 가중치일수록 더 많은 영향)
+            repeat_count = max(1, int(calculated_weight))  # 최소 1번, 가중치에 따라 반복
+            for _ in range(repeat_count):
+                preference_texts.append(tag_name)
+            
+            logger.info(f"Tag '{tag_name}' added {repeat_count} times (weight: {calculated_weight})")
         
         # 행동 이력 기반 텍스트 추가 (좋아요, 북마크한 장소들의 정보)
         action_places = []
