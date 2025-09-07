@@ -37,11 +37,20 @@ export default function RecommendationsPage() {
       try {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
-        // 메인 추천 데이터 (15개)
-        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(selectedCategory)}&limit=15`)
+        // 메인 추천 데이터 (15개) - 카테고리별 필터링
+        const categoryMap: { [key: string]: string } = {
+          '레저': 'leisure_sports',
+          '숙박': 'accommodation',
+          '쇼핑': 'shopping',
+          '자연': 'nature',
+          '맛집': 'restaurants',
+          '인문': 'humanities'
+        }
+        const categoryFilter = categoryMap[selectedCategory] || 'leisure_sports'
+        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`)
         if (response.ok) {
           const data = await response.json()
-          const attractions = data.attractions || []
+          const attractions = data.results || []
           
           const formattedItems = attractions.map((attraction: any, index: number) => ({
             id: attraction.id,
@@ -50,164 +59,25 @@ export default function RecommendationsPage() {
             genre: selectedCategory,
             rating: attraction.rating || (4.9 - index * 0.1),
             views: Math.floor(Math.random() * 5000) + 1000,
-            imageUrl: attraction.imageUrl || `https://images.unsplash.com/photo-${1506905925346 + index}?w=100&h=100&fit=crop`
+            imageUrl: attraction.imageUrl || `https://picsum.photos/100/100?random=${Math.random()}00/100?random=${Date.now() + index}`
           }))
           
           setLeftColumnItems(formattedItems.slice(0, 8))
           setRightColumnItems(formattedItems.slice(8, 15))
         } else {
-          // 응답이 실패하면 더미 데이터 사용
-          generateDummyData()
+          console.error('API 응답 실패:', response.status)
+          setLeftColumnItems([])
+          setRightColumnItems([])
         }
       } catch (error) {
         console.error('데이터 가져오기 실패:', error)
-        generateDummyData()
+        setLeftColumnItems([])
+        setRightColumnItems([])
       }
       
       setLoading(false)
     }
     
-    const generateDummyData = () => {
-      const baseItems = [
-        {
-          id: `${selectedCategory}-1`,
-          title: `${selectedCategory} 스팟 1`,
-          author: selectedCategory === '레저' ? '스포츠 액티비티' : selectedCategory === '숙박' ? '프리미엄 호텔' : selectedCategory === '쇼핑' ? '인기 쇼핑몰' : selectedCategory === '자연' ? '자연 경관' : selectedCategory === '맛집' ? '로컬 맛집' : '역사 문화',
-          genre: selectedCategory,
-          rating: 4.9,
-          imageUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-2`,
-          title: `${selectedCategory} 스팟 2`,
-          author: selectedCategory === '레저' ? '익스트림 스포츠' : selectedCategory === '숙박' ? '부티크 호텔' : selectedCategory === '쇼핑' ? '아울렛몰' : selectedCategory === '자연' ? '국립공원' : selectedCategory === '맛집' ? '전통 요리' : '박물관',
-          genre: selectedCategory,
-          rating: 4.8,
-          imageUrl: 'https://images.unsplash.com/photo-1539650116574-75c0c6d73ab7?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-3`,
-          title: `${selectedCategory} 스팟 3`,
-          author: selectedCategory === '레저' ? '수상 스포츠' : selectedCategory === '숙박' ? '펜션' : selectedCategory === '쇼핑' ? '전통시장' : selectedCategory === '자연' ? '해변' : selectedCategory === '맛집' ? '디저트 카페' : '유적지',
-          genre: selectedCategory,
-          rating: 4.7,
-          imageUrl: 'https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-4`,
-          title: `${selectedCategory} 스팟 4`,
-          author: selectedCategory === '레저' ? '실내 액티비티' : selectedCategory === '숙박' ? '게스트하우스' : selectedCategory === '쇼핑' ? '브랜드 매장' : selectedCategory === '자연' ? '산림' : selectedCategory === '맛집' ? '퓨전 레스토랑' : '갤러리',
-          genre: selectedCategory,
-          rating: 4.6,
-          imageUrl: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-5`,
-          title: `${selectedCategory} 스팟 5`,
-          author: selectedCategory === '레저' ? '어드벤처 투어' : selectedCategory === '숙박' ? '리조트' : selectedCategory === '쇼핑' ? '명품 매장' : selectedCategory === '자연' ? '폭포' : selectedCategory === '맛집' ? '바 & 펜' : '전시관',
-          genre: selectedCategory,
-          rating: 4.5,
-          imageUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-6`,
-          title: `${selectedCategory} 스팟 6`,
-          author: selectedCategory === '레저' ? '테마파크' : selectedCategory === '숙박' ? '캠핑장' : selectedCategory === '쇼핑' ? '플리마켓' : selectedCategory === '자연' ? '호수' : selectedCategory === '맛집' ? '길거리 음식' : '도서관',
-          genre: selectedCategory,
-          rating: 4.4,
-          imageUrl: 'https://images.unsplash.com/photo-1551516595-834406bf4178?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-7`,
-          title: `${selectedCategory} 스팟 7`,
-          author: selectedCategory === '레저' ? '워터파크' : selectedCategory === '숙박' ? '한옥 스테이' : selectedCategory === '쇼핑' ? '백화점' : selectedCategory === '자연' ? '계곡' : selectedCategory === '맛집' ? '브런치 카페' : '문화센터',
-          genre: selectedCategory,
-          rating: 4.3,
-          imageUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-8`,
-          title: `${selectedCategory} 스팟 8`,
-          author: selectedCategory === '레저' ? '볼링장' : selectedCategory === '숙박' ? '글램핑' : selectedCategory === '쇼핑' ? '홈플러스' : selectedCategory === '자연' ? '섬' : selectedCategory === '맛집' ? '이자카야' : '아트센터',
-          genre: selectedCategory,
-          rating: 4.2,
-          imageUrl: 'https://images.unsplash.com/photo-1539650116574-75c0c6d73ab7?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-9`,
-          title: `${selectedCategory} 스팟 9`,
-          author: selectedCategory === '레저' ? 'VR 체험관' : selectedCategory === '숙박' ? '유스호스텔' : selectedCategory === '쇼핑' ? '지하상가' : selectedCategory === '자연' ? '동굴' : selectedCategory === '맛집' ? '피자집' : '과학관',
-          genre: selectedCategory,
-          rating: 4.1,
-          imageUrl: 'https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-10`,
-          title: `${selectedCategory} 스팟 10`,
-          author: selectedCategory === '레저' ? '노래방' : selectedCategory === '숙박' ? '모텔' : selectedCategory === '쇼핑' ? '편의점' : selectedCategory === '자연' ? '습지' : selectedCategory === '맛집' ? '치킨집' : '도서관',
-          genre: selectedCategory,
-          rating: 4.0,
-          imageUrl: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-11`,
-          title: `${selectedCategory} 스팟 11`,
-          author: selectedCategory === '레저' ? '게임센터' : selectedCategory === '숙박' ? '펜션' : selectedCategory === '쇼핑' ? '마트' : selectedCategory === '자연' ? '강' : selectedCategory === '맛집' ? '햄버거집' : '음악당',
-          genre: selectedCategory,
-          rating: 3.9,
-          imageUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-12`,
-          title: `${selectedCategory} 스팟 12`,
-          author: selectedCategory === '레저' ? 'PC방' : selectedCategory === '숙박' ? '호스텔' : selectedCategory === '쇼핑' ? '면세점' : selectedCategory === '자연' ? '공원' : selectedCategory === '맛집' ? '분식점' : '연극장',
-          genre: selectedCategory,
-          rating: 3.8,
-          imageUrl: 'https://images.unsplash.com/photo-1551516595-834406bf4178?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-13`,
-          title: `${selectedCategory} 스팟 13`,
-          author: selectedCategory === '레저' ? '당구장' : selectedCategory === '숙박' ? '콘도' : selectedCategory === '쇼핑' ? '로드샵' : selectedCategory === '자연' ? '들판' : selectedCategory === '맛집' ? '술집' : '컨벤션센터',
-          genre: selectedCategory,
-          rating: 3.7,
-          imageUrl: 'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-14`,
-          title: `${selectedCategory} 스팟 14`,
-          author: selectedCategory === '레저' ? '헬스장' : selectedCategory === '숙박' ? '팬션' : selectedCategory === '쇼핑' ? '온라인몰' : selectedCategory === '자연' ? '꽃밭' : selectedCategory === '맛집' ? '카페' : '공연장',
-          genre: selectedCategory,
-          rating: 3.6,
-          imageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        },
-        {
-          id: `${selectedCategory}-15`,
-          title: `${selectedCategory} 스팟 15`,
-          author: selectedCategory === '레저' ? '요가스튜디오' : selectedCategory === '숙박' ? '에어비앤비' : selectedCategory === '쇼핑' ? '아웃렛' : selectedCategory === '자연' ? '절벽' : selectedCategory === '맛집' ? '베이커리' : '시민회관',
-          genre: selectedCategory,
-          rating: 3.5,
-          imageUrl: 'https://images.unsplash.com/photo-1445346366695-5bf62de05412?w=100&h=100&fit=crop',
-          views: Math.floor(Math.random() * 5000) + 1000
-        }
-      ]
-      setLeftColumnItems(baseItems.slice(0, 8))
-      setRightColumnItems(baseItems.slice(8, 15))
-    }
     
     fetchCategoryData()
   }, [selectedCategory])
@@ -219,10 +89,10 @@ export default function RecommendationsPage() {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         
         // "오늘의 발견" 섹션 데이터 (다양한 카테고리에서 인기 장소들)
-        const discoveryResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?limit=4`)
+        const discoveryResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=4`)
         if (discoveryResponse.ok) {
           const discoveryData = await discoveryResponse.json()
-          const discoveryAttractions = discoveryData.attractions || []
+          const discoveryAttractions = discoveryData.results || []
           
           const formattedDiscoveryItems = discoveryAttractions.map((attraction: any) => ({
             id: attraction.id,
@@ -231,7 +101,7 @@ export default function RecommendationsPage() {
             genre: getCategoryInKorean(attraction.category),
             rating: attraction.rating || 4.7,
             views: Math.floor(Math.random() * 3000) + 1000,
-            imageUrl: attraction.imageUrl || `https://images.unsplash.com/photo-${Math.floor(Math.random() * 1000000000)}?w=200&h=280&fit=crop`,
+            imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random()}`,
             tags: ['추천', '인기', '특별']
           }))
           
@@ -239,10 +109,10 @@ export default function RecommendationsPage() {
         }
         
         // "새로 나온 코스" 섹션 데이터 (최근 추가된 장소들)
-        const newResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?limit=3`)
+        const newResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=3`)
         if (newResponse.ok) {
           const newData = await newResponse.json()
-          const newAttractions = newData.attractions || []
+          const newAttractions = newData.results || []
           
           const formattedNewItems = newAttractions.map((attraction: any) => ({
             id: attraction.id,
@@ -251,14 +121,16 @@ export default function RecommendationsPage() {
             genre: getCategoryInKorean(attraction.category),
             rating: attraction.rating || 4.5,
             views: Math.floor(Math.random() * 2000) + 500,
-            imageUrl: attraction.imageUrl || `https://images.unsplash.com/photo-${Math.floor(Math.random() * 1000000000)}?w=200&h=280&fit=crop`
+            imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 1000}`
           }))
           
           setNewItems(formattedNewItems)
         }
       } catch (error) {
         console.error('추가 섹션 데이터 가져오기 실패:', error)
-        // 실패시 기본 더미 데이터 유지
+        // 실패시 빈 데이터로 설정
+        setDiscoveryItems([])
+        setNewItems([])
       }
     }
     
@@ -432,48 +304,7 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {(discoveryItems.length > 0 ? discoveryItems : [
-                {
-                  id: 'discovery-1',
-                  title: '제주도의 숨은 보물',
-                  author: '현지인만 아는 비밀 장소들',
-                  genre: '자연',
-                  rating: 4.8,
-                  views: 1543,
-                  imageUrl: 'https://images.unsplash.com/photo-1539650116574-75c0c6d73ab7?w=200&h=280&fit=crop',
-                  tags: ['숨은명소', '사진', '힐링']
-                },
-                {
-                  id: 'discovery-2',
-                  title: '서울 골목 탐험',
-                  author: '어른의 원석 시간여행',
-                  genre: '문화',
-                  rating: 4.6,
-                  views: 2341,
-                  imageUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=200&h=280&fit=crop',
-                  tags: ['골목길', '레트로', '카페']
-                },
-                {
-                  id: 'discovery-3',
-                  title: '부산 야경 명소',
-                  author: '마치 스위치를 켠 듯한 밤',
-                  genre: '야경',
-                  rating: 4.7,
-                  views: 1876,
-                  imageUrl: 'https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=200&h=280&fit=crop',
-                  tags: ['야경', '데이트', '포토존']
-                },
-                {
-                  id: 'discovery-4',
-                  title: '경주 역사 탐방',
-                  author: '천년의 시간을 걷다',
-                  genre: '역사',
-                  rating: 4.5,
-                  views: 1234,
-                  imageUrl: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=200&h=280&fit=crop',
-                  tags: ['역사', '문화재', '교육']
-                }
-              ]).map((item) => (
+              {discoveryItems.map((item) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-48 cursor-pointer hover:scale-105 transition-transform"
@@ -531,35 +362,7 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {(newItems.length > 0 ? newItems : [
-                {
-                  id: 'new-1',
-                  title: '미지의 장호국의 시화',
-                  author: '키타야 쿠로, 크레인',
-                  genre: '인문',
-                  rating: 3.8,
-                  views: 4,
-                  imageUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=200&h=280&fit=crop'
-                },
-                {
-                  id: 'new-2',
-                  title: '악역 영애 전생 아가씨',
-                  author: '우에야마 미지로',
-                  genre: '맛집',
-                  rating: 4.8,
-                  views: 1361,
-                  imageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=200&h=280&fit=crop'
-                },
-                {
-                  id: 'new-3',
-                  title: '귀영다는 말 들은 없어!!',
-                  author: '하루후지 나라바',
-                  genre: '자연',
-                  rating: 4.8,
-                  views: 1222,
-                  imageUrl: 'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=200&h=280&fit=crop'
-                }
-              ]).map((item) => (
+              {newItems.map((item) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-48 cursor-pointer hover:scale-105 transition-transform"
