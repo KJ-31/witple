@@ -482,10 +482,13 @@ class RecommendationEngine:
             # 사용자 선호도 벡터 생성
             user_vector = await self._create_user_vector(preferences, actions)
             
-            # place_features에서 장소 데이터와 벡터 가져오기 
+            # place_features와 place_recommendations를 조인해서 이미지 URL 포함하여 가져오기
             query = """
-                SELECT place_id, table_name, name, region, city, latitude, longitude, vector
-                FROM place_features WHERE vector IS NOT NULL
+                SELECT pf.place_id, pf.table_name, pf.name, pf.region, pf.city, pf.latitude, pf.longitude, 
+                       pf.vector, pr.overview as description, pr.image_urls
+                FROM place_features pf
+                LEFT JOIN place_recommendations pr ON pf.place_id = pr.place_id AND pf.table_name = pr.table_name
+                WHERE pf.vector IS NOT NULL
             """
             conditions = []
             params = []
