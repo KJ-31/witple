@@ -58,12 +58,19 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         
         // 새로운 ID 형식 처리: table_name_id 형식인 경우
         let apiUrl: string
-        if (params.id.includes('_')) {
+        if (params.id && params.id.includes('_') && !params.id.includes('undefined')) {
           // table_name_id 형식인 경우 (예: leisure_sports_577)
           const lastUnderscoreIndex = params.id.lastIndexOf('_')
           const tableName = params.id.substring(0, lastUnderscoreIndex)
           const attractionId = params.id.substring(lastUnderscoreIndex + 1)
-          apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
+          
+          // tableName과 attractionId가 유효한지 확인
+          if (tableName && attractionId && tableName !== 'undefined' && attractionId !== 'undefined') {
+            apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
+          } else {
+            // 유효하지 않으면 기존 API 사용
+            apiUrl = `${API_BASE_URL}/api/v1/attractions/${params.id}`
+          }
         } else {
           // 기존 형식인 경우
           apiUrl = `${API_BASE_URL}/api/v1/attractions/${params.id}`
