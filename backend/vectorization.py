@@ -4,6 +4,17 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
 import pickle
+import logging
+from typing import Dict, List, Tuple, Any
+import asyncio
+import asyncpg
+import json
+from dotenv import load_dotenv
+from services.weight_calculator import tag_weight_calculator
+
+# .env 파일 로드
+load_dotenv()
+
 # Custom implementations to replace sklearn
 def cosine_similarity(X, Y):
     """코사인 유사도 계산"""
@@ -56,16 +67,6 @@ class MinMaxScaler:
     
     def fit_transform(self, X):
         return self.fit(X).transform(X)
-import logging
-from typing import Dict, List, Tuple, Any
-import asyncio
-import asyncpg
-import json
-from dotenv import load_dotenv
-from services.weight_calculator import tag_weight_calculator
-
-# .env 파일 로드
-load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
