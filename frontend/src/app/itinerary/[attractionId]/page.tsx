@@ -132,25 +132,25 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
+
       // /filtered API 사용 - 추천 알고리즘 적용
       const categoryParam = category === 'all' ? '' : `&category=${category}`
       const filteredResponse = await fetch(
         `${API_BASE_URL}/api/v1/attractions/filtered?region=${encodeURIComponent(region)}&limit=50${categoryParam}`
       )
-      
+
       if (filteredResponse.ok) {
         const filteredData = await filteredResponse.json()
         // 현재 관광지 제외
         const filtered = filteredData.attractions.filter((item: any) => item.id !== params.attractionId)
-        
+
         if (isFirstLoad) {
           // 데이터가 없거나 부족할 경우 fallback으로 더 많은 데이터 가져오기
           if (filtered.length < 10) {
             await loadCategoryFallback(region, category, isFirstLoad)
             return
           }
-          
+
           // 전체 카테고리 개수 계산을 위해 모든 장소 저장
           setAllCategoryPlaces(filtered)
           setRelatedAttractions(filtered)
@@ -158,7 +158,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           setNoMoreResults(false)
           // 추천 API에서 50개 받았으면 더 많은 데이터를 위해 hasMore = true로 설정
           setHasMore(filtered.length >= 50)
-          
+
           // 캐시에 저장
           if (isFirstLoad) {
             setCategoryCache(prev => ({
@@ -195,20 +195,20 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const loadCategoryFallback = async (region: string, category: CategoryKey = 'all', isFirstLoad: boolean = false) => {
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
+
       // 1차: 해당 지역 + 카테고리로 검색
       const categoryQuery = category === 'all' ? region : `${region} ${getCategoryName(category)}`
       const searchResponse = await fetch(
         `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(categoryQuery)}&region=${encodeURIComponent(region)}&limit=50`
       )
-      
+
       let filtered: any[] = []
-      
+
       if (searchResponse.ok) {
         const searchData = await searchResponse.json()
         // 현재 관광지 제외
         filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
-        
+
         // 카테고리 필터링 (search API 결과에서)
         if (category !== 'all') {
           filtered = filtered.filter((place: any) => {
@@ -217,7 +217,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             }
             const categoryMap: { [key: string]: string } = {
               '자연': 'nature',
-              '맛집': 'restaurants', 
+              '맛집': 'restaurants',
               '쇼핑': 'shopping',
               '숙박': 'accommodation',
               '인문': 'humanities',
@@ -227,7 +227,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           })
         }
       }
-      
+
       // 2차: 데이터가 부족하면 전국 단위에서 더 가져오기
       if (filtered.length < 20) {
         try {
@@ -235,13 +235,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           const fallbackResponse = await fetch(
             `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(fallbackQuery)}&limit=50`
           )
-          
+
           if (fallbackResponse.ok) {
             const fallbackData = await fallbackResponse.json()
             const additionalPlaces = fallbackData.results
               .filter((item: any) => item.id !== params.attractionId)
               .filter((item: any) => !filtered.some((existing: any) => existing.id === item.id))
-            
+
             // 카테고리 필터링
             let categoryFiltered = additionalPlaces
             if (category !== 'all') {
@@ -251,7 +251,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                 }
                 const categoryMap: { [key: string]: string } = {
                   '자연': 'nature',
-                  '맛집': 'restaurants', 
+                  '맛집': 'restaurants',
                   '쇼핑': 'shopping',
                   '숙박': 'accommodation',
                   '인문': 'humanities',
@@ -260,7 +260,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                 return categoryMap[place.category] === category || place.category === category
               })
             }
-            
+
             // 부족한 만큼만 추가
             const needCount = Math.max(0, 20 - filtered.length)
             filtered = [...filtered, ...categoryFiltered.slice(0, needCount)]
@@ -269,7 +269,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           console.error('전국 fallback 로드 오류:', fallbackError)
         }
       }
-        
+
       if (isFirstLoad) {
         // fallback에서도 allCategoryPlaces 업데이트 (카테고리 카운트를 위해)
         setAllCategoryPlaces(filtered)
@@ -311,12 +311,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       const searchResponse = await fetch(
         `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(cityName)}&region=${encodeURIComponent(region)}&page=${page}&limit=50`
       )
-      
+
       if (searchResponse.ok) {
         const searchData = await searchResponse.json()
         // 현재 관광지 제외
         const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
-        
+
         if (isFirstLoad) {
           setRelatedAttractions(filtered)
           setCurrentPage(0)
@@ -330,7 +330,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             setCurrentPage(page)
           }
         }
-        
+
         setHasMore(searchData.hasMore || false)
       }
     } catch (error) {
@@ -347,41 +347,41 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // API에서 관광지 상세 정보와 관련 관광지 가져오기
   useEffect(() => {
     let isCancelled = false // cleanup을 위한 플래그
-    
+
     const fetchAttractionData = async () => {
       try {
         if (isCancelled) return // 이미 취소된 경우 중단
-        
+
         setLoading(true)
         setRelatedAttractions([]) // 새로 로드하기 전에 기존 데이터 초기화
-        
+
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-        
+
         // attractionId가 유효한지 확인
         if (!params.attractionId || params.attractionId === 'undefined') {
           throw new Error('유효하지 않은 관광지 ID입니다.')
         }
-        
+
         // 'general'인 경우 특정 attraction 정보 없이 전국 데이터 로드
         if (params.attractionId === 'general') {
           if (isCancelled) return
-          
+
           // attraction 정보 없이 전국 데이터 로드
           setAttraction(null)
           await loadAllCategoriesForCount('전국')
           await loadFilteredAttractions('전국', 'all', true)
           return
         }
-        
+
         // 선택된 관광지 정보 가져오기
         const attractionResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/${params.attractionId}`)
         if (!attractionResponse.ok) {
           throw new Error(`HTTP error! status: ${attractionResponse.status}`)
         }
         const attractionData = await attractionResponse.json()
-        
+
         if (isCancelled) return // 이미 취소된 경우 중단
-        
+
         setAttraction(attractionData)
 
         // 같은 지역의 추천 관광지들 가져오기 (추천 알고리즘 적용)
@@ -403,7 +403,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     if (params.attractionId) {
       fetchAttractionData()
     }
-    
+
     return () => {
       isCancelled = true // cleanup 시 플래그 설정
     }
@@ -420,12 +420,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const loadAllCategoriesForCount = async (region: string) => {
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
+
       // 전체 카테고리의 데이터를 한 번에 가져오기
       const allResponse = await fetch(
         `${API_BASE_URL}/api/v1/attractions/filtered?region=${encodeURIComponent(region)}&limit=100`
       )
-      
+
       if (allResponse.ok) {
         const allData = await allResponse.json()
         const filtered = allData.attractions.filter((item: any) => item.id !== params.attractionId)
@@ -435,7 +435,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         const searchResponse = await fetch(
           `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(region)}&region=${encodeURIComponent(region)}&limit=100`
         )
-        
+
         if (searchResponse.ok) {
           const searchData = await searchResponse.json()
           const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
@@ -501,7 +501,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     if (selectedCategory !== 'bookmarked' && categoryCache[selectedCategory]) {
       return categoryCache[selectedCategory] || []
     }
-    
+
     // allCategoryPlaces가 비어있지 않으면 그것을 사용, 아니면 relatedAttractions 사용
     return allCategoryPlaces.length > 0 ? allCategoryPlaces : relatedAttractions
   }
@@ -513,7 +513,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     if (selectedCategory === 'all') {
       return allPlaces
     }
-    
+
     // 북마크 카테고리인 경우 저장된 장소들을 반환
     if (selectedCategory === 'bookmarked') {
       return savedLocations.map(location => ({
@@ -528,14 +528,14 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         sourceTable: 'saved'
       }))
     }
-    
+
     // sourceTable 기준으로 필터링 + 키워드 기반 매칭
     const filtered = allPlaces.filter(place => {
       // sourceTable이 있으면 그것을 우선 사용
       if (place.sourceTable) {
         return place.sourceTable === selectedCategory
       }
-      
+
       // category를 영어로 변환해서 비교
       const categoryMap: { [key: string]: string } = {
         '자연': 'nature',
@@ -545,11 +545,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         '인문': 'humanities',
         '레저': 'leisure_sports'
       }
-      
+
       if (categoryMap[place.category] === selectedCategory || place.category === selectedCategory) {
         return true
       }
-      
+
       // 키워드 기반 추가 매칭 (특히 인문 카테고리에서 유용)
       const categoryKeywords = {
         'humanities': ['인문', '문화', '박물관', '미술관', '역사', '전시관', '기념관', '향교', '서원', '궁', '성당', '절', '사찰', '교회'],
@@ -559,13 +559,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         'accommodation': ['숙박', '호텔', '펜션', '리조트', '모텔'],
         'leisure_sports': ['레저', '스포츠', '체험', '놀이', '액티비티', '테마파크']
       }
-      
+
       const keywords = categoryKeywords[selectedCategory as keyof typeof categoryKeywords] || []
       const placeText = `${place.name} ${place.description || ''} ${place.category || ''}`.toLowerCase()
-      
+
       return keywords.some(keyword => placeText.includes(keyword))
     })
-    
+
     return filtered
   }
 
@@ -715,30 +715,30 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 저장된 장소들을 가져오는 함수
   const loadSavedLocations = async () => {
     if (!session) return
-    
+
     // 북마크 카테고리가 이미 캐시에 있으면 재사용
     if (loadedCategories.has('bookmarked') && categoryCache.bookmarked) {
       console.log('캐시된 북마크 데이터 사용')
       setSavedLocations(categoryCache.bookmarked)
       return
     }
-    
+
     try {
       setLoadingSavedLocations(true)
       const token = getToken()
-      
+
       if (!token) {
         console.log('토큰 없음 - 저장된 장소 로딩 건너뛰기')
         return
       }
-      
+
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         console.log('=== 저장된 장소 API 응답 디버깅 ===')
@@ -746,21 +746,21 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         console.log('locations:', data.locations)
         console.log('saved_locations:', data.saved_locations)
         console.log('============================')
-        
+
         // 프로필 페이지와 동일하게 data.locations 사용
         const locations = data.locations || data.saved_locations || []
         setSavedLocations(locations)
-        
+
         // 북마크된 장소 ID들도 함께 업데이트
         const bookmarkedIds = new Set<string>(locations.map((loc: any) => String(loc.id)) || [])
         setBookmarkedPlaces(bookmarkedIds)
-        
+
         // 북마크 데이터를 캐시에 저장
         setCategoryCache(prev => ({
           ...prev,
           bookmarked: locations
         }))
-        
+
         setLoadedCategories(prev => {
           const newSet = new Set(prev)
           newSet.add('bookmarked')
@@ -828,114 +828,114 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             <p className="text-[#6FA0E6] text-lg mb-2">저장된 장소를 불러오는 중...</p>
             <p className="text-[#94A9C9] text-sm">잠시만 기다려주세요</p>
           </div>
-        ) : 
-        /* 북마크 카테고리 빈 상태 */
-        selectedCategory === 'bookmarked' && filteredPlaces.length === 0 && !loadingSavedLocations ? (
-          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
-            <div className="text-6xl mb-4">🔖</div>
-            <p className="text-[#6FA0E6] text-lg mb-2">저장된 장소가 없습니다</p>
-            <p className="text-[#94A9C9] text-sm mb-4">마음에 드는 장소를 북마크해보세요!</p>
-            <div className="flex justify-center">
-              <div className="bg-[#3E68FF]/20 px-4 py-2 rounded-full text-[#6FA0E6] text-sm">
-                다른 카테고리에서 장소를 둘러보세요
-              </div>
-            </div>
-          </div>
         ) :
-        /* 일반 카테고리 빈 상태 */
-        filteredPlaces.length === 0 && !loading && !loadingMore ? (
-          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
-            <p className="text-[#6FA0E6] text-lg mb-2">🔍 더 많은 장소를 찾아보고 있어요!</p>
-            <p className="text-[#94A9C9] text-sm mb-4">잠시 후 다른 카테고리의 인기 장소들이 표시됩니다</p>
-            <div className="flex justify-center">
-              <div className="animate-pulse bg-[#3E68FF]/20 px-4 py-2 rounded-full text-[#6FA0E6] text-sm">
-                전국 인기 장소 검색 중...
+          /* 북마크 카테고리 빈 상태 */
+          selectedCategory === 'bookmarked' && filteredPlaces.length === 0 && !loadingSavedLocations ? (
+            <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+              <div className="text-6xl mb-4">🔖</div>
+              <p className="text-[#6FA0E6] text-lg mb-2">저장된 장소가 없습니다</p>
+              <p className="text-[#94A9C9] text-sm mb-4">마음에 드는 장소를 북마크해보세요!</p>
+              <div className="flex justify-center">
+                <div className="bg-[#3E68FF]/20 px-4 py-2 rounded-full text-[#6FA0E6] text-sm">
+                  다른 카테고리에서 장소를 둘러보세요
+                </div>
               </div>
             </div>
-          </div>
-        ) : filteredPlaces.length === 0 ? (
-          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
-            <p className="text-[#6FA0E6] text-lg mb-2">맞춤 추천 장소를 찾는 중...</p>
-            <p className="text-[#94A9C9] text-sm">잠시만 기다려주세요</p>
-          </div>
-        ) : (
-          filteredPlaces.map(place => {
-            const isSelectedOnCurrentDay = isPlaceSelectedOnDay(place.id, selectedDayForAdding)
-            const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
-            return (
-              <div
-                key={`place-${place.id}-${place.sourceTable || 'default'}`}
-                className={`
-                  bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
-                  ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' :
-                    isSelectedOnAnyOtherDay ? 'ring-2 ring-[#6FA0E6] bg-[#6FA0E6]/10' : 'hover:bg-[#12345D]/50'}
-                `}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-white text-lg mb-2">{place.name}</h3>
-
-                    <p className="text-[#94A9C9] text-sm mb-3 line-clamp-2">
-                      {place.description}
-                    </p>
-
-                    <div className="flex items-center space-x-2">
-                      <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
-                        {getCategoryName(place.category)}
-                      </span>
-                      <div className="flex items-center">
-                        <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                        </svg>
-                        <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
-                    {/* 북마크 버튼 */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleBookmarkToggle(place)
-                      }}
-                      className={`
-                        p-2 rounded-lg transition-all duration-200
-                        ${bookmarkedPlaces.has(place.id)
-                          ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
-                          : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
-                        }
-                      `}
-                      title={bookmarkedPlaces.has(place.id) ? '북마크 해제' : '북마크 추가'}
-                    >
-                      <svg className="w-4 h-4" fill={bookmarkedPlaces.has(place.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                      </svg>
-                    </button>
-
-                    {/* 일정 추가 버튼 */}
-                    <button
-                      onClick={() => handleAddToItinerary(place)}
-                      className={`
-                        px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                        ${isSelectedOnCurrentDay
-                          ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
-                          : isSelectedOnAnyOtherDay
-                            ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
-                            : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
-                        }
-                      `}
-                    >
-                      {isSelectedOnCurrentDay ? '선택됨' :
-                        isSelectedOnAnyOtherDay ? `다른날` : '+ 추가'}
-                    </button>
+          ) :
+            /* 일반 카테고리 빈 상태 */
+            filteredPlaces.length === 0 && !loading && !loadingMore ? (
+              <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+                <p className="text-[#6FA0E6] text-lg mb-2">🔍 더 많은 장소를 찾아보고 있어요!</p>
+                <p className="text-[#94A9C9] text-sm mb-4">잠시 후 다른 카테고리의 인기 장소들이 표시됩니다</p>
+                <div className="flex justify-center">
+                  <div className="animate-pulse bg-[#3E68FF]/20 px-4 py-2 rounded-full text-[#6FA0E6] text-sm">
+                    전국 인기 장소 검색 중...
                   </div>
                 </div>
               </div>
-            )
-          })
-        )}
+            ) : filteredPlaces.length === 0 ? (
+              <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+                <p className="text-[#6FA0E6] text-lg mb-2">맞춤 추천 장소를 찾는 중...</p>
+                <p className="text-[#94A9C9] text-sm">잠시만 기다려주세요</p>
+              </div>
+            ) : (
+              filteredPlaces.map(place => {
+                const isSelectedOnCurrentDay = isPlaceSelectedOnDay(place.id, selectedDayForAdding)
+                const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
+                return (
+                  <div
+                    key={`place-${place.id}-${place.sourceTable || 'default'}`}
+                    className={`
+                  bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
+                  ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' :
+                        isSelectedOnAnyOtherDay ? 'ring-2 ring-[#6FA0E6] bg-[#6FA0E6]/10' : 'hover:bg-[#12345D]/50'}
+                `}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-white text-lg mb-2">{place.name}</h3>
+
+                        <p className="text-[#94A9C9] text-sm mb-3 line-clamp-2">
+                          {place.description}
+                        </p>
+
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
+                            {getCategoryName(place.category)}
+                          </span>
+                          <div className="flex items-center">
+                            <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                            <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                        {/* 북마크 버튼 */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleBookmarkToggle(place)
+                          }}
+                          className={`
+                        p-2 rounded-lg transition-all duration-200
+                        ${bookmarkedPlaces.has(place.id)
+                              ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
+                            }
+                      `}
+                          title={bookmarkedPlaces.has(place.id) ? '북마크 해제' : '북마크 추가'}
+                        >
+                          <svg className="w-4 h-4" fill={bookmarkedPlaces.has(place.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                          </svg>
+                        </button>
+
+                        {/* 일정 추가 버튼 */}
+                        <button
+                          onClick={() => handleAddToItinerary(place)}
+                          className={`
+                        px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                        ${isSelectedOnCurrentDay
+                              ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : isSelectedOnAnyOtherDay
+                                ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
+                                : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
+                            }
+                      `}
+                        >
+                          {isSelectedOnCurrentDay ? '선택됨' :
+                            isSelectedOnAnyOtherDay ? `다른날` : '+ 추가'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
 
         {/* Load More Button / No More Results Message */}
         {!loading && (
@@ -952,8 +952,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                 disabled={loadingMore}
                 className={`
                   w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
-                  ${loadingMore 
-                    ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed' 
+                  ${loadingMore
+                    ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
                     : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
                   }
                 `}
@@ -991,7 +991,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
         <div className="text-center">
           <p className="text-[#94A9C9] text-lg mb-4">{error || '명소를 찾을 수 없습니다'}</p>
-          <button 
+          <button
             onClick={() => router.back()}
             className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
           >
@@ -1008,14 +1008,19 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
         {/* Header */}
         <div className="flex items-center justify-between p-4">
-          <button
-            onClick={handleBack}
-            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
+          {/* 뒤로가기 버튼 - 상세 페이지에서 온 경우에만 표시 */}
+          {params.attractionId !== 'general' ? (
+            <button
+              onClick={() => router.back()}
+              className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          ) : (
+            <div className="w-10 h-10" />
+          )}
 
           <h1 className="text-lg font-semibold text-[#94A9C9]">
             {params.attractionId === 'general' ? '여행 일정 만들기' : '여행 기간이 어떻게 되시나요?'}
@@ -1024,78 +1029,78 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           <div className="w-10 h-10" /> {/* Spacer */}
         </div>
 
-      {/* Travel Period Info */}
-      <div className="px-4 mb-6 text-center">
-        <p className="text-[#6FA0E6] text-sm mb-2">
-          {dateRange[0].getMonth() + 1}월 {dateRange[0].getDate()}일 - {dateRange[dateRange.length - 1].getMonth() + 1}월 {dateRange[dateRange.length - 1].getDate()}일
-        </p>
-        <p className="text-[#94A9C9] text-xs">
-          {dateRange.length}일간의 여행 • 선택된 장소: {getAllSelectedPlaces().length}개
-        </p>
-      </div>
+        {/* Travel Period Info */}
+        <div className="px-4 mb-6 text-center">
+          <p className="text-[#6FA0E6] text-sm mb-2">
+            {dateRange[0].getMonth() + 1}월 {dateRange[0].getDate()}일 - {dateRange[dateRange.length - 1].getMonth() + 1}월 {dateRange[dateRange.length - 1].getDate()}일
+          </p>
+          <p className="text-[#94A9C9] text-xs">
+            {dateRange.length}일간의 여행 • 선택된 장소: {getAllSelectedPlaces().length}개
+          </p>
+        </div>
 
-      {/* Day Selection Tabs */}
-      <div className="px-4 mb-6">
-        {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
-        <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
-          {dateRange.map((date, index) => {
-            const dayNumber = index + 1
-            const isSelected = selectedDayForAdding === dayNumber
-            const placesForDay = getPlacesForDay(dayNumber).length
+        {/* Day Selection Tabs */}
+        <div className="px-4 mb-6">
+          {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
+          <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
+            {dateRange.map((date, index) => {
+              const dayNumber = index + 1
+              const isSelected = selectedDayForAdding === dayNumber
+              const placesForDay = getPlacesForDay(dayNumber).length
 
-            return (
-              <button
-                key={dayNumber}
-                onClick={() => setSelectedDayForAdding(dayNumber)}
-                className={`
+              return (
+                <button
+                  key={dayNumber}
+                  onClick={() => setSelectedDayForAdding(dayNumber)}
+                  className={`
                   flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-w-[70px]
                   ${isSelected
+                      ? 'bg-[#3E68FF] text-white shadow-lg'
+                      : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
+                    }
+                `}
+                >
+                  <div className="text-center">
+                    <div className="font-semibold">Day {dayNumber}</div>
+                    <div className="text-xs opacity-80">
+                      {date.getMonth() + 1}/{date.getDate() + 1}
+                    </div>
+                    {placesForDay > 0 && (
+                      <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
+                        {placesForDay}개
+                      </div>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Category Tabs */}
+        <div className="px-4 mb-6">
+          <div className="flex space-x-2 overflow-x-auto no-scrollbar">
+            {categories.map(category => (
+              <button
+                key={category.key}
+                onClick={() => setSelectedCategory(category.key)}
+                className={`
+                flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-1
+                ${selectedCategory === category.key
                     ? 'bg-[#3E68FF] text-white shadow-lg'
                     : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
                   }
-                `}
-              >
-                <div className="text-center">
-                  <div className="font-semibold">Day {dayNumber}</div>
-                  <div className="text-xs opacity-80">
-                    {date.getMonth() + 1}/{date.getDate() + 1}
-                  </div>
-                  {placesForDay > 0 && (
-                    <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
-                      {placesForDay}개
-                    </div>
-                  )}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Category Tabs */}
-      <div className="px-4 mb-6">
-        <div className="flex space-x-2 overflow-x-auto no-scrollbar">
-          {categories.map(category => (
-            <button
-              key={category.key}
-              onClick={() => setSelectedCategory(category.key)}
-              className={`
-                flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-1
-                ${selectedCategory === category.key
-                  ? 'bg-[#3E68FF] text-white shadow-lg'
-                  : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
-                }
               `}
-            >
-              <span>{category.icon}</span>
-              <span>{category.name}</span>
-            </button>
-          ))}
+              >
+                <span>{category.icon}</span>
+                <span>{category.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Places List */}
-      {renderMainContent()}
+        {/* Places List */}
+        {renderMainContent()}
 
 
         {/* Selected Places Summary */}
