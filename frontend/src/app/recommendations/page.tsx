@@ -36,7 +36,7 @@ export default function RecommendationsPage() {
     const fetchCategoryData = async () => {
       try {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-        
+
         // 메인 추천 데이터 (15개) - 카테고리별 필터링
         const categoryMap: { [key: string]: string } = {
           '레저': 'leisure_sports',
@@ -51,7 +51,7 @@ export default function RecommendationsPage() {
         if (response.ok) {
           const data = await response.json()
           const attractions = data.results || []
-          
+
           const formattedItems = attractions.map((attraction: any, index: number) => ({
             id: attraction.id,
             title: attraction.name,
@@ -61,7 +61,7 @@ export default function RecommendationsPage() {
             views: Math.floor(Math.random() * 5000) + 1000,
             imageUrl: attraction.imageUrl || `https://picsum.photos/100/100?random=${Math.random()}00/100?random=${Date.now() + index}`
           }))
-          
+
           setLeftColumnItems(formattedItems.slice(0, 8))
           setRightColumnItems(formattedItems.slice(8, 15))
         } else {
@@ -74,46 +74,46 @@ export default function RecommendationsPage() {
         setLeftColumnItems([])
         setRightColumnItems([])
       }
-      
+
       setLoading(false)
     }
-    
-    
+
+
     fetchCategoryData()
   }, [selectedCategory])
-  
+
   // 추가 섹션 데이터 가져오기
   useEffect(() => {
     const fetchAdditionalSections = async () => {
       try {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-        
+
         // "오늘의 발견" 섹션 데이터 (다양한 카테고리에서 인기 장소들)
         const discoveryResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=4`)
         if (discoveryResponse.ok) {
           const discoveryData = await discoveryResponse.json()
           const discoveryAttractions = discoveryData.results || []
-          
+
           const formattedDiscoveryItems = discoveryAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
-            author: attraction.description || `${attraction.city?.name || attraction.region}의 숨은 보물`,
+            author: attraction.city?.name || attraction.region || '여행지',
             genre: getCategoryInKorean(attraction.category),
             rating: attraction.rating || 4.7,
             views: Math.floor(Math.random() * 3000) + 1000,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random()}`,
             tags: ['추천', '인기', '특별']
           }))
-          
+
           setDiscoveryItems(formattedDiscoveryItems)
         }
-        
+
         // "새로 나온 코스" 섹션 데이터 (최근 추가된 장소들)
         const newResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=3`)
         if (newResponse.ok) {
           const newData = await newResponse.json()
           const newAttractions = newData.results || []
-          
+
           const formattedNewItems = newAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
@@ -123,7 +123,7 @@ export default function RecommendationsPage() {
             views: Math.floor(Math.random() * 2000) + 500,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 1000}`
           }))
-          
+
           setNewItems(formattedNewItems)
         }
       } catch (error) {
@@ -133,10 +133,10 @@ export default function RecommendationsPage() {
         setNewItems([])
       }
     }
-    
+
     fetchAdditionalSections()
   }, [])
-  
+
   // 카테고리 한국어 변환 함수
   const getCategoryInKorean = (category: string): string => {
     const categoryMap: { [key: string]: string } = {
@@ -174,7 +174,7 @@ export default function RecommendationsPage() {
           <h1 className="text-2xl font-bold text-[#3E68FF]">추천</h1>
           <p className="text-[#94A9C9] text-sm mt-1">당신을 위한 맞춤 여행 추천</p>
         </div>
-        
+
         {/* Category Tabs */}
         <div className="px-4 pb-4">
           <div className="flex space-x-4 overflow-x-auto no-scrollbar">
@@ -182,11 +182,10 @@ export default function RecommendationsPage() {
               <button
                 key={category}
                 onClick={() => setSelectedCategory(category)}
-                className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  selectedCategory === category
-                    ? 'bg-[#3E68FF] text-white'
-                    : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                }`}
+                className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-colors ${selectedCategory === category
+                  ? 'bg-[#3E68FF] text-white'
+                  : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                  }`}
               >
                 {category}
               </button>
@@ -200,7 +199,7 @@ export default function RecommendationsPage() {
         <div className="mb-4">
           <h2 className="text-xl font-semibold text-white">지금 많이 찾고 있는 {selectedCategory}</h2>
         </div>
-        
+
         {/* Horizontal Slide Layout */}
         <div className="overflow-x-auto no-scrollbar">
           <div className="flex gap-12 pb-4" style={{ width: 'max-content' }}>
@@ -211,7 +210,7 @@ export default function RecommendationsPage() {
               for (let i = 0; i < allItems.length; i += 6) {
                 pages.push(allItems.slice(i, i + 6))
               }
-              
+
               return pages.map((pageItems, pageIndex) => (
                 <div key={`page-${pageIndex}`} className="flex-shrink-0 w-80">
                   <div className="flex gap-6">
@@ -250,7 +249,7 @@ export default function RecommendationsPage() {
                         )
                       })}
                     </div>
-                    
+
                     {/* Right Column of this page */}
                     <div className="flex-1 space-y-6">
                       {pageItems.slice(3, 6).map((item, index) => {
@@ -292,7 +291,7 @@ export default function RecommendationsPage() {
             })()}
           </div>
         </div>
-        
+
         {/* 오늘의 발견 섹션 */}
         <div className="mt-12 mb-8">
           <div className="flex items-center justify-between mb-6">
@@ -301,48 +300,36 @@ export default function RecommendationsPage() {
               더보기
             </button>
           </div>
-          
+
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
               {discoveryItems.map((item) => (
                 <div
                   key={item.id}
-                  className="flex-shrink-0 w-48 cursor-pointer hover:scale-105 transition-transform"
+                  className="flex-shrink-0 w-52 cursor-pointer group"
                   onClick={() => handleItemClick(item)}
                 >
-                  <div className="bg-[#1F3C7A]/20 rounded-2xl overflow-hidden hover:bg-[#1F3C7A]/30 transition-colors">
+                  <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-58 object-cover"
+                        className="w-full h-32 object-cover"
                       />
-                      <div className="absolute top-2 left-2 bg-[#3E68FF] text-white text-xs px-2 py-1 rounded-full">
+                      <div className="absolute top-3 left-3 bg-[#3E68FF] text-white text-xs font-medium px-3 py-1 rounded-lg">
                         {item.genre}
                       </div>
                     </div>
                     <div className="p-4">
-                      <h3 className="font-semibold text-white text-sm mb-1">{item.title}</h3>
-                      <p className="text-[#94A9C9] text-xs mb-2">{item.author}</p>
-                      <div className="flex items-center mb-2">
-                        <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                      <h3 className="font-bold text-white text-base mb-2 leading-tight">{item.title}</h3>
+                      <p className="text-[#9CA3AF] text-sm mb-3">{item.author}</p>
+                      <div className="flex items-center">
+                        <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-[#6FA0E6] text-xs mr-2">{item.rating}</span>
-                        <span className="text-[#94A9C9] text-xs">({item.views})</span>
+                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
+                        <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
-                      {item.tags && (
-                        <div className="flex flex-wrap gap-1">
-                          {item.tags.map((tag, index) => (
-                            <span
-                              key={index}
-                              className="bg-[#3E68FF]/20 text-[#6FA0E6] text-xs px-2 py-0.5 rounded-full"
-                            >
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -359,35 +346,35 @@ export default function RecommendationsPage() {
               더보기
             </button>
           </div>
-          
+
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
               {newItems.map((item) => (
                 <div
                   key={item.id}
-                  className="flex-shrink-0 w-48 cursor-pointer hover:scale-105 transition-transform"
+                  className="flex-shrink-0 w-52 cursor-pointer group"
                   onClick={() => handleItemClick(item)}
                 >
-                  <div className="bg-[#1F3C7A]/20 rounded-2xl overflow-hidden hover:bg-[#1F3C7A]/30 transition-colors">
+                  <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="w-full h-58 object-cover"
+                        className="w-full h-32 object-cover"
                       />
-                      <div className="absolute top-2 left-2 bg-[#3E68FF] text-white text-xs px-2 py-1 rounded-full">
+                      <div className="absolute top-3 left-3 bg-[#3E68FF] text-white text-xs font-medium px-3 py-1 rounded-lg">
                         {item.genre}
                       </div>
                     </div>
                     <div className="p-4">
-                      <h3 className="font-semibold text-white text-sm mb-1">{item.title}</h3>
-                      <p className="text-[#94A9C9] text-xs mb-2">{item.author}</p>
+                      <h3 className="font-bold text-white text-base mb-2 leading-tight">{item.title}</h3>
+                      <p className="text-[#9CA3AF] text-sm mb-3">{item.author}</p>
                       <div className="flex items-center">
-                        <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-[#6FA0E6] text-xs mr-2">{item.rating}</span>
-                        <span className="text-[#94A9C9] text-xs">({item.views})</span>
+                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
+                        <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
                   </div>
