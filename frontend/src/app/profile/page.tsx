@@ -7,11 +7,26 @@ import { useSession, signOut } from 'next-auth/react'
 
 
 interface TripPlace {
-  name: string
+  table_name: string
+  id: string
+  dayNumber: number
   order: number
-  latitude?: string
-  longitude?: string
+  name?: string
+  category?: string
+  rating?: number
+  description?: string
+  latitude?: string | number
+  longitude?: string | number
   address?: string
+  region?: string
+  imageUrl?: string
+  city?: {
+    id: string
+    name: string
+    region: string
+  }
+  cityName?: string
+  isPinned?: boolean
 }
 
 interface Trip {
@@ -554,6 +569,38 @@ export default function ProfilePage() {
     }
   }
 
+  // 여행 카드 클릭 핸들러
+  const handleTripClick = (trip: Trip) => {
+    if (!trip.places || trip.places.length === 0) {
+      alert('이 여행에는 저장된 장소가 없습니다.')
+      return
+    }
+
+    // DB 구조에 맞게 데이터 변환: table_name + "_" + id 형태로 조합
+    const placeIds = trip.places.map(place => `${place.table_name}_${place.id}`)
+    const dayNumbers = trip.places.map(place => place.dayNumber.toString())
+    const sourceTables = trip.places.map(place => place.table_name)
+    
+    // 날짜 차이 계산
+    const startDate = new Date(trip.start_date)
+    const endDate = new Date(trip.end_date)
+    const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    
+    // URL 파라미터 생성
+    const params = new URLSearchParams({
+      places: placeIds.join(','),
+      dayNumbers: dayNumbers.join(','),
+      sourceTables: sourceTables.join(','),
+      startDate: trip.start_date,
+      endDate: trip.end_date,
+      days: daysDiff.toString(),
+      baseAttraction: 'general'
+    })
+    
+    // map 페이지로 이동
+    router.push(`/map?${params.toString()}`)
+  }
+
   // 날짜 포맷 함수
   const formatDateRange = (startDate: string, endDate: string) => {
     const start = new Date(startDate)
@@ -634,7 +681,11 @@ export default function ProfilePage() {
         return (
           <div className="space-y-4">
             {trips.map((trip) => (
-              <div key={trip.id} className="bg-gray-800 p-4 rounded-2xl relative">
+              <div 
+                key={trip.id} 
+                className="bg-gray-800 p-4 rounded-2xl relative cursor-pointer hover:bg-gray-750 transition-colors"
+                onClick={() => handleTripClick(trip)}
+              >
                 {/* 상태 표시 - 모든 카드에 표시 */}
                 <div className="absolute top-4 right-4">
                   <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
