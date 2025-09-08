@@ -17,12 +17,12 @@ export default function Home() {
   const [page, setPage] = useState(0)
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadingRef = useRef(false)
-  
+
   // 필터링 상태
   const [selectedRegion, setSelectedRegion] = useState<string>('')
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [regions, setRegions] = useState<string[]>([])
-  const [categories, setCategories] = useState<Array<{id: string, name: string, description: string}>>([])
+  const [categories, setCategories] = useState<Array<{ id: string, name: string, description: string }>>([])
   const [showFilters, setShowFilters] = useState(false)
 
   // 검색 결과 상태
@@ -30,6 +30,18 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+
+  // 챗봇 상태
+  const [showChatbot, setShowChatbot] = useState(false)
+  const [chatMessage, setChatMessage] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: 1,
+      type: 'bot',
+      message: '쉽게 여행 계획을 작성해볼래?',
+      timestamp: new Date()
+    }
+  ])
 
   // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
@@ -71,14 +83,14 @@ export default function Home() {
   const loadFilterData = useCallback(async () => {
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
+
       // 지역 목록 로드
       const regionsResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/regions`)
       if (regionsResponse.ok) {
         const regionsData = await regionsResponse.json()
         setRegions(regionsData.regions)
       }
-      
+
       // 카테고리 목록 로드
       const categoriesResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/categories`)
       if (categoriesResponse.ok) {
@@ -98,9 +110,9 @@ export default function Home() {
     setLoading(true)
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
+
       let filteredCitySections: CitySection[] = []
-      
+
       // 지역만 선택된 경우: 카테고리별로 구분된 섹션 표시
       if (selectedRegion && !selectedCategory) {
         const params = new URLSearchParams({
@@ -108,18 +120,18 @@ export default function Home() {
           page: pageNum.toString(),
           limit: '8'
         })
-        
+
         const url = `${API_BASE_URL}/api/v1/attractions/filtered-by-category?${params}`
         console.log('Filtered by category URL:', url)
-        
+
         const response = await fetch(url)
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        
+
         const result = await response.json()
-        
+
         // 카테고리별 섹션을 CitySection 형식으로 변환
         result.categorySections.forEach((categorySection: any, index: number) => {
           filteredCitySections.push({
@@ -131,33 +143,33 @@ export default function Home() {
             recommendationScore: 90 - index * 5
           })
         })
-        
+
         setHasMore(result.hasMore)
-      } 
+      }
       // 지역과 카테고리 모두 선택된 경우: 기존 방식 사용
       else if (selectedRegion && selectedCategory) {
         const params = new URLSearchParams({
           page: pageNum.toString(),
           limit: '3'
         })
-        
+
         params.append('region', selectedRegion)
         params.append('category', selectedCategory)
-        
+
         const url = `${API_BASE_URL}/api/v1/attractions/filtered?${params}`
         console.log('Filtered attractions URL:', url)
-        
+
         const response = await fetch(url)
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        
+
         const result = await response.json()
-        
+
         // 지역별로 그룹화
         const groupedByRegion: { [key: string]: any[] } = {}
-        
+
         result.attractions.forEach((attraction: any) => {
           const region = attraction.region || '기타'
           if (!groupedByRegion[region]) {
@@ -165,7 +177,7 @@ export default function Home() {
           }
           groupedByRegion[region].push(attraction)
         })
-        
+
         // 각 지역별로 CitySection 생성
         Object.entries(groupedByRegion).forEach(([region, attractions], index) => {
           const cityName = attractions[0]?.city?.name || region
@@ -178,7 +190,7 @@ export default function Home() {
             recommendationScore: 85 - index * 5
           })
         })
-        
+
         setHasMore(result.hasMore)
       }
 
@@ -217,9 +229,9 @@ export default function Home() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (showFilters && 
-          !target.closest('.filter-panel') && 
-          !target.closest('input[placeholder="어디로 떠나볼까요?"]')) {
+      if (showFilters &&
+        !target.closest('.filter-panel') &&
+        !target.closest('input[placeholder="어디로 떠나볼까요?"]')) {
         setShowFilters(false)
       }
     }
@@ -253,31 +265,31 @@ export default function Home() {
   const handleSearch = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!searchQuery.trim()) return
-    
+
     setIsSearching(true)
     setSearchError(null)
-    
+
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}`)
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-      
+
       const results = await response.json()
-      
+
       // 중복 제거: 같은 이름과 주소를 가진 항목들을 제거
       const uniqueResults = (results.results || []).filter((item: any, index: number, array: any[]) => {
-        return array.findIndex((other: any) => 
-          other.name === item.name && 
+        return array.findIndex((other: any) =>
+          other.name === item.name &&
           other.address === item.address
         ) === index
       })
-      
+
       setSearchResults(uniqueResults)
       setShowSearchResults(true)
-      
+
     } catch (error) {
       console.error('검색 오류:', error)
       setSearchError('검색 중 오류가 발생했습니다. 다시 시도해주세요.')
@@ -294,6 +306,34 @@ export default function Home() {
     setSearchError(null)
   }
 
+  // 챗봇 관련 함수
+  const handleChatSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!chatMessage.trim()) return
+
+    // 사용자 메시지 추가
+    const userMessage = {
+      id: Date.now(),
+      type: 'user',
+      message: chatMessage,
+      timestamp: new Date()
+    }
+
+    setChatMessages(prev => [...prev, userMessage])
+    setChatMessage('')
+
+    // 간단한 봇 응답 (실제로는 API 호출)
+    setTimeout(() => {
+      const botResponse = {
+        id: Date.now() + 1,
+        type: 'bot',
+        message: '여행 계획 작성을 도와드릴게요! 어떤 지역으로 여행을 계획하고 계신가요?',
+        timestamp: new Date()
+      }
+      setChatMessages(prev => [...prev, botResponse])
+    }, 1000)
+  }
+
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
       {/* Logo */}
@@ -302,7 +342,7 @@ export default function Home() {
       </div>
 
       {/* Search Bar */}
-      <div className="px-4 mb-8 mt-20">
+      <div className="px-4 mb-16 mt-20">
         <form onSubmit={handleSearch} className="relative w-[90%] mx-auto">
           <input
             type="text"
@@ -351,12 +391,12 @@ export default function Home() {
                 ✕ 닫기
               </button>
             </div>
-            
+
             {/* 스크롤 가능한 검색 결과 컨테이너 - 화면의 절반 높이로 제한 */}
-            <div 
+            <div
               className="overflow-y-auto bg-[#0F1A31]/30 rounded-2xl p-4 scrollbar-thin scrollbar-thumb-[#3E68FF] scrollbar-track-transparent"
-              style={{ 
-                height: '50vh', 
+              style={{
+                height: '50vh',
                 maxHeight: '400px',
                 scrollbarWidth: 'thin',
                 scrollbarColor: '#3E68FF transparent'
@@ -367,7 +407,7 @@ export default function Home() {
                   <p className="text-red-300">{searchError}</p>
                 </div>
               )}
-              
+
               {searchResults.length === 0 && !isSearching && !searchError ? (
                 <div className="text-center py-8">
                   <div className="text-6xl mb-4">🔍</div>
@@ -394,7 +434,7 @@ export default function Home() {
                             {result.category === 'leisure_sports' && '⚽'}
                           </span>
                         </div>
-                        
+
                         {/* 정보 */}
                         <div className="flex-1 min-w-0">
                           <h3 className="text-white font-semibold text-lg mb-1 truncate">
@@ -459,11 +499,10 @@ export default function Home() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setSelectedRegion('')}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                      !selectedRegion 
-                        ? 'bg-[#3E68FF] text-white' 
-                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                    }`}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${!selectedRegion
+                      ? 'bg-[#3E68FF] text-white'
+                      : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                      }`}
                   >
                     전체
                   </button>
@@ -471,11 +510,10 @@ export default function Home() {
                     <button
                       key={region}
                       onClick={() => setSelectedRegion(region)}
-                      className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                        selectedRegion === region 
-                          ? 'bg-[#3E68FF] text-white' 
-                          : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                      }`}
+                      className={`px-3 py-1 rounded-full text-sm transition-colors ${selectedRegion === region
+                        ? 'bg-[#3E68FF] text-white'
+                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                        }`}
                     >
                       {region}
                     </button>
@@ -489,11 +527,10 @@ export default function Home() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setSelectedCategory('')}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                      !selectedCategory 
-                        ? 'bg-[#3E68FF] text-white' 
-                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                    }`}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${!selectedCategory
+                      ? 'bg-[#3E68FF] text-white'
+                      : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                      }`}
                   >
                     전체
                   </button>
@@ -501,11 +538,10 @@ export default function Home() {
                     <button
                       key={category.id}
                       onClick={() => setSelectedCategory(category.id)}
-                      className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                        selectedCategory === category.id 
-                          ? 'bg-[#3E68FF] text-white' 
-                          : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                      }`}
+                      className={`px-3 py-1 rounded-full text-sm transition-colors ${selectedCategory === category.id
+                        ? 'bg-[#3E68FF] text-white'
+                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
+                        }`}
                     >
                       {category.name}
                     </button>
@@ -567,6 +603,85 @@ export default function Home() {
         </main>
       )}
 
+      {/* Chatbot Icon - Fixed Position */}
+      <button
+        onClick={() => setShowChatbot(true)}
+        className="fixed bottom-24 right-6 z-50 w-16 h-16 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+      >
+        <img
+          src="/images/chat_icon.svg"
+          alt="챗봇"
+          className="w-12 h-12"
+        />
+      </button>
+
+      {/* Chatbot Modal */}
+      {showChatbot && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl">
+            {/* Header */}
+            <div className="bg-[#3E68FF] p-4 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <img
+                  src="/images/chat_icon.svg"
+                  alt="챗봇"
+                  className="w-12 h-12 bg-white rounded-full p-2"
+                />
+                <div>
+                  <h3 className="text-white font-semibold">쿼카</h3>
+                  <p className="text-blue-100 text-sm">여행 마스터</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowChatbot(false)}
+                className="text-white hover:text-blue-200 text-xl font-bold w-8 h-8 flex items-center justify-center"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+              {chatMessages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] ${msg.type === 'user'
+                    ? 'bg-[#3E68FF] text-white'
+                    : 'bg-white border border-gray-200'
+                    } rounded-2xl px-4 py-2 shadow-sm`}>
+                    <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
+                      {msg.message}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+
+            {/* Input */}
+            <div className="p-4 border-t border-gray-200 bg-white">
+              <form onSubmit={handleChatSubmit} className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  placeholder="메시지를 입력하세요..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent text-gray-800"
+                />
+                <button
+                  type="submit"
+                  disabled={!chatMessage.trim()}
+                  className="w-10 h-10 bg-[#3E68FF] hover:bg-[#4C7DFF] disabled:bg-gray-300 rounded-full flex items-center justify-center transition-colors"
+                >
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       <BottomNavigation />
     </div>
   )
@@ -583,7 +698,7 @@ function SectionCarousel({
   title: string
   cityName: string
   attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
-  categorySections?: Array<{category: string; categoryName: string; attractions: any[]; total: number}>
+  categorySections?: Array<{ category: string; categoryName: string; attractions: any[]; total: number }>
   onAttractionClick: (attractionId: string) => void
 }) {
   return (
@@ -594,9 +709,9 @@ function SectionCarousel({
           <h2 className="text-2xl md:text-3xl font-semibold text-[#94A9C9]">
             {title}
           </h2>
-          <div className="flex items-center mt-2 space-x-2">
+          {/* <div className="flex items-center mt-2 space-x-2">
             <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
-          </div>
+          </div> */}
         </div>
       </div>
 
@@ -614,7 +729,7 @@ function SectionCarousel({
                   {categorySection.total}개 장소
                 </span>
               </div>
-              
+
               {/* 카테고리별 장소 캐러셀 */}
               <div className="relative -mx-4 px-4">
                 <div
@@ -634,7 +749,7 @@ function SectionCarousel({
                     />
                   ))}
                 </div>
-                
+
                 {/* 좌/우 가장자리 페이드 */}
                 <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
                 <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#0B1220] to-transparent" />
@@ -700,8 +815,8 @@ function AttractionCard({
             <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
             </div>
-            
-            <img 
+
+            <img
               src={attraction.imageUrl}
               alt={attraction.name}
               className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
@@ -720,9 +835,9 @@ function AttractionCard({
                 if (fallback) fallback.style.display = 'flex';
               }}
             />
-            
+
             {/* 이미지 로드 실패 시 대체 UI */}
-            <div 
+            <div
               className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center"
               style={{ display: 'none' }}
             >
