@@ -114,10 +114,6 @@ export default function ProfilePage() {
       return
     }
 
-    console.log('=== fetchUserProfile 시작 ===')
-    console.log('세션 상태:', session)
-    console.log('백엔드 토큰:', (session as any)?.backendToken ? '있음' : '없음')
-
     setIsLoadingProfile(true)
     try {
       const headers: any = {
@@ -126,41 +122,24 @@ export default function ProfilePage() {
 
       if ((session as any)?.backendToken) {
         headers['Authorization'] = `Bearer ${(session as any).backendToken}`
-        console.log('Authorization 헤더 추가됨')
-      } else {
-        console.log('경고: backendToken이 없음')
       }
-
-      console.log('요청 헤더:', headers)
 
       const response = await fetch('/api/proxy/api/v1/profile/me', {
         headers: headers
       })
 
-      console.log('응답 상태:', response.status)
-      console.log('응답 OK:', response.ok)
-
       if (response.ok) {
         const profileData = await response.json()
-        console.log('프로필 데이터:', profileData)
         setUserProfile(profileData)
         
         // 여행 취향 정보가 있으면 상태에 설정
         if (profileData.persona || profileData.priority || profileData.accommodation || profileData.exploration) {
-          console.log('프로필에서 여행 취향 정보 발견:', {
-            persona: profileData.persona,
-            priority: profileData.priority,
-            accommodation: profileData.accommodation,
-            exploration: profileData.exploration
-          })
           setTravelPreferences({
             persona: profileData.persona || '',
             priority: profileData.priority || '',
             accommodation: profileData.accommodation || '',
             exploration: profileData.exploration || ''
           })
-        } else {
-          console.log('프로필에 여행 취향 정보가 없습니다.')
         }
       } else {
         const errorData = await response.json()
@@ -170,7 +149,6 @@ export default function ProfilePage() {
       console.error('프로필 정보 가져오기 오류:', error)
     } finally {
       setIsLoadingProfile(false)
-      console.log('=== fetchUserProfile 완료 ===')
     }
   }, [session])
 
@@ -188,16 +166,8 @@ export default function ProfilePage() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('=== 사용자 게시글 필터링 디버그 ===')
-        console.log('현재 세션 사용자 ID:', session.user?.id)
-        console.log('현재 세션 사용자 이메일:', session.user?.email)
-        console.log('전체 게시글 수:', data.posts?.length || 0)
-        console.log('게시글 user_id 샘플:', data.posts?.[0]?.user_id)
-
         // 현재 사용자의 게시글만 필터링
         const userPosts = data.posts.filter((post: Post) => post.user_id === session.user?.id)
-        console.log('필터링된 게시글 수:', userPosts.length)
-        console.log('==============================')
         setPosts(userPosts)
       } else {
         console.error('게시글 가져오기 실패')
@@ -459,7 +429,6 @@ export default function ProfilePage() {
       }
 
       const result = await response.json()
-      console.log('여행 취향 업데이트 성공:', result)
       alert('여행 취향이 업데이트되었습니다!')
 
       // 프로필 정보 다시 가져오기 (여행 취향 정보 포함)
@@ -908,14 +877,11 @@ export default function ProfilePage() {
                 className="w-full h-full object-cover"
               />
             ) : userProfile?.profile_image ? (
-              <>
-                <img
-                  src={userProfile.profile_image}
-                  alt="Profile"
-                  className="w-full h-full object-cover"
-                />
-                {console.log('프로필 이미지 표시 중:', userProfile.profile_image)}
-              </>
+              <img
+                src={userProfile.profile_image}
+                alt="Profile"
+                className="w-full h-full object-cover"
+              />
             ) : session.user?.image ? (
               <img
                 src={session.user.image}
