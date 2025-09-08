@@ -17,7 +17,7 @@ export default function PlanCalendar() {
   const handleDateClick = (date: Date) => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    
+
     // 과거 날짜는 선택 불가
     if (date < today) return
 
@@ -50,7 +50,7 @@ export default function PlanCalendar() {
   }
 
   const isDateSelected = (date: Date) => {
-    return selectedDates.some(selected => 
+    return selectedDates.some(selected =>
       selected.getTime() === date.getTime()
     )
   }
@@ -71,11 +71,11 @@ export default function PlanCalendar() {
 
   const handleSelectComplete = () => {
     if (selectedDates.length === 0) return
-    
+
     // 선택된 날짜들을 query parameter로 전달하며 세부 일정 페이지로 이동
     const startDate = selectedDates[0].toISOString().split('T')[0]
     const endDate = selectedDates[selectedDates.length - 1].toISOString().split('T')[0]
-    
+
     // 기존 itinerary 페이지를 활용, general을 attractionId로 사용
     router.push(`/itinerary/general?startDate=${startDate}&endDate=${endDate}&days=${selectedDates.length}`)
   }
@@ -87,7 +87,7 @@ export default function PlanCalendar() {
     const firstDay = new Date(year, month, 1)
     const lastDay = new Date(year, month + 1, 0)
     const startDate = new Date(firstDay)
-    
+
     // 월요일부터 시작하도록 조정
     const dayOfWeek = firstDay.getDay()
     const mondayStart = dayOfWeek === 0 ? 6 : dayOfWeek - 1
@@ -95,13 +95,13 @@ export default function PlanCalendar() {
 
     const days = []
     const current = new Date(startDate)
-    
+
     // 6주간의 날짜 생성 (42일)
     for (let i = 0; i < 42; i++) {
       days.push(new Date(current))
       current.setDate(current.getDate() + 1)
     }
-    
+
     return days
   }
 
@@ -112,15 +112,15 @@ export default function PlanCalendar() {
   return (
     <div className="min-h-screen bg-[#0B1220] text-white overflow-y-auto no-scrollbar">
       {/* Header */}
-      <div className="flex items-center justify-between p-4">
-        <button
+      <div className="flex items-center justify-between p-4 h-20">
+        {/* <button
           onClick={handleBack}
           className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-        </button>
+        </button> */}
       </div>
 
       {/* Title */}
@@ -145,11 +145,11 @@ export default function PlanCalendar() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          
+
           <h2 className="text-xl font-semibold text-[#94A9C9]">
             {currentDate.getFullYear()}년 {currentDate.getMonth() + 1}월
           </h2>
-          
+
           <button
             onClick={handleNextMonth}
             className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
@@ -206,7 +206,7 @@ export default function PlanCalendar() {
             <p className="text-[#6FA0E6] text-sm mb-1">선택된 여행 기간</p>
             <p className="text-white font-semibold">
               {selectedDates.length === 1 ? (
-                isSelectingRange ? 
+                isSelectingRange ?
                   `${selectedDates[0].getMonth() + 1}월 ${selectedDates[0].getDate()}일부터...` :
                   `${selectedDates[0].getMonth() + 1}월 ${selectedDates[0].getDate()}일 (당일치기)`
               ) : (
@@ -224,8 +224,8 @@ export default function PlanCalendar() {
           disabled={selectedDates.length === 0}
           className={`
             w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
-            ${selectedDates.length > 0 
-              ? 'bg-[#3E68FF] hover:bg-[#4C7DFF] text-white' 
+            ${selectedDates.length > 0
+              ? 'bg-[#3E68FF] hover:bg-[#4C7DFF] text-white'
               : 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
             }
           `}
