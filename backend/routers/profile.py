@@ -84,7 +84,27 @@ async def get_current_user_profile(
     current_user: User = Depends(get_current_user)
 ):
     """현재 사용자의 프로필 정보를 가져옵니다."""
-    return current_user
+    # 사용자의 여행 취향 정보도 함께 가져오기
+    user_preference = db.query(UserPreference).filter(
+        UserPreference.user_id == current_user.user_id
+    ).first()
+    
+    # UserResponse 객체 생성 시 여행 취향 정보 포함
+    user_data = {
+        "user_id": current_user.user_id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "age": current_user.age,
+        "nationality": current_user.nationality,
+        "profile_image": current_user.profile_image,
+        "created_at": current_user.created_at,
+        "persona": user_preference.persona if user_preference else None,
+        "priority": user_preference.priority if user_preference else None,
+        "accommodation": user_preference.accommodation if user_preference else None,
+        "exploration": user_preference.exploration if user_preference else None
+    }
+    
+    return UserResponse(**user_data)
 
 
 @router.put("/image", response_model=UserResponse)
