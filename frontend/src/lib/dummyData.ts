@@ -69,6 +69,7 @@ export const fetchRecommendations = async (
       headers['Authorization'] = `Bearer ${token}`
     }
     
+    const url = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?limit=${limit}`
     
     const response = await fetch(url, {
       method: 'GET',
