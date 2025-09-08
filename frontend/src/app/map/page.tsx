@@ -2514,7 +2514,7 @@ export default function MapPage() {
                       setTimeout(() => {
                         setSaveToast({ show: false, message: '', type: 'success' });
                         router.push('/profile');
-                      }, 1500);
+                      }, 1000);
                       
                       closeSaveItinerary();
                     } catch (error) {
