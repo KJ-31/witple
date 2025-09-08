@@ -21,6 +21,11 @@ class UserResponse(BaseModel):
     nationality: Optional[str] = None
     profile_image: Optional[str] = None
     created_at: Optional[datetime] = None
+    # 여행 취향 정보 추가
+    persona: Optional[str] = None
+    priority: Optional[str] = None
+    accommodation: Optional[str] = None
+    exploration: Optional[str] = None
     
     class Config:
         from_attributes = True
