@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
-import { saveTrip } from '@/app/api'
+import { saveTrip, updateTrip } from '@/app/api'
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
@@ -82,12 +82,19 @@ export default function MapPage() {
   const sourceParam = searchParams.get('source')
   const tripTitleParam = searchParams.get('tripTitle')
   const tripDescriptionParam = searchParams.get('tripDescription')
+  const tripIdParam = searchParams.get('tripId')
   
   // profile에서 온 경우 판단
   const isFromProfile = sourceParam === 'profile'
   
   // 편집 모드 상태 (profile에서 온 경우에만 사용)
   const [isEditMode, setIsEditMode] = useState(false)
+  const [editTitle, setEditTitle] = useState(tripTitleParam ? decodeURIComponent(tripTitleParam) : '')
+  const [editDescription, setEditDescription] = useState(tripDescriptionParam && tripDescriptionParam.trim() 
+    ? decodeURIComponent(tripDescriptionParam) 
+    : ''
+  )
+  const [isUpdatingTrip, setIsUpdatingTrip] = useState(false)
   
   const [selectedItineraryPlaces, setSelectedItineraryPlaces] = useState<SelectedPlace[]>([])
   const [categoryPlaces, setCategoryPlaces] = useState<AttractionData[]>([])
@@ -310,6 +317,98 @@ export default function MapPage() {
 
     loadSelectedPlaces()
   }, [placesParam, dayNumbersParam, sourceTablesParam])
+
+  // Trip 업데이트 함수
+  const handleUpdateTrip = useCallback(async () => {
+    if (!tripIdParam || !isFromProfile) return
+    
+    setIsUpdatingTrip(true)
+    try {
+      // places 데이터를 백엔드 형식에 맞게 변환
+      // 일차별로 order를 1부터 시작하도록 계산
+      const dayOrderMap: { [key: number]: number } = {}
+      
+      const placesForBackend = selectedItineraryPlaces.map((place) => {
+        let tableName = 'general'
+        let placeId = place.id || ''
+        const dayNumber = place.dayNumber || 1
+
+        // 각 일차별로 order 카운트
+        if (!dayOrderMap[dayNumber]) {
+          dayOrderMap[dayNumber] = 0
+        }
+        dayOrderMap[dayNumber] += 1
+
+        // ID 파싱 로직 개선
+        if (place.id && typeof place.id === 'string' && place.id.includes('_')) {
+          const parts = place.id.split('_')
+          if (parts.length >= 2) {
+            // leisure_sports_123 같은 경우 처리
+            if (parts[0] === 'leisure' && parts[1] === 'sports' && parts.length >= 3) {
+              tableName = 'leisure_sports'
+              placeId = parts[2]
+            } else {
+              tableName = parts[0]
+              placeId = parts[1]
+            }
+          }
+        } else {
+          // place.id가 없거나 _가 없는 경우
+          tableName = 'general'
+          placeId = place.id || ''
+        }
+
+        console.log(`Place parsing: ${place.id} -> table_name: ${tableName}, id: ${placeId}`)
+
+        return {
+          table_name: tableName,
+          id: placeId,
+          name: place.name || '',
+          dayNumber: dayNumber,
+          order: dayOrderMap[dayNumber]
+        }
+      })
+      
+      const tripData = {
+        title: editTitle,
+        description: editDescription || null,
+        places: placesForBackend,
+        start_date: startDateParam || undefined,
+        end_date: endDateParam || undefined,
+        days: daysParam ? parseInt(daysParam) : undefined
+      }
+      
+      console.log('Original selectedItineraryPlaces:', JSON.stringify(selectedItineraryPlaces, null, 2))
+      console.log('Transformed placesForBackend:', JSON.stringify(placesForBackend, null, 2))
+      
+      await updateTrip(parseInt(tripIdParam), tripData)
+      
+      // 성공 메시지 표시
+      console.log('여행 일정이 성공적으로 업데이트되었습니다!')
+      
+      // 편집 모드 종료
+      setIsEditMode(false)
+      
+    } catch (error: any) {
+      console.error('Trip 업데이트 오류:', error)
+      console.error('에러 응답 데이터:', error.response?.data)
+      
+      let errorMessage = error.message
+      if (error.response?.data?.detail) {
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map((err: any) => 
+            typeof err === 'string' ? err : JSON.stringify(err)
+          ).join(', ')
+        } else {
+          errorMessage = error.response.data.detail
+        }
+      }
+      
+      console.error(`여행 일정 업데이트에 실패했습니다: ${errorMessage}`)
+    } finally {
+      setIsUpdatingTrip(false)
+    }
+  }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
@@ -1665,14 +1764,32 @@ export default function MapPage() {
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
                 {isFromProfile && tripTitleParam ? (
-                  <div>
-                    <h2 className="text-xl font-bold text-[#3E68FF]">{decodeURIComponent(tripTitleParam)}</h2>
-                    <p className="text-sm text-[#94A9C9]">
-                      {tripDescriptionParam && tripDescriptionParam.trim() 
-                        ? decodeURIComponent(tripDescriptionParam)
-                        : '저장된 여행 일정'
-                      }
-                    </p>
+                  <div className="flex-1 mr-4">
+                    {isEditMode ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="text-xl font-bold text-[#3E68FF] bg-transparent border-b border-[#3E68FF]/30 focus:border-[#3E68FF] outline-none w-full"
+                          placeholder="여행 제목"
+                        />
+                        <input
+                          type="text"
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          className="text-sm text-[#94A9C9] bg-transparent border-b border-[#94A9C9]/30 focus:border-[#94A9C9] outline-none w-full"
+                          placeholder="여행 설명"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <h2 className="text-xl font-bold text-[#3E68FF]">{editTitle}</h2>
+                        <p className="text-sm text-[#94A9C9]">
+                          {editDescription || '저장된 여행 일정'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
@@ -1680,13 +1797,24 @@ export default function MapPage() {
                 <div className="flex items-center space-x-2">
                   {isFromProfile && (
                     <button
-                      onClick={() => setIsEditMode(!isEditMode)}
-                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors flex items-center space-x-1"
+                      onClick={async () => {
+                        if (isEditMode) {
+                          // 편집 완료 - trip 업데이트
+                          await handleUpdateTrip()
+                        } else {
+                          // 편집 시작
+                          setIsEditMode(true)
+                        }
+                      }}
+                      disabled={isUpdatingTrip}
+                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors flex items-center space-x-1 disabled:opacity-50"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       </svg>
-                      <span>{isEditMode ? '편집 완료' : '편집'}</span>
+                      <span>
+                        {isUpdatingTrip ? '저장 중...' : (isEditMode ? '편집 완료' : '편집')}
+                      </span>
                     </button>
                   )}
                   {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (

@@ -597,7 +597,8 @@ export default function ProfilePage() {
       baseAttraction: 'general',
       source: 'profile',
       tripTitle: trip.title,
-      tripDescription: trip.description || ''
+      tripDescription: trip.description || '',
+      tripId: trip.id.toString()
     })
     
     // map 페이지로 이동
