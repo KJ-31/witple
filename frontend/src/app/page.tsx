@@ -246,7 +246,6 @@ export default function Home() {
       }
       
       const results = await response.json()
-      console.log('검색 결과:', results)
       
       // 중복 제거: 같은 이름과 주소를 가진 항목들을 제거
       const uniqueResults = (results.results || []).filter((item: any, index: number, array: any[]) => {

@@ -110,7 +110,6 @@ export default function ProfilePage() {
   // 사용자 프로필 정보 가져오기
   const fetchUserProfile = useCallback(async () => {
     if (!session) {
-      console.log('fetchUserProfile: 세션 없음')
       return
     }
 
@@ -188,7 +187,6 @@ export default function ProfilePage() {
       const token = getToken()
       
       if (!token) {
-        console.log('토큰 없음 - 저장된 장소 로딩 건너뛰기')
         return
       }
       
@@ -219,7 +217,6 @@ export default function ProfilePage() {
       const token = getToken()
       
       if (!token) {
-        console.log('토큰 없음 - 여행 목록 로딩 건너뛰기')
         return
       }
       
@@ -302,10 +299,7 @@ export default function ProfilePage() {
 
   // 프로필 이미지 업로드
   const handleProfileImageUpload = async () => {
-    console.log('=== 프로필 이미지 업로드 시작 ===')
-
     if (!selectedImage || !session?.user?.id) {
-      console.log('업로드 취소: 이미지 또는 세션 없음')
       alert('업로드 취소: 이미지 또는 세션 없음')
       return
     }
@@ -319,13 +313,7 @@ export default function ProfilePage() {
       // 백엔드 토큰이 있으면 Authorization 헤더 추가
       if ((session as any)?.backendToken) {
         headers['Authorization'] = `Bearer ${(session as any).backendToken}`
-        console.log('Authorization 헤더 추가됨')
-      } else {
-        console.log('경고: backendToken이 없음')
       }
-
-      console.log('요청 헤더:', headers)
-      console.log('이미지 데이터 길이:', selectedImage.length)
 
       const response = await fetch('/api/proxy/api/v1/profile/image', {
         method: 'PUT',
@@ -335,17 +323,12 @@ export default function ProfilePage() {
         })
       })
 
-      console.log('응답 상태:', response.status)
-      console.log('응답 OK:', response.ok)
-
       if (!response.ok) {
         const errorData = await response.json()
-        console.error('서버 에러 응답:', errorData)
         throw new Error(errorData.detail || '프로필 이미지 업로드 실패')
       }
 
       const result = await response.json()
-      console.log('프로필 이미지 업데이트 성공:', result)
 
       alert('프로필 이미지가 업데이트되었습니다!')
       setSelectedImage(null)
@@ -357,7 +340,6 @@ export default function ProfilePage() {
       alert(`이미지 업데이트에 실패했습니다: ${error.message}`)
     } finally {
       setIsUploadingImage(false)
-      console.log('=== 프로필 이미지 업로드 종료 ===')
     }
   }
 

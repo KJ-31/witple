@@ -1247,15 +1247,6 @@ export default function MapPage() {
           duration: leg.duration?.text || '알 수 없음',
           transitDetails: leg.steps?.map((step: any) => {
             // 교통수단 정보 디버깅을 위한 로그
-            if (step.transit) {
-              console.log('Transit step data:', {
-                line_name: step.transit.line?.name,
-                line_short_name: step.transit.line?.short_name,
-                vehicle_name: step.transit.line?.vehicle?.name,
-                vehicle_type: step.transit.line?.vehicle?.type,
-                full_step: step.transit
-              });
-            }
             
             return {
               instruction: step.instructions?.replace(/<[^>]*>/g, ''), // HTML 태그 제거
@@ -1433,19 +1424,10 @@ export default function MapPage() {
 
       const lockedCount = constraints.filter(c => c.locked).length;
 
-      console.log(`${dayNumber}일차 최적화 시작:`, {
-        origin: firstPlace.name,
-        destinations: destinationNames,
-        constraints: constraints,
-        lockedCount: lockedCount,
-        lockedPlaces: lockedPlaces
-      });
 
       // 제약 조건이 있는 최적화 실행
       const optimized = optimizeRouteOrderWithConstraints(originCoords, destinationCoords, destinationNames, constraints);
       
-      console.log(`${dayNumber}일차 최적화된 순서:`, optimized.optimizedNames);
-      console.log(`${dayNumber}일차 예상 총 거리:`, optimized.totalDistance.toFixed(1), 'km');
 
       updateStatus(`${dayNumber}일차 경로 최적화 완료! (${lockedCount}개 순서 고정) 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
 
@@ -1477,7 +1459,6 @@ export default function MapPage() {
         });
       }
 
-      console.log(`${dayNumber}일차 최적화된 경로 구간:`, segments);
       await renderRoute(segments, true);
 
     } catch (error) {
@@ -2353,7 +2334,6 @@ export default function MapPage() {
                         days: daysParam ? parseInt(daysParam) : undefined
                       };
                       
-                      console.log('저장할 데이터:', tripData);
                       
                       await saveTrip(tripData);
                       
