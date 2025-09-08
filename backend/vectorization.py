@@ -366,16 +366,43 @@ class RecommendationEngine:
         return final_scores.tolist()
 
     async def get_fallback_places(self, limit: int = 20) -> List[Dict]:
-        """개인화 추천 실패시 실제 DB 데이터에서 간단한 장소 반환"""
+        """개인화 추천 실패시 인기도 기반 장소 반환"""
         conn = await asyncpg.connect(self.db_url)
         
         try:
-            # place_recommendations 테이블에서 간단히 데이터 가져오기
+            # 인기도와 신선성 기반 가중 샘플링
             query = """
-                SELECT place_id, table_name, name, region, city, latitude, longitude, 
-                       overview as description, image_urls
-                FROM place_recommendations 
-                ORDER BY RANDOM() 
+                WITH place_popularity AS (
+                    SELECT 
+                        ual.place_category as table_name,
+                        ual.place_id,
+                        SUM(aw.weight * COALESCE(ual.action_value, 1)) as popularity_score,
+                        MAX(ual.created_at) as last_activity,
+                        COUNT(*) as interaction_count
+                    FROM user_action_logs ual
+                    JOIN action_weights aw ON ual.action_type = aw.action_type
+                    WHERE ual.created_at >= NOW() - INTERVAL '90 days'
+                    GROUP BY ual.place_category, ual.place_id
+                )
+                SELECT pr.place_id, pr.table_name, pr.name, pr.region, pr.city, pr.latitude, pr.longitude, 
+                       pr.overview as description, pr.image_urls,
+                       COALESCE(pp.popularity_score, 0) as popularity_score,
+                       -- 신선성과 인기도를 반영한 가중치
+                       (COALESCE(pp.popularity_score, 0) * 0.4 + 
+                        CASE 
+                            WHEN pp.last_activity IS NULL THEN 0.2
+                            WHEN pp.last_activity >= NOW() - INTERVAL '7 days' THEN 1.0
+                            WHEN pp.last_activity >= NOW() - INTERVAL '30 days' THEN 0.6
+                            ELSE 0.2
+                        END * 0.3 +
+                        random() * 0.3) as final_weight
+                FROM place_recommendations pr
+                LEFT JOIN place_popularity pp ON pr.place_id = pp.place_id AND pr.table_name = pp.table_name
+                WHERE pr.name IS NOT NULL 
+                  AND pr.overview IS NOT NULL 
+                  AND pr.image_urls IS NOT NULL 
+                  AND pr.image_urls != 'null'::jsonb
+                ORDER BY final_weight DESC
                 LIMIT $1
             """
             
@@ -393,7 +420,7 @@ class RecommendationEngine:
                     'longitude': float(place['longitude']) if place['longitude'] else 0.0,
                     'description': place['description'] or '설명 없음',
                     'image_urls': place['image_urls'],
-                    'similarity_score': 0.7  # 기본 점수
+                    'similarity_score': 0.7 + (place.get('popularity_score', 0) * 0.1)  # 인기도 반영
                 })
             
             return results
@@ -507,8 +534,24 @@ class RecommendationEngine:
             if conditions:
                 query += " AND " + " AND ".join(conditions)
             
-            # 성능을 위해 전체가 아닌 샘플링 (큰 데이터셋인 경우)
-            query += " ORDER BY RANDOM() LIMIT 1000"
+            # 단순화: 선호 태그 기반 필터링만 적용하고 랜덤 샘플링
+            # 사용자 선호 태그가 있으면 우선 필터링
+            user_tags = [tag['tag'] for tag in preferences.get('tags', [])]
+            
+            if user_tags and conditions:
+                # 태그 기반 필터링을 위한 추가 조건 - 간단한 텍스트 매칭
+                tag_conditions = []
+                for i, tag in enumerate(user_tags[:3]):  # 상위 3개 태그만
+                    param_count = len(params) + 1
+                    tag_conditions.append(f"(pr.overview ILIKE ${param_count})")
+                    params.append(f'%{tag}%')
+                    param_count += 1
+                
+                if tag_conditions:
+                    query += f" AND ({' OR '.join(tag_conditions)})"
+            
+            # 성능을 위한 랜덤 샘플링
+            query += " ORDER BY random() LIMIT 1000"
             
             places = await conn.fetch(query, *params)
             
@@ -556,6 +599,16 @@ class RecommendationEngine:
             
             return results[:limit]
             
+        except Exception as e:
+            logger.error(f"Error in personalized recommendations: {str(e)}")
+            # 개인화 추천 실패 시 간단한 fallback
+            try:
+                fallback_places = await self.get_fallback_places(limit)
+                return fallback_places
+            except Exception as fallback_error:
+                logger.error(f"Fallback also failed: {str(fallback_error)}")
+                return []
+            
         finally:
             await conn.close()
 
@@ -582,10 +635,10 @@ class RecommendationEngine:
         # 태그 선호도 추가 (가중치 반영)
         for tag_pref in preferences['tags']:
             tag_name = tag_pref['tag']
-            calculated_weight = tag_pref['calculated_weight']
+            calculated_weight = tag_pref.get('calculated_weight', 1.0)
             
             # 가중치에 따라 텍스트 반복 (높은 가중치일수록 더 많은 영향)
-            repeat_count = max(1, int(calculated_weight))  # 최소 1번, 가중치에 따라 반복
+            repeat_count = max(1, int(calculated_weight * 2))  # 가중치 2배로 증폭하여 반영
             for _ in range(repeat_count):
                 preference_texts.append(tag_name)
             
@@ -599,12 +652,16 @@ class RecommendationEngine:
             conn = await asyncpg.connect(self.db_url)
             try:
                 for action in high_weight_actions[:10]:  # 최근 10개만
-                    place_info = await conn.fetchrow(f"""
-                        SELECT name, overview FROM {action['place_category']} 
-                        WHERE id = $1
-                    """, action['place_id'])
-                    if place_info and place_info['overview']:
-                        action_places.append(f"{place_info['name']} {place_info['overview']}")
+                    try:
+                        place_info = await conn.fetchrow(f"""
+                            SELECT name, overview FROM {action['place_category']} 
+                            WHERE id = $1
+                        """, action['place_id'])
+                        if place_info and place_info['overview']:
+                            action_places.append(f"{place_info['name']} {place_info['overview']}")
+                    except Exception:
+                        # 테이블이 존재하지 않거나 쿼리 오류시 무시
+                        continue
             finally:
                 await conn.close()
         
