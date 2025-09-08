@@ -86,6 +86,9 @@ export default function MapPage() {
   // profile에서 온 경우 판단
   const isFromProfile = sourceParam === 'profile'
   
+  // 편집 모드 상태 (profile에서 온 경우에만 사용)
+  const [isEditMode, setIsEditMode] = useState(false)
+  
   const [selectedItineraryPlaces, setSelectedItineraryPlaces] = useState<SelectedPlace[]>([])
   const [categoryPlaces, setCategoryPlaces] = useState<AttractionData[]>([])
   const [categoryLoading, setCategoryLoading] = useState(false)
@@ -1519,8 +1522,8 @@ export default function MapPage() {
         </button>
       </div>
 
-      {/* Search Bar - profile에서 온 경우 숨기기 */}
-      {!isFromProfile && (
+      {/* Search Bar - profile에서 온 경우 편집 모드에서만 표시 */}
+      {(!isFromProfile || isEditMode) && (
         <div className="absolute top-4 left-16 right-4 z-40">
         <form onSubmit={handleSearch} className="relative">
           <div className="relative">
@@ -1544,8 +1547,8 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* Category Filter - profile에서 온 경우 숨기기 */}
-      {!isFromProfile && (
+      {/* Category Filter - profile에서 온 경우 편집 모드에서만 표시 */}
+      {(!isFromProfile || isEditMode) && (
       <div className="absolute top-20 left-4 right-4 z-40">
         <div className="flex space-x-2 overflow-x-auto no-scrollbar">
           {categories.map(category => (
@@ -1675,6 +1678,17 @@ export default function MapPage() {
                   <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
                 )}
                 <div className="flex items-center space-x-2">
+                  {isFromProfile && (
+                    <button
+                      onClick={() => setIsEditMode(!isEditMode)}
+                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors flex items-center space-x-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      <span>{isEditMode ? '편집 완료' : '편집'}</span>
+                    </button>
+                  )}
                   {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (
                     <button
                       onClick={clearRoute}
@@ -1687,7 +1701,7 @@ export default function MapPage() {
                       <span>경로 지우기</span>
                     </button>
                   )}
-                  {!isFromProfile && (
+                  {(!isFromProfile || isEditMode) && (
                     <button
                       onClick={() => setShowItinerary(false)}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
@@ -1849,18 +1863,19 @@ export default function MapPage() {
                             </div>
                             
                             {/* 잠금 버튼 - 휴지통 왼쪽 */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleLockPlace(place.id, day);
-                              }}
-                              className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
-                                lockedPlaces[`${place.id}_${day}`] 
-                                  ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
-                                  : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
-                              }`}
-                              title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
-                            >
+                            {(!isFromProfile || isEditMode) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleLockPlace(place.id, day);
+                                }}
+                                className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
+                                  lockedPlaces[`${place.id}_${day}`] 
+                                    ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
+                                    : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
+                                }`}
+                                title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
+                              >
                               {lockedPlaces[`${place.id}_${day}`] ? (
                                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -1870,10 +1885,12 @@ export default function MapPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
                                 </svg>
                               )}
-                            </button>
+                              </button>
+                            )}
 
                             {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
-                            <button
+                            {(!isFromProfile || isEditMode) && (
+                              <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openDeleteConfirm(place, day);
@@ -1881,10 +1898,11 @@ export default function MapPage() {
                               className="absolute -top-2 -right-2 w-8 h-8 bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border border-[#3E68FF]/30 hover:border-[#3E68FF]/50 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10"
                               title="일정에서 제거"
                             >
-                              <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-                            </button>
+                                <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            )}
 
                             <div className="flex items-start justify-between">
                               <div 
@@ -2141,7 +2159,7 @@ export default function MapPage() {
             </div>
           )}
           
-          {/* 일정 저장하기 버튼 - profile에서 온 경우 숨기기 */}
+          {/* 일정 저장/수정하기 버튼 - 편집 모드에서는 숨기기 */}
           {showItinerary && selectedItineraryPlaces.length > 0 && !isFromProfile && (
             <div className="px-4 pb-8 pt-4">
               <button
