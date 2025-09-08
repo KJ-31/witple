@@ -169,7 +169,8 @@ async def create_trip(
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number]  # 일차별로 1부터 시작
+                    "order": day_counters[day_number],  # 일차별로 1부터 시작
+                    "isLocked": place.get("isLocked", False)  # 잠금 상태 추가
                 }
                 simplified_places.append(simplified_place)
         
@@ -271,7 +272,8 @@ async def update_trip(
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number]  # 일차별로 1부터 시작
+                    "order": day_counters[day_number],  # 일차별로 1부터 시작
+                    "isLocked": place.get("isLocked", False)  # 잠금 상태 추가
                 }
                 simplified_places.append(simplified_place)
         

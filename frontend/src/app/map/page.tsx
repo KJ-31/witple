@@ -84,6 +84,7 @@ export default function MapPage() {
   const tripDescriptionParam = searchParams.get('tripDescription')
   const tripIdParam = searchParams.get('tripId')
   const editModeParam = searchParams.get('editMode')
+  const lockedPlacesParam = searchParams.get('lockedPlaces')
   
   // profile에서 온 경우 판단
   const isFromProfile = sourceParam === 'profile'
@@ -165,6 +166,7 @@ export default function MapPage() {
     message: string
     type: 'success' | 'error'
   }>({ show: false, message: '', type: 'success' })
+
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -315,6 +317,19 @@ export default function MapPage() {
         }
         
         setSelectedItineraryPlaces(places)
+        
+        // 잠금 상태 복원
+        if (lockedPlacesParam) {
+          console.log('lockedPlacesParam:', lockedPlacesParam)
+          const lockedKeys = lockedPlacesParam.split(',')
+          console.log('lockedKeys:', lockedKeys)
+          const restoredLockedPlaces: {[key: string]: boolean} = {}
+          lockedKeys.forEach(key => {
+            restoredLockedPlaces[key] = true
+          })
+          console.log('restoredLockedPlaces:', restoredLockedPlaces)
+          setLockedPlaces(restoredLockedPlaces)
+        }
       } catch (error) {
         setError('선택된 장소들을 불러올 수 없습니다.')
       } finally {
@@ -323,7 +338,7 @@ export default function MapPage() {
     }
 
     loadSelectedPlaces()
-  }, [placesParam, dayNumbersParam, sourceTablesParam])
+  }, [placesParam, dayNumbersParam, sourceTablesParam, lockedPlacesParam])
 
   // Trip 업데이트 함수
   const handleUpdateTrip = useCallback(async () => {
@@ -2021,7 +2036,12 @@ export default function MapPage() {
                                 }`}
                                 title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
                               >
-                              {lockedPlaces[`${place.id}_${day}`] ? (
+                              {(() => {
+                                const lockKey = `${place.id}_${day}`;
+                                const isLocked = lockedPlaces[lockKey];
+                                console.log(`장소 ${place.name} (${place.id}) - 키: ${lockKey}, 잠금상태: ${isLocked}`);
+                                return isLocked;
+                              })() ? (
                                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                 </svg>
@@ -2511,11 +2531,17 @@ export default function MapPage() {
                     }
                     
                     try {
+                      // places에 잠금 상태 추가
+                      const placesWithLockStatus = selectedItineraryPlaces.map(place => ({
+                        ...place,
+                        isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                      }));
+
                       // API로 DB에 저장
                       const tripData = {
                         title: saveItineraryModal.title.trim(),
                         description: saveItineraryModal.description.trim() || undefined,
-                        places: selectedItineraryPlaces,
+                        places: placesWithLockStatus,
                         startDate: startDateParam || undefined,
                         endDate: endDateParam || undefined,
                         days: daysParam ? parseInt(daysParam) : undefined

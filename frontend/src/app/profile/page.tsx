@@ -27,6 +27,7 @@ interface TripPlace {
   }
   cityName?: string
   isPinned?: boolean
+  isLocked?: boolean
 }
 
 interface Trip {
@@ -629,6 +630,12 @@ export default function ProfilePage() {
     const dayNumbers = trip.places.map(place => place.dayNumber.toString())
     const sourceTables = trip.places.map(place => place.table_name)
     
+    // 잠금 상태 정보 (전체 식별자_dayNumber 형태로 잠금된 장소들의 키)
+    const lockedPlaceKeys = trip.places
+      .filter(place => place.isLocked)
+      .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
+    console.log('lockedPlaceKeys:', lockedPlaceKeys)
+    
     // 날짜 차이 계산
     const startDate = new Date(trip.start_date)
     const endDate = new Date(trip.end_date)
@@ -646,7 +653,8 @@ export default function ProfilePage() {
       source: 'profile',
       tripTitle: trip.title,
       tripDescription: trip.description || '',
-      tripId: trip.id.toString()
+      tripId: trip.id.toString(),
+      ...(lockedPlaceKeys.length > 0 && { lockedPlaces: lockedPlaceKeys.join(',') })
     })
     
     // map 페이지로 이동 (보기 모드 - long press 불가)
@@ -664,6 +672,12 @@ export default function ProfilePage() {
     const placeIds = trip.places.map(place => `${place.table_name}_${place.id}`)
     const dayNumbers = trip.places.map(place => place.dayNumber.toString())
     const sourceTables = trip.places.map(place => place.table_name)
+    
+    // 잠금 상태 정보 (전체 식별자_dayNumber 형태로 잠금된 장소들의 키)
+    const lockedPlaceKeys = trip.places
+      .filter(place => place.isLocked)
+      .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
+    console.log('lockedPlaceKeys:', lockedPlaceKeys)
     
     // 날짜 차이 계산
     const startDate = new Date(trip.start_date)
@@ -683,7 +697,8 @@ export default function ProfilePage() {
       tripTitle: trip.title,
       tripDescription: trip.description || '',
       tripId: trip.id.toString(),
-      editMode: 'true' // 편집 모드 플래그 추가
+      editMode: 'true', // 편집 모드 플래그 추가
+      ...(lockedPlaceKeys.length > 0 && { lockedPlaces: lockedPlaceKeys.join(',') })
     })
     
     // map 페이지로 이동 (편집 모드 - long press 가능)
