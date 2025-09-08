@@ -144,6 +144,24 @@ export default function ProfilePage() {
         const profileData = await response.json()
         console.log('프로필 데이터:', profileData)
         setUserProfile(profileData)
+        
+        // 여행 취향 정보가 있으면 상태에 설정
+        if (profileData.persona || profileData.priority || profileData.accommodation || profileData.exploration) {
+          console.log('프로필에서 여행 취향 정보 발견:', {
+            persona: profileData.persona,
+            priority: profileData.priority,
+            accommodation: profileData.accommodation,
+            exploration: profileData.exploration
+          })
+          setTravelPreferences({
+            persona: profileData.persona || '',
+            priority: profileData.priority || '',
+            accommodation: profileData.accommodation || '',
+            exploration: profileData.exploration || ''
+          })
+        } else {
+          console.log('프로필에 여행 취향 정보가 없습니다.')
+        }
       } else {
         const errorData = await response.json()
         console.error('프로필 정보 가져오기 실패:', errorData)
@@ -265,7 +283,7 @@ export default function ProfilePage() {
   // 세션이 있을 때 프로필 정보와 게시글 가져오기
   useEffect(() => {
     if (session) {
-      fetchUserProfile()
+      fetchUserProfile() // 프로필 정보에 여행 취향도 포함됨
       fetchUserPosts()
       loadSavedLocations()
       loadTrips()
@@ -443,6 +461,9 @@ export default function ProfilePage() {
       const result = await response.json()
       console.log('여행 취향 업데이트 성공:', result)
       alert('여행 취향이 업데이트되었습니다!')
+
+      // 프로필 정보 다시 가져오기 (여행 취향 정보 포함)
+      await fetchUserProfile()
 
     } catch (error: any) {
       console.error('여행 취향 업데이트 오류:', error)
