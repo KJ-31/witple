@@ -423,7 +423,14 @@ export default function Home() {
         {/* 데이터가 없을 때 */}
         {!loading && citySections.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
+            {session ? (
+              <>
+                <p className="text-[#94A9C9] text-lg mb-4">맞춤 추천을 준비하고 있어요!</p>
+                <p className="text-[#6FA0E6] text-sm">선호도 설정이나 여행지 탐색 후 다시 확인해보세요 ✨</p>
+              </>
+            ) : (
+              <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
+            )}
           </div>
         )}
       </main>
