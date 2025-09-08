@@ -617,7 +617,7 @@ export default function ProfilePage() {
     }
   }
 
-  // 여행 카드 클릭 핸들러
+  // 여행 카드 클릭 핸들러 (보기 모드)
   const handleTripClick = (trip: Trip) => {
     if (!trip.places || trip.places.length === 0) {
       showToast('이 여행에는 저장된 장소가 없습니다.', 'info')
@@ -634,7 +634,7 @@ export default function ProfilePage() {
     const endDate = new Date(trip.end_date)
     const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
     
-    // URL 파라미터 생성
+    // URL 파라미터 생성 (보기 모드)
     const params = new URLSearchParams({
       places: placeIds.join(','),
       dayNumbers: dayNumbers.join(','),
@@ -649,7 +649,44 @@ export default function ProfilePage() {
       tripId: trip.id.toString()
     })
     
-    // map 페이지로 이동
+    // map 페이지로 이동 (보기 모드 - long press 불가)
+    router.push(`/map?${params.toString()}`)
+  }
+
+  // 여행 편집 버튼 클릭 핸들러 (편집 모드)
+  const handleEditTripClick = (trip: Trip) => {
+    if (!trip.places || trip.places.length === 0) {
+      showToast('이 여행에는 저장된 장소가 없습니다.', 'info')
+      return
+    }
+
+    // DB 구조에 맞게 데이터 변환: table_name + "_" + id 형태로 조합
+    const placeIds = trip.places.map(place => `${place.table_name}_${place.id}`)
+    const dayNumbers = trip.places.map(place => place.dayNumber.toString())
+    const sourceTables = trip.places.map(place => place.table_name)
+    
+    // 날짜 차이 계산
+    const startDate = new Date(trip.start_date)
+    const endDate = new Date(trip.end_date)
+    const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    
+    // URL 파라미터 생성 (편집 모드)
+    const params = new URLSearchParams({
+      places: placeIds.join(','),
+      dayNumbers: dayNumbers.join(','),
+      sourceTables: sourceTables.join(','),
+      startDate: trip.start_date,
+      endDate: trip.end_date,
+      days: daysDiff.toString(),
+      baseAttraction: 'general',
+      source: 'profile',
+      tripTitle: trip.title,
+      tripDescription: trip.description || '',
+      tripId: trip.id.toString(),
+      editMode: 'true' // 편집 모드 플래그 추가
+    })
+    
+    // map 페이지로 이동 (편집 모드 - long press 가능)
     router.push(`/map?${params.toString()}`)
   }
 
@@ -804,7 +841,7 @@ export default function ProfilePage() {
                 className="bg-gray-800 p-4 rounded-2xl relative cursor-pointer hover:bg-gray-750 transition-colors"
                 onClick={() => handleTripClick(trip)}
               >
-                {/* 상태 표시와 휴지통 버튼 - 오른쪽 상단 */}
+                {/* 상태 표시와 버튼들 - 오른쪽 상단 */}
                 <div className="absolute top-4 right-4 flex items-center space-x-2">
                   <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
                     trip.status === 'active' ? 'bg-red-500' : 
@@ -815,6 +852,20 @@ export default function ProfilePage() {
                     {trip.status === 'completed' && '✓ 완료됨'}
                     {trip.status === 'planned' && '📋 예정됨'}
                   </span>
+                  
+                  {/* 편집 버튼 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation() // 카드 클릭 이벤트 방지
+                      handleEditTripClick(trip)
+                    }}
+                    className="text-blue-400 hover:text-blue-300 transition-colors p-1 hover:bg-blue-900 rounded"
+                    title="일정 편집"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
                   
                   {/* 휴지통 버튼 */}
                   <button

@@ -83,12 +83,19 @@ export default function MapPage() {
   const tripTitleParam = searchParams.get('tripTitle')
   const tripDescriptionParam = searchParams.get('tripDescription')
   const tripIdParam = searchParams.get('tripId')
+  const editModeParam = searchParams.get('editMode')
   
   // profile에서 온 경우 판단
   const isFromProfile = sourceParam === 'profile'
   
-  // 편집 모드 상태 (profile에서 온 경우에만 사용)
-  const [isEditMode, setIsEditMode] = useState(false)
+  // 편집 모드 상태 (profile에서 온 경우에만 사용, editMode 파라미터가 있으면 자동 활성화)
+  const [isEditMode, setIsEditMode] = useState(editModeParam === 'true')
+  
+  // long press 활성화 조건 계산 (동적으로 변경되도록)
+  // 1. profile이 아닌 곳에서 온 경우: 항상 가능
+  // 2. profile에서 왔지만 편집 모드가 활성화된 경우: 가능
+  // 3. profile에서 왔고 편집 모드가 비활성화된 경우: 불가능
+  const isLongPressEnabled = !isFromProfile || isEditMode
   const [editTitle, setEditTitle] = useState(tripTitleParam ? decodeURIComponent(tripTitleParam) : '')
   const [editDescription, setEditDescription] = useState(tripDescriptionParam && tripDescriptionParam.trim() 
     ? decodeURIComponent(tripDescriptionParam) 
@@ -1965,16 +1972,24 @@ export default function MapPage() {
                             data-place-card="true"
                             className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative cursor-pointer select-none group"
                             onTouchStart={(e) => {
-                              handleLongPressStart(e, place, day, index);
+                              if (isLongPressEnabled) {
+                                handleLongPressStart(e, place, day, index);
+                              }
                             }}
                             onTouchMove={(e) => {
-                              handleLongPressMove(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressMove(e);
+                              }
                             }}
                             onTouchEnd={(e) => {
-                              handleLongPressEnd(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressEnd(e);
+                              }
                             }}
                             onTouchCancel={(e) => {
-                              handleLongPressEnd(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressEnd(e);
+                              }
                             }}
                             style={{ 
                               touchAction: 'none',
@@ -1983,12 +1998,14 @@ export default function MapPage() {
                               WebkitTouchCallout: 'none'
                             } as React.CSSProperties}
                           >
-                            {/* Long press 말풍선 힌트 */}
-                            <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
-                              <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
-                                꾹 눌러 이동
+                            {/* Long press 말풍선 힌트 (long press가 활성화된 경우에만 표시) */}
+                            {isLongPressEnabled && (
+                              <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
+                                <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
+                                  꾹 눌러 이동
+                                </div>
                               </div>
-                            </div>
+                            )}
                             
                             {/* 잠금 버튼 - 휴지통 왼쪽 */}
                             {(!isFromProfile || isEditMode) && (
