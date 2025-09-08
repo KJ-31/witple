@@ -480,16 +480,16 @@ export default function RecommendationsPage() {
               }
 
               return pages.map((pageItems, pageIndex) => (
-                <div key={`page-${pageIndex}`} className="flex-shrink-0 w-80">
+                <div key={`page-${pageIndex}`} className="flex-shrink-0 w-[416px]">
                   <div className="flex gap-6">
                     {/* Left Column of this page */}
-                    <div className="flex-1 space-y-6">
+                    <div className="flex-1 space-y-4">
                       {pageItems.slice(0, 3).map((item, index) => {
                         const globalIndex = pageIndex * 6 + index
                         return (
                           <div
                             key={item.id}
-                            className="flex items-center space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors"
+                            className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
                             onClick={() => handleItemClick(item)}
                           >
                             <div className="flex-shrink-0 relative">
@@ -505,15 +505,15 @@ export default function RecommendationsPage() {
                                 {globalIndex + 1}
                               </div>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-white text-sm mb-1 truncate">{item.title}</h3>
-                              <p className="text-[#94A9C9] text-xs mb-1">{item.author}</p>
-                              <div className="flex items-center">
-                                <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <div className="w-[116px] flex flex-col justify-center h-16 overflow-hidden">
+                              <h3 className="font-semibold text-white text-sm mb-1 truncate w-full">{item.title}</h3>
+                              <p className="text-[#94A9C9] text-xs mb-1 truncate w-full">{item.author}</p>
+                              <div className="flex items-center w-full">
+                                <svg className="w-3 h-3 text-yellow-400 mr-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
-                                <span className="text-[#6FA0E6] text-xs mr-2">{item.rating}</span>
-                                <span className="text-[#94A9C9] text-xs">({item.views?.toLocaleString()})</span>
+                                <span className="text-[#6FA0E6] text-xs mr-1 flex-shrink-0">{item.rating}</span>
+                                <span className="text-[#94A9C9] text-xs truncate flex-1">({item.views?.toLocaleString()})</span>
                               </div>
                             </div>
                           </div>
@@ -522,13 +522,13 @@ export default function RecommendationsPage() {
                     </div>
 
                     {/* Right Column of this page */}
-                    <div className="flex-1 space-y-6">
+                    <div className="flex-1 space-y-4">
                       {pageItems.slice(3, 6).map((item, index) => {
                         const globalIndex = pageIndex * 6 + index + 3
                         return (
                           <div
                             key={item.id}
-                            className="flex items-center space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors"
+                            className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
                             onClick={() => handleItemClick(item)}
                           >
                             <div className="flex-shrink-0 relative">
@@ -544,15 +544,15 @@ export default function RecommendationsPage() {
                                 {globalIndex + 1}
                               </div>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-white text-sm mb-1 truncate">{item.title}</h3>
-                              <p className="text-[#94A9C9] text-xs mb-1">{item.author}</p>
-                              <div className="flex items-center">
-                                <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <div className="w-[116px] flex flex-col justify-center h-16 overflow-hidden">
+                              <h3 className="font-semibold text-white text-sm mb-1 truncate w-full">{item.title}</h3>
+                              <p className="text-[#94A9C9] text-xs mb-1 truncate w-full">{item.author}</p>
+                              <div className="flex items-center w-full">
+                                <svg className="w-3 h-3 text-yellow-400 mr-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
-                                <span className="text-[#6FA0E6] text-xs mr-2">{item.rating}</span>
-                                <span className="text-[#94A9C9] text-xs">({item.views?.toLocaleString()})</span>
+                                <span className="text-[#6FA0E6] text-xs mr-1 flex-shrink-0">{item.rating}</span>
+                                <span className="text-[#94A9C9] text-xs truncate flex-1">({item.views?.toLocaleString()})</span>
                               </div>
                             </div>
                           </div>
