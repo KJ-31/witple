@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { BottomNavigation } from '../../../components'
 
 interface ItineraryBuilderProps {
   params: { attractionId: string }
@@ -60,7 +61,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // URL에서 선택된 날짜들 파싱
   const startDateParam = searchParams.get('startDate')
-  const endDateParam = searchParams.get('endDate')
   const daysParam = searchParams.get('days')
 
   // 상태 관리
@@ -863,7 +863,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Fixed Bottom Button - Create Itinerary */}
-      <div className="absolute bottom-0 left-0 right-0 bg-[#0B1220] border-t border-[#1F3C7A]/30 p-4 z-10">
+      <div className="absolute bottom-16 left-0 right-0 bg-[#0B1220] p-4 z-10">
         <button
           onClick={handleCreateItinerary}
           disabled={getAllSelectedPlaces().length === 0}
@@ -878,6 +878,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           여행 일정 만들기
         </button>
       </div>
+
+      <BottomNavigation />
     </div>
   )
 }
