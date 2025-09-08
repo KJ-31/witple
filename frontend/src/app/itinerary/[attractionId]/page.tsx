@@ -170,7 +170,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
               newSet.add(category)
               return newSet
             })
-            console.log(`카테고리 캐시 저장 완료: ${category}`)
           }
         } else {
           // 추천 알고리즘에서는 페이지네이션 없이 한 번에 모든 결과 반환
@@ -728,7 +727,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       const token = getToken()
 
       if (!token) {
-        console.log('토큰 없음 - 저장된 장소 로딩 건너뛰기')
         return
       }
 
@@ -741,11 +739,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('=== 저장된 장소 API 응답 디버깅 ===')
-        console.log('전체 응답:', data)
-        console.log('locations:', data.locations)
-        console.log('saved_locations:', data.saved_locations)
-        console.log('============================')
 
         // 프로필 페이지와 동일하게 data.locations 사용
         const locations = data.locations || data.saved_locations || []
@@ -766,7 +759,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           newSet.add('bookmarked')
           return newSet
         })
-        console.log('북마크 캐시 저장 완료')
       } else {
         console.error('저장된 장소 로딩 실패:', response.status)
         setSavedLocations([])
