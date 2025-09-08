@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 class PlaceVectorizer:
     def __init__(self):
-        # BERT 모델 초기화 (256차원)
+        # BERT 모델 초기화 (384차원)
         self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L12-v2')
         self.scaler = MinMaxScaler()
         
@@ -191,7 +191,7 @@ class PlaceVectorizer:
                     'city': row.get('city', ''),
                     'latitude': float(row.get('latitude', 0)) if pd.notna(row.get('latitude')) else 0,
                     'longitude': float(row.get('longitude', 0)) if pd.notna(row.get('longitude')) else 0,
-                    'vector': embeddings[idx][:256]  # 256차원으로 자르기
+                    'vector': embeddings[idx][:384]  # 384차원으로 자르기
                 })
             
             vectors[table_name] = place_data
@@ -215,7 +215,7 @@ class PlaceVectorizer:
                     city VARCHAR(100),
                     latitude NUMERIC,
                     longitude NUMERIC,
-                    vector VECTOR(256) NOT NULL,
+                    vector VECTOR(384) NOT NULL,
                     created_at TIMESTAMP DEFAULT now(),
                     UNIQUE(place_id, table_name)
                 )
@@ -573,8 +573,8 @@ class RecommendationEngine:
                     # numpy 배열로 변환
                     vector_array = np.array(vector_data, dtype=np.float32)
                     
-                    # 벡터 차원 확인 (256차원이어야 함)
-                    if len(vector_array) == 256:
+                    # 벡터 차원 확인 (384차원이어야 함)
+                    if len(vector_array) == 384:
                         place_vectors.append(vector_array)
                         valid_places.append(place)
                     
@@ -669,8 +669,8 @@ class RecommendationEngine:
         all_texts = preference_texts + action_places
         combined_text = ' '.join(all_texts) if all_texts else "일반적인 여행지"
         
-        # BERT 벡터화 (256차원으로 자르기 - place_features와 동일하게)
-        user_vector = self.bert_model.encode([combined_text])[0][:256]
+        # BERT 벡터화 (384차원으로 자르기 - place_features와 동일하게)
+        user_vector = self.bert_model.encode([combined_text])[0][:384]
         
         return user_vector
 
