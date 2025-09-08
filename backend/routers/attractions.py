@@ -707,6 +707,8 @@ async def search_attractions(
             search_tables = CATEGORY_TABLES
         
         # 각 테이블에서 검색
+        seen_attractions = set()  # 중복 방지를 위한 집합
+        
         for table_name, table_model in search_tables.items():
             query = db.query(table_model)
             
@@ -730,9 +732,15 @@ async def search_attractions(
             offset = page * limit
             attractions = query.offset(offset).limit(limit).all()
             
-            # 결과 포맷팅
+            # 결과 포맷팅 및 중복 제거
             table_category = get_category_from_table(table_name)
             for attraction in attractions:
+                # 중복 체크: 이름과 주소가 같은 항목은 제외
+                attraction_key = f"{attraction.name}_{attraction.address}"
+                if attraction_key in seen_attractions:
+                    continue
+                seen_attractions.add(attraction_key)
+                
                 formatted_attraction = format_attraction_data(attraction, table_category, table_name)
                 formatted_attraction["city"] = {
                     "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
