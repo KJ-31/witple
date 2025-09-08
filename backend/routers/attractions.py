@@ -7,8 +7,12 @@ from database import get_db
 from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
+from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+import logging
 
 router = APIRouter(tags=["attractions"])
+
+logger = logging.getLogger(__name__)
 
 # 카테고리별 테이블 매핑
 CATEGORY_TABLES = {
@@ -89,6 +93,47 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
         data["closedDays"] = getattr(attraction, 'closed_days', None)
     
     return data
+
+async def get_db_fallback_places(db: Session, region: str, category: str = None, limit: int = 20, exclude_ids: set = None):
+    """추천 엔진 실패시 DB에서 직접 가져오는 fallback"""
+    places = []
+    exclude_ids = exclude_ids or set()
+    
+    # 검색할 테이블들 결정
+    search_tables = {}
+    if category and category != 'all':
+        for table_name, table_model in CATEGORY_TABLES.items():
+            if get_category_from_table(table_name) == category:
+                search_tables[table_name] = table_model
+    else:
+        search_tables = CATEGORY_TABLES
+    
+    for table_name, table_model in search_tables.items():
+        if len(places) >= limit:
+            break
+            
+        # 지역으로 필터링
+        query = db.query(table_model).filter(
+            or_(
+                table_model.region.ilike(f"%{region}%"),
+                table_model.region == region,
+                table_model.city.ilike(f"%{region}%")
+            )
+        ).limit(limit - len(places))
+        
+        attractions = query.all()
+        table_category = get_category_from_table(table_name)
+        
+        for attraction in attractions:
+            place_id = f"{table_name}_{attraction.id}"
+            if place_id not in exclude_ids:
+                formatted_place = format_attraction_data(attraction, table_category, table_name)
+                places.append(formatted_place)
+                
+                if len(places) >= limit:
+                    break
+    
+    return places
 
 async def get_attractions_by_city(db: Session, city_name: str, limit: int = 8):
     """도시별 관광지 조회 - 각 카테고리에서 골고루 가져오기"""
@@ -319,6 +364,32 @@ def get_category_korean_name(category: str) -> str:
         "leisure_sports": "레저"
     }
     return category_map.get(category, category)
+
+
+def get_first_valid_image(image_urls):
+    """이미지 URL에서 첫 번째 유효한 이미지 반환"""
+    if not image_urls:
+        return None
+    
+    try:
+        if isinstance(image_urls, list) and len(image_urls) > 0:
+            for img_url in image_urls:
+                if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                    return img_url
+        elif isinstance(image_urls, str):
+            if image_urls.startswith('[') and image_urls.endswith(']'):
+                import json
+                parsed_urls = json.loads(image_urls)
+                if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                    for img_url in parsed_urls:
+                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                            return img_url
+            elif image_urls.strip() and image_urls != "/images/default.jpg":
+                return image_urls
+    except Exception:
+        pass
+    
+    return None
 
 
 def sort_regions_by_priority(regions):
@@ -636,6 +707,8 @@ async def search_attractions(
             search_tables = CATEGORY_TABLES
         
         # 각 테이블에서 검색
+        seen_attractions = set()  # 중복 방지를 위한 집합
+        
         for table_name, table_model in search_tables.items():
             query = db.query(table_model)
             
@@ -659,9 +732,15 @@ async def search_attractions(
             offset = page * limit
             attractions = query.offset(offset).limit(limit).all()
             
-            # 결과 포맷팅
+            # 결과 포맷팅 및 중복 제거
             table_category = get_category_from_table(table_name)
             for attraction in attractions:
+                # 중복 체크: 이름과 주소가 같은 항목은 제외
+                attraction_key = f"{attraction.name}_{attraction.address}"
+                if attraction_key in seen_attractions:
+                    continue
+                seen_attractions.add(attraction_key)
+                
                 formatted_attraction = format_attraction_data(attraction, table_category, table_name)
                 formatted_attraction["city"] = {
                     "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
@@ -710,79 +789,152 @@ async def get_filtered_attractions(
     region: Optional[str] = Query(None, description="지역 필터"),
     category: Optional[str] = Query(None, description="카테고리 필터"),
     page: int = Query(0, ge=0, description="페이지 번호 (0부터 시작)"),
-    limit: int = Query(20, ge=1, le=100, description="페이지당 결과 수"),
+    limit: int = Query(50, ge=1, le=100, description="페이지당 결과 수"),
+    current_user = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """지역 및 카테고리별로 필터링된 관광지 목록을 가져옵니다."""
+    """일정 짜기 페이지용 추천 알고리즘 적용 관광지 목록"""
     try:
+        logger.info(f"Filtered attractions request: region={region}, category={category}, limit={limit}")
+        
+        # 지역이 필수로 필요함 (일정 짜기 페이지는 특정 지역 기반)
+        if not region:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="지역을 선택해주세요."
+            )
+        
         results = []
         
-        # 카테고리 필터에 따른 테이블 선택
-        search_tables = {}
-        if category:
-            # 카테고리에 맞는 테이블만 검색
-            for table_name, table_model in CATEGORY_TABLES.items():
-                table_category = get_category_from_table(table_name)
-                if table_category == category:
-                    search_tables[table_name] = table_model
-        else:
-            # 모든 테이블 검색
-            search_tables = CATEGORY_TABLES
-        
-        # 각 테이블에서 필터링된 결과 조회
-        for table_name, table_model in search_tables.items():
-            query = db.query(table_model)
+        # 로그인 상태에 따른 추천 알고리즘 적용
+        if current_user and hasattr(current_user, 'user_id'):
+            # 로그인 시: 개인화 추천 + 코사인 유사도 혼합
+            user_id = str(current_user.user_id)
+            logger.info(f"Personalized recommendations for user: {user_id}")
             
-            # 지역 필터
-            if region:
-                query = query.filter(
-                    or_(
-                        table_model.region.ilike(f"%{region}%"),
-                        table_model.region == region
-                    )
+            try:
+                # 개인화 추천 (상단 절반)
+                personalized_limit = min(25, limit // 2)
+                personalized_places = await recommendation_engine.get_personalized_recommendations(
+                    user_id=user_id,
+                    region=region,
+                    category=category,
+                    limit=personalized_limit
                 )
+                
+                # 코사인 유사도 기반 (하단 절반) - 중복 제거
+                used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
+                similarity_limit = limit - len(personalized_places)
+                similarity_places = await get_similarity_based_places(
+                    region=region,
+                    category=category,
+                    limit=similarity_limit,
+                    exclude_ids=used_place_ids
+                )
+                
+                # 결과 결합 및 포맷팅
+                all_recommendations = personalized_places + similarity_places
+                
+                for i, place in enumerate(all_recommendations):
+                    # recommendations 형태를 attractions 형태로 변환
+                    formatted_attraction = {
+                        "id": f"{place['table_name']}_{place['place_id']}",
+                        "name": place.get('name', '이름 없음'),
+                        "description": place.get('description', '설명 없음'),
+                        "imageUrl": get_first_valid_image(place.get('image_urls')),
+                        "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+                        "category": get_category_from_table(place['table_name']),
+                        "region": place.get('region', region),
+                        "city": {
+                            "name": place.get('city', '알 수 없음'),
+                            "region": place.get('region', region)
+                        },
+                        "latitude": place.get('latitude'),
+                        "longitude": place.get('longitude'),
+                        "sourceTable": place['table_name'],
+                        "recommendationType": "personalized" if i < len(personalized_places) else "similarity"
+                    }
+                    results.append(formatted_attraction)
+                
+                logger.info(f"Retrieved {len(results)} personalized attractions")
+                
+            except Exception as e:
+                logger.error(f"Personalized recommendations failed: {str(e)}")
+                # 개인화 실패시 유사도 기반으로 fallback
+                similarity_places = await get_similarity_based_places(
+                    region=region,
+                    category=category,
+                    limit=limit,
+                    exclude_ids=set()
+                )
+                
+                for place in similarity_places:
+                    formatted_attraction = {
+                        "id": f"{place['table_name']}_{place['place_id']}",
+                        "name": place.get('name', '이름 없음'),
+                        "description": place.get('description', '설명 없음'),
+                        "imageUrl": get_first_valid_image(place.get('image_urls')),
+                        "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+                        "category": get_category_from_table(place['table_name']),
+                        "region": place.get('region', region),
+                        "city": {
+                            "name": place.get('city', '알 수 없음'),
+                            "region": place.get('region', region)
+                        },
+                        "latitude": place.get('latitude'),
+                        "longitude": place.get('longitude'),
+                        "sourceTable": place['table_name'],
+                        "recommendationType": "similarity"
+                    }
+                    results.append(formatted_attraction)
+        
+        else:
+            # 비로그인 시: 코사인 유사도만
+            logger.info("Guest user - similarity based recommendations")
+            similarity_places = await get_similarity_based_places(
+                region=region,
+                category=category,
+                limit=limit,
+                exclude_ids=set()
+            )
             
-            # 페이지네이션 적용하여 검색 결과 조회
-            offset = page * limit
-            attractions = query.offset(offset).limit(limit).all()
-            
-            # 결과 포맷팅
-            table_category = get_category_from_table(table_name)
-            for attraction in attractions:
-                formatted_attraction = format_attraction_data(attraction, table_category, table_name)
-                formatted_attraction["city"] = {
-                    "id": attraction.city.lower().replace(" ", "-") if attraction.city else "unknown",
-                    "name": attraction.city or "알 수 없음",
-                    "region": attraction.region or "알 수 없음"
+            for place in similarity_places:
+                formatted_attraction = {
+                    "id": f"{place['table_name']}_{place['place_id']}",
+                    "name": place.get('name', '이름 없음'),
+                    "description": place.get('description', '설명 없음'),
+                    "imageUrl": get_first_valid_image(place.get('image_urls')),
+                    "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+                    "category": get_category_from_table(place['table_name']),
+                    "region": place.get('region', region),
+                    "city": {
+                        "name": place.get('city', '알 수 없음'),
+                        "region": place.get('region', region)
+                    },
+                    "latitude": place.get('latitude'),
+                    "longitude": place.get('longitude'),
+                    "sourceTable": place['table_name'],
+                    "recommendationType": "similarity"
                 }
                 results.append(formatted_attraction)
-        
-        # 전체 결과 개수 계산
-        total_results = 0
-        for table_name, table_model in search_tables.items():
-            query = db.query(table_model)
-            if region:
-                query = query.filter(
-                    or_(
-                        table_model.region.ilike(f"%{region}%"),
-                        table_model.region == region
-                    )
-                )
-            total_results += query.count()
         
         return {
             "attractions": results,
             "total": len(results),
-            "totalAvailable": total_results,
+            "totalAvailable": len(results),
             "page": page,
             "limit": limit,
-            "hasMore": (page + 1) * limit < total_results,
+            "hasMore": False,  # 일정 짜기에서는 페이지네이션 없이 한 번에 모든 결과 반환
             "filters": {
                 "region": region,
                 "category": category
             }
         }
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error in filtered attractions: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"필터링된 관광지 조회 중 오류 발생: {str(e)}"

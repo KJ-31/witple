@@ -33,16 +33,9 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       // const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       // console.log('Mobile device detected:', isMobile)
       
-      console.log('All process.env NEXT_PUBLIC_* variables:')
-      Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC_')).forEach(key => {
-        console.log(`${key}:`, process.env[key])
-      })
       
       const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
       
-      console.log('Google Maps API Key1:', apiKey ? 'Key loaded' : 'Key missing')
-      console.log('API Key type:', typeof apiKey)
-      console.log('API Key length:', apiKey?.length)
       
       if (!apiKey || apiKey === '') {
         console.error('Google Maps API Key가 설정되지 않았습니다')

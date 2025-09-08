@@ -3,3 +3,4 @@
 
 export { default as PWAInstallPrompt } from './PWAInstallPrompt';
 export { default as GoogleMap } from './GoogleMap';
+export { default as BottomNavigation } from './BottomNavigation';

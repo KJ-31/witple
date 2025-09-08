@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
+import { BottomNavigation } from '../components'
 
 export default function Home() {
   const router = useRouter()
@@ -23,6 +24,12 @@ export default function Home() {
   const [regions, setRegions] = useState<string[]>([])
   const [categories, setCategories] = useState<Array<{id: string, name: string, description: string}>>([])
   const [showFilters, setShowFilters] = useState(false)
+
+  // 검색 결과 상태
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [showSearchResults, setShowSearchResults] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
@@ -58,7 +65,7 @@ export default function Home() {
       setLoading(false)
       loadingRef.current = false
     }
-  }, [status, session])
+  }, [session])
 
   // 필터 데이터 로드 함수
   const loadFilterData = useCallback(async () => {
@@ -227,6 +234,9 @@ export default function Home() {
     e.preventDefault()
     if (!searchQuery.trim()) return
     
+    setIsSearching(true)
+    setSearchError(null)
+    
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}`)
@@ -236,14 +246,32 @@ export default function Home() {
       }
       
       const results = await response.json()
-      console.log('검색 결과:', results)
       
-      // TODO: 검색 결과 페이지로 이동하거나 결과 표시
-      // router.push(`/search?q=${encodeURIComponent(searchQuery)}`)
+      // 중복 제거: 같은 이름과 주소를 가진 항목들을 제거
+      const uniqueResults = (results.results || []).filter((item: any, index: number, array: any[]) => {
+        return array.findIndex((other: any) => 
+          other.name === item.name && 
+          other.address === item.address
+        ) === index
+      })
+      
+      setSearchResults(uniqueResults)
+      setShowSearchResults(true)
       
     } catch (error) {
       console.error('검색 오류:', error)
+      setSearchError('검색 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setIsSearching(false)
     }
+  }
+
+  // 검색 결과 숨기기 함수
+  const handleClearSearch = () => {
+    setSearchQuery('')
+    setSearchResults([])
+    setShowSearchResults(false)
+    setSearchError(null)
   }
 
   return (
@@ -272,18 +300,106 @@ export default function Home() {
           />
           <button
             type="submit"
-            className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-[#6FA0E6] hover:text-white transition"
+            disabled={isSearching}
+            className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-[#6FA0E6] hover:text-white transition disabled:opacity-50"
             aria-label="검색"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+            {isSearching ? (
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#6FA0E6]"></div>
+            ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            )}
           </button>
         </form>
       </div>
 
-      {/* Filter Section */}
-      <div className="px-4 mb-16">
+      {/* Search Results */}
+      {showSearchResults && (
+        <div className="px-4 mb-8">
+          <div className="w-[90%] mx-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white">
+                &apos;{searchQuery}&apos; 검색 결과 ({searchResults.length}개)
+              </h2>
+              <button
+                onClick={handleClearSearch}
+                className="text-[#6FA0E6] hover:text-white transition-colors text-sm"
+              >
+                ✕ 닫기
+              </button>
+            </div>
+            
+            {searchError && (
+              <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-4">
+                <p className="text-red-300">{searchError}</p>
+              </div>
+            )}
+            
+            {searchResults.length === 0 && !isSearching && !searchError ? (
+              <div className="text-center py-8">
+                <div className="text-6xl mb-4">🔍</div>
+                <p className="text-gray-400 text-lg mb-2">검색 결과가 없습니다</p>
+                <p className="text-gray-500 text-sm">다른 키워드로 검색해보세요</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {searchResults.map((result, index) => (
+                  <div
+                    key={`${result.name}-${result.address}-${index}`}
+                    onClick={() => router.push(`/attraction/${result.id}`)}
+                    className="bg-gray-800/50 hover:bg-gray-700/50 p-4 rounded-2xl cursor-pointer transition-colors border border-gray-700/50"
+                  >
+                    <div className="flex items-start space-x-4">
+                      {/* 카테고리 아이콘 */}
+                      <div className="flex-shrink-0 w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                        <span className="text-2xl">
+                          {result.category === 'nature' && '🌲'}
+                          {result.category === 'restaurants' && '🍽️'}
+                          {result.category === 'shopping' && '🛍️'}
+                          {result.category === 'accommodation' && '🏨'}
+                          {result.category === 'humanities' && '🏛️'}
+                          {result.category === 'leisure_sports' && '⚽'}
+                        </span>
+                      </div>
+                      
+                      {/* 정보 */}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-white font-semibold text-lg mb-1 truncate">
+                          {result.name}
+                        </h3>
+                        <p className="text-gray-300 text-sm mb-2 line-clamp-2">
+                          {result.overview}
+                        </p>
+                        <div className="flex items-center space-x-4 text-xs text-gray-400">
+                          <div className="flex items-center space-x-1">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span>{result.address}</span>
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                            </svg>
+                            <span className="capitalize">{result.category}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Filter Section - 검색 결과가 표시될 때는 숨김 */}
+      {!showSearchResults && (
+        <div className="px-4 mb-16">
         <div className="w-[90%] mx-auto">
           {/* Filter Toggle Button */}
           <div className="flex items-center justify-between mb-4">
@@ -385,112 +501,60 @@ export default function Home() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* 추천 도시별 명소 섹션 (무한 스크롤) */}
-      <main className="px-4 pb-24 space-y-12">
-        {citySections.map((citySection, index) => (
-          <div
-            key={`${citySection.id}-${index}`}
-            ref={index === citySections.length - 1 ? lastElementRef : null}
-          >
-            <SectionCarousel
-              title={`${citySection.description}`}
-              cityName={citySection.cityName}
-              attractions={citySection.attractions}
-              categorySections={citySection.categorySections}
-              onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
-            />
-          </div>
-        ))}
-
-        {/* 로딩 인디케이터 */}
-        {loading && (
-          <div className="flex justify-center items-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
-            <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
-          </div>
-        )}
-
-        {/* 더 이상 데이터가 없을 때 */}
-        {!hasMore && citySections.length > 0 && (
-          <div className="text-center py-8">
-            <p className="text-[#6FA0E6] text-lg">모든 추천 여행지를 확인했습니다 ✨</p>
-            <p className="text-[#94A9C9] text-sm mt-2">새로운 여행지가 추가되면 알려드릴게요!</p>
-          </div>
-        )}
-
-        {/* 데이터가 없을 때 */}
-        {!loading && citySections.length === 0 && (
-          <div className="text-center py-16">
-            <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
-          </div>
-        )}
-      </main>
-
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-[#0F1A31]/95 backdrop-blur-md border-t border-[#1F3C7A]/30">
-        <div className="flex items-center justify-around px-4 py-5 max-w-md mx-auto">
-          <Link
-            href="/"
-            className="flex flex-col items-center py-1 px-2 text-[#3E68FF]"
-            aria-label="홈"
-          >
-            <svg className="w-6 h-6 mb-1" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-            </svg>
-          </Link>
-
-          <Link
-            href="/recommendations"
-            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
-            aria-label="추천"
-          >
-            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-            </svg>
-          </Link>
-
-          <Link
-            href="/treasure"
-            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
-            aria-label="보물찾기"
-          >
-            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </Link>
-
-          <Link
-            href="/feed"
-            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
-            aria-label="피드"
-          >
-            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
-            </svg>
-          </Link>
-
-          <button
-            onClick={() => {
-
-              // NextAuth 세션 상태를 확인하여 로그인 여부 판단
-              if (status === 'authenticated' && session) {
-                router.push('/profile')
-              } else {
-                router.push('/auth/login')
-              }
-            }}
-            className="flex flex-col items-center py-1 px-2 text-[#6FA0E6] hover:text-[#3E68FF] transition-colors"
-            aria-label="마이페이지"
-          >
-            <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-          </button>
         </div>
-      </nav>
+      )}
+
+      {/* 추천 도시별 명소 섹션 (무한 스크롤) - 검색 결과가 표시될 때는 숨김 */}
+      {!showSearchResults && (
+        <main className="px-4 pb-24 space-y-12">
+          {citySections.map((citySection, index) => (
+            <div
+              key={`${citySection.id}-${index}`}
+              ref={index === citySections.length - 1 ? lastElementRef : null}
+            >
+              <SectionCarousel
+                title={`${citySection.description}`}
+                cityName={citySection.cityName}
+                attractions={citySection.attractions}
+                categorySections={citySection.categorySections}
+                onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
+              />
+            </div>
+          ))}
+
+          {/* 로딩 인디케이터 */}
+          {loading && (
+            <div className="flex justify-center items-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+              <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
+            </div>
+          )}
+
+          {/* 더 이상 데이터가 없을 때 */}
+          {!hasMore && citySections.length > 0 && (
+            <div className="text-center py-8">
+              <p className="text-[#6FA0E6] text-lg">모든 추천 여행지를 확인했습니다 ✨</p>
+              <p className="text-[#94A9C9] text-sm mt-2">새로운 여행지가 추가되면 알려드릴게요!</p>
+            </div>
+          )}
+
+          {/* 데이터가 없을 때 */}
+          {!loading && citySections.length === 0 && (
+            <div className="text-center py-16">
+              {session ? (
+                <>
+                  <p className="text-[#94A9C9] text-lg mb-4">맞춤 추천을 준비하고 있어요!</p>
+                  <p className="text-[#6FA0E6] text-sm">선호도 설정이나 여행지 탐색 후 다시 확인해보세요 ✨</p>
+                </>
+              ) : (
+                <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
+              )}
+            </div>
+          )}
+        </main>
+      )}
+
+      <BottomNavigation />
     </div>
   )
 }
