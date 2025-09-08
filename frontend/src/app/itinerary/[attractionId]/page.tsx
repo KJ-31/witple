@@ -332,6 +332,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           throw new Error('유효하지 않은 관광지 ID입니다.')
         }
         
+        // 'general'인 경우 특정 attraction 정보 없이 전국 데이터 로드
+        if (params.attractionId === 'general') {
+          if (isCancelled) return
+          
+          // attraction 정보 없이 전국 데이터 로드
+          setAttraction(null)
+          await loadAllCategoriesForCount('전국')
+          await loadFilteredAttractions('전국', 'all', true)
+          return
+        }
+        
         // 선택된 관광지 정보 가져오기
         const attractionResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/${params.attractionId}`)
         if (!attractionResponse.ok) {
@@ -402,14 +413,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // 카테고리 변경 시 추천 관광지 다시 로드
   useEffect(() => {
-    if (attraction && selectedCategory) {
+    if (selectedCategory) {
       const loadCategoryPlaces = async () => {
         // 1차: 추천 알고리즘 시도
-        await loadFilteredAttractions(attraction.region, selectedCategory, true)
+        const region = attraction?.region || '전국'
+        await loadFilteredAttractions(region, selectedCategory, true)
       }
       loadCategoryPlaces()
     }
-  }, [selectedCategory])
+  }, [selectedCategory, attraction])
 
   // 날짜별 장소 관리 헬퍼 함수들
   const getAllSelectedPlaces = (): SelectedPlace[] => {
@@ -584,7 +596,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     )
   }
 
-  if (error || !attraction) {
+  if (error || (!attraction && params.attractionId !== 'general')) {
     return (
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
         <div className="text-center">
@@ -616,7 +628,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           </button>
 
           <h1 className="text-lg font-semibold text-[#94A9C9]">
-            여행 기간이 어떻게 되시나요?
+            {params.attractionId === 'general' ? '여행 일정 만들기' : '여행 기간이 어떻게 되시나요?'}
           </h1>
 
           <div className="w-10 h-10" /> {/* Spacer */}
@@ -772,8 +784,10 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           {hasMore && !noMoreResults ? (
             <button
               onClick={() => {
-                if (attraction && !loadingMore) {
-                  loadMoreAttractions(attraction.city.name, attraction.region, currentPage + 1, false)
+                if (!loadingMore) {
+                  const cityName = attraction?.city?.name || '전국'
+                  const region = attraction?.region || '전국'
+                  loadMoreAttractions(cityName, region, currentPage + 1, false)
                 }
               }}
               disabled={loadingMore}
