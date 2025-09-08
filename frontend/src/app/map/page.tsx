@@ -79,6 +79,12 @@ export default function MapPage() {
   const startDateParam = searchParams.get('startDate')
   const endDateParam = searchParams.get('endDate')
   const daysParam = searchParams.get('days')
+  const sourceParam = searchParams.get('source')
+  const tripTitleParam = searchParams.get('tripTitle')
+  const tripDescriptionParam = searchParams.get('tripDescription')
+  
+  // profile에서 온 경우 판단
+  const isFromProfile = sourceParam === 'profile'
   
   const [selectedItineraryPlaces, setSelectedItineraryPlaces] = useState<SelectedPlace[]>([])
   const [categoryPlaces, setCategoryPlaces] = useState<AttractionData[]>([])
@@ -1513,8 +1519,9 @@ export default function MapPage() {
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="absolute top-4 left-16 right-4 z-40">
+      {/* Search Bar - profile에서 온 경우 숨기기 */}
+      {!isFromProfile && (
+        <div className="absolute top-4 left-16 right-4 z-40">
         <form onSubmit={handleSearch} className="relative">
           <div className="relative">
             <input
@@ -1534,9 +1541,11 @@ export default function MapPage() {
             </button>
           </div>
         </form>
-      </div>
+        </div>
+      )}
 
-      {/* Category Filter */}
+      {/* Category Filter - profile에서 온 경우 숨기기 */}
+      {!isFromProfile && (
       <div className="absolute top-20 left-4 right-4 z-40">
         <div className="flex space-x-2 overflow-x-auto no-scrollbar">
           {categories.map(category => (
@@ -1558,6 +1567,7 @@ export default function MapPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Route Status Toast */}
       {routeStatus && (
@@ -1651,7 +1661,19 @@ export default function MapPage() {
             /* 일정 보기 모드 */
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
+                {isFromProfile && tripTitleParam ? (
+                  <div>
+                    <h2 className="text-xl font-bold text-[#3E68FF]">{decodeURIComponent(tripTitleParam)}</h2>
+                    <p className="text-sm text-[#94A9C9]">
+                      {tripDescriptionParam && tripDescriptionParam.trim() 
+                        ? decodeURIComponent(tripDescriptionParam)
+                        : '저장된 여행 일정'
+                      }
+                    </p>
+                  </div>
+                ) : (
+                  <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
+                )}
                 <div className="flex items-center space-x-2">
                   {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (
                     <button
@@ -1665,12 +1687,14 @@ export default function MapPage() {
                       <span>경로 지우기</span>
                     </button>
                   )}
-                  <button
-                    onClick={() => setShowItinerary(false)}
-                    className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
-                  >
-                    장소 찾기
-                  </button>
+                  {!isFromProfile && (
+                    <button
+                      onClick={() => setShowItinerary(false)}
+                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
+                    >
+                      장소 찾기
+                    </button>
+                  )}
                 </div>
               </div>
               
@@ -2117,8 +2141,8 @@ export default function MapPage() {
             </div>
           )}
           
-          {/* 일정 저장하기 버튼 */}
-          {showItinerary && selectedItineraryPlaces.length > 0 && (
+          {/* 일정 저장하기 버튼 - profile에서 온 경우 숨기기 */}
+          {showItinerary && selectedItineraryPlaces.length > 0 && !isFromProfile && (
             <div className="px-4 pb-8 pt-4">
               <button
                 onClick={openSaveItinerary}

@@ -594,7 +594,10 @@ export default function ProfilePage() {
       startDate: trip.start_date,
       endDate: trip.end_date,
       days: daysDiff.toString(),
-      baseAttraction: 'general'
+      baseAttraction: 'general',
+      source: 'profile',
+      tripTitle: trip.title,
+      tripDescription: trip.description || ''
     })
     
     // map 페이지로 이동
