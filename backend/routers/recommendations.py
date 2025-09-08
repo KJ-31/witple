@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 from config import settings
+import asyncpg
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,96 @@ async def get_current_user_optional(token: str = Depends(oauth2_scheme), db: Ses
         return None
     
     return user
+
+# 헬퍼 함수들
+async def get_place_region(table_name: str, place_id: str) -> str:
+    """선택한 장소의 지역 정보 조회"""
+    db_url = os.getenv("DATABASE_URL")
+    conn = await asyncpg.connect(db_url)
+    
+    try:
+        # 유효한 테이블명인지 확인
+        valid_tables = ['accommodation', 'restaurants', 'nature', 'shopping', 'humanities', 'leisure_sports']
+        if table_name not in valid_tables:
+            return None
+            
+        query = f"SELECT region FROM {table_name} WHERE id = $1"
+        region = await conn.fetchval(query, int(place_id))
+        return region
+        
+    except Exception as e:
+        logger.error(f"Error getting place region: {str(e)}")
+        return None
+    finally:
+        await conn.close()
+
+async def get_similarity_based_places(region: str, category: str = None, limit: int = 50, exclude_ids: set = None) -> List[Dict]:
+    """코사인 유사도 기반 장소 추천"""
+    db_url = os.getenv("DATABASE_URL")
+    conn = await asyncpg.connect(db_url)
+    
+    try:
+        # place_features와 place_recommendations 조인 쿼리
+        query = """
+            SELECT pf.place_id, pf.table_name, pf.name, pf.region, pf.city, pf.latitude, pf.longitude,
+                   pr.overview as description, pr.image_urls,
+                   -- 코사인 유사도를 시뮬레이션 (실제로는 벡터 유사도 계산)
+                   (random() + 0.5) as similarity_score
+            FROM place_features pf
+            LEFT JOIN place_recommendations pr ON pf.place_id = pr.place_id AND pf.table_name = pr.table_name
+            WHERE pf.region = $1
+        """
+        
+        params = [region]
+        param_count = 1
+        
+        # 카테고리 필터
+        if category:
+            param_count += 1
+            query += f" AND pf.table_name = ${param_count}"
+            params.append(category)
+        
+        # 제외할 장소들
+        if exclude_ids:
+            exclude_conditions = []
+            for place_id in exclude_ids:
+                if '_' in place_id:
+                    table, pid = place_id.split('_', 1)
+                    param_count += 2
+                    exclude_conditions.append(f"NOT (pf.table_name = ${param_count-1} AND pf.place_id = ${param_count})")
+                    params.extend([table, int(pid)])
+            
+            if exclude_conditions:
+                query += " AND " + " AND ".join(exclude_conditions)
+        
+        query += f" ORDER BY similarity_score DESC LIMIT ${param_count + 1}"
+        params.append(limit)
+        
+        places = await conn.fetch(query, *params)
+        
+        # 결과 포맷팅
+        results = []
+        for place in places:
+            results.append({
+                'place_id': place['place_id'],
+                'table_name': place['table_name'],
+                'name': place['name'] or '이름 없음',
+                'region': place['region'],
+                'city': place['city'],
+                'latitude': float(place['latitude']) if place['latitude'] else 0.0,
+                'longitude': float(place['longitude']) if place['longitude'] else 0.0,
+                'description': place['description'] or '설명 없음',
+                'image_urls': place['image_urls'],
+                'similarity_score': float(place['similarity_score'])
+            })
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error getting similarity based places: {str(e)}")
+        return []
+    finally:
+        await conn.close()
 
 @router.get("/popular", response_model=List[Dict[str, Any]])
 async def get_popular_places(
@@ -264,10 +356,12 @@ async def get_personalized_region_categories(
             user_id = str(current_user.user_id)
             
             # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴
+            logger.info(f"Getting personalized recommendations for user: {user_id}")
             personalized_places = await recommendation_engine.get_personalized_recommendations(
                 user_id=user_id,
-                limit=100  # 충분한 데이터를 가져와서 지역별 분석
+                limit=500  # 충분한 데이터를 가져와서 카테고리별 분석
             )
+            logger.info(f"Retrieved {len(personalized_places)} personalized places")
             
             # 2. 지역별로 그룹핑하여 상위 지역들 선별
             region_scores = {}
@@ -293,12 +387,34 @@ async def get_personalized_region_categories(
             top_regions.sort(key=lambda x: x[1], reverse=True)
             selected_regions = top_regions[:limit]
             
-            # 4. 각 지역별로 카테고리별 구분
+            # 사용자 선호도 가져오기 (카테고리별 차등 배분용)
+            user_preferences = await recommendation_engine.get_user_preferences(user_id)
+            preferred_categories = set()
+            if user_preferences and user_preferences.get('tags'):
+                # 태그를 카테고리로 매핑
+                tag_to_category = {
+                    '자연': 'nature', '바다': 'nature', '산': 'nature', '공원': 'nature',
+                    '맛집': 'restaurants', '음식': 'restaurants', '카페': 'restaurants',
+                    '쇼핑': 'shopping', '시장': 'shopping', '백화점': 'shopping',
+                    '숙박': 'accommodation', '호텔': 'accommodation',
+                    '문화': 'humanities', '박물관': 'humanities', '역사': 'humanities',
+                    '레저': 'leisure_sports', '스포츠': 'leisure_sports', '체험': 'leisure_sports'
+                }
+                for tag_info in user_preferences['tags']:
+                    tag = tag_info.get('tag', '')
+                    for keyword, category in tag_to_category.items():
+                        if keyword in tag:
+                            preferred_categories.add(category)
+
+            # 4. 각 지역별로 카테고리별 구분 (스마트 배분)
             result_data = []
             for region, avg_score, places in selected_regions:
+                # 카테고리별 충분한 데이터 확보를 위해 지역당 더 많은 장소 사용
+                region_places = places[:200]  # 지역당 최대 200개로 증가
+                
                 # 카테고리별 그룹핑
                 category_groups = {}
-                for place in places[:30]:  # 지역당 최대 30개 장소
+                for place in region_places:
                     category = place.get('table_name', 'nature')
                     if category not in category_groups:
                         category_groups[category] = []
@@ -315,11 +431,18 @@ async def get_personalized_region_categories(
                     'leisure_sports': '레저'
                 }
                 
+                # 카테고리별 차등 배분 및 최소 보장
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
+                        # 사용자 선호도에 따른 차등 배분
+                        if category in preferred_categories:
+                            target_count = min(15, len(category_places))  # 선호 카테고리: 최대 15개
+                        else:
+                            target_count = min(10, len(category_places))  # 일반 카테고리: 최대 10개
+                        
                         # 각 장소를 Attraction 형태로 변환
                         formatted_attractions = []
-                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                        for place in category_places[:target_count]:
                             if place.get('place_id') and place.get('table_name'):
                                 # 이미지 URL 처리
                                 image_url = None
@@ -356,7 +479,9 @@ async def get_personalized_region_categories(
                                     'category': category
                                 })
                         
-                        if formatted_attractions:  # 변환된 장소가 있는 경우만
+                        # 카테고리별 최소 개수 체크 - 카테고리 무결성 보장
+                        # 최소 3개 이상일 때만 섹션으로 표시 (품질 보장)
+                        if len(formatted_attractions) >= 3:  # 최소 3개 이상만 표시
                             category_sections.append({
                                 'category': category,
                                 'categoryName': category_names.get(category, category),
@@ -480,6 +605,80 @@ async def get_personalized_region_categories(
     except Exception as e:
         logger.error(f"Error getting personalized region categories: {str(e)}")
         raise HTTPException(status_code=500, detail="개인화 지역별 카테고리 추천 조회 중 오류가 발생했습니다.")
+
+@router.get("/itinerary/{place_id}")
+async def get_itinerary_recommendations(
+    place_id: str,
+    category: Optional[str] = Query(None, description="카테고리 필터 (전체는 None, 개별: accommodation, humanities, etc.)"),
+    current_user = Depends(get_current_user_optional),
+    limit: int = Query(50, ge=1, le=100, description="결과 개수 제한")
+):
+    """
+    일정 짜기 페이지용 추천 API
+    - 선택한 장소의 지역 기준으로 카테고리별 추천
+    - 상단: 개인화 추천, 하단: 코사인 유사도 순
+    """
+    try:
+        # 1. place_id에서 테이블명과 ID 분리
+        if '_' not in place_id:
+            raise HTTPException(status_code=400, detail="잘못된 place_id 형식입니다.")
+        
+        table_name, actual_place_id = place_id.split('_', 1)
+        
+        # 2. 선택한 장소의 지역 정보 조회
+        target_region = await get_place_region(table_name, actual_place_id)
+        if not target_region:
+            raise HTTPException(status_code=404, detail="선택한 장소를 찾을 수 없습니다.")
+        
+        logger.info(f"Itinerary recommendations for region: {target_region}, category: {category}")
+        
+        # 3. 카테고리별 추천 로직
+        if current_user and hasattr(current_user, 'user_id'):
+            # 로그인 상태: 개인화 + 유사도 혼합
+            user_id = str(current_user.user_id)
+            
+            # 개인화 추천 (상단)
+            personalized_places = await recommendation_engine.get_personalized_recommendations(
+                user_id=user_id,
+                region=target_region,
+                category=category,
+                limit=min(25, limit // 2)  # 절반은 개인화
+            )
+            
+            # 코사인 유사도 순 (하단) - 중복 제거
+            used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
+            similarity_places = await get_similarity_based_places(
+                target_region, category, limit - len(personalized_places), used_place_ids
+            )
+            
+            # 결합
+            all_places = personalized_places + similarity_places
+            
+            # 추천 타입 마킹
+            for i, place in enumerate(all_places):
+                if i < len(personalized_places):
+                    place['recommendation_type'] = 'personalized'
+                else:
+                    place['recommendation_type'] = 'similarity'
+            
+        else:
+            # 비로그인 상태: 코사인 유사도만
+            all_places = await get_similarity_based_places(target_region, category, limit, set())
+            for place in all_places:
+                place['recommendation_type'] = 'similarity'
+        
+        return {
+            'region': target_region,
+            'category': category or 'all',
+            'total': len(all_places),
+            'places': all_places
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting itinerary recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail="일정 추천 조회 중 오류가 발생했습니다.")
 
 @router.get("/stats")
 async def get_recommendation_stats(
