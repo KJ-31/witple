@@ -213,6 +213,26 @@ export default function Home() {
     }
   }, [selectedRegion, selectedCategory, loadFilteredAttractions, loadRecommendedCities])
 
+  // 필터 패널 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element
+      if (showFilters && 
+          !target.closest('.filter-panel') && 
+          !target.closest('input[placeholder="어디로 떠나볼까요?"]')) {
+        setShowFilters(false)
+      }
+    }
+
+    if (showFilters) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showFilters])
+
   // 무한 스크롤 감지
   const lastElementRef = useCallback((node: HTMLDivElement | null) => {
     if (loadingRef.current) return
@@ -289,6 +309,7 @@ export default function Home() {
             placeholder="어디로 떠나볼까요?"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setShowFilters(true)}
             className="
               w-full px-6 pr-12 py-[1.14rem] text-lg
               rounded-3xl
@@ -331,114 +352,107 @@ export default function Home() {
               </button>
             </div>
             
-            {searchError && (
-              <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-4">
-                <p className="text-red-300">{searchError}</p>
-              </div>
-            )}
-            
-            {searchResults.length === 0 && !isSearching && !searchError ? (
-              <div className="text-center py-8">
-                <div className="text-6xl mb-4">🔍</div>
-                <p className="text-gray-400 text-lg mb-2">검색 결과가 없습니다</p>
-                <p className="text-gray-500 text-sm">다른 키워드로 검색해보세요</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {searchResults.map((result, index) => (
-                  <div
-                    key={`${result.name}-${result.address}-${index}`}
-                    onClick={() => router.push(`/attraction/${result.id}`)}
-                    className="bg-gray-800/50 hover:bg-gray-700/50 p-4 rounded-2xl cursor-pointer transition-colors border border-gray-700/50"
-                  >
-                    <div className="flex items-start space-x-4">
-                      {/* 카테고리 아이콘 */}
-                      <div className="flex-shrink-0 w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                        <span className="text-2xl">
-                          {result.category === 'nature' && '🌲'}
-                          {result.category === 'restaurants' && '🍽️'}
-                          {result.category === 'shopping' && '🛍️'}
-                          {result.category === 'accommodation' && '🏨'}
-                          {result.category === 'humanities' && '🏛️'}
-                          {result.category === 'leisure_sports' && '⚽'}
-                        </span>
-                      </div>
-                      
-                      {/* 정보 */}
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-white font-semibold text-lg mb-1 truncate">
-                          {result.name}
-                        </h3>
-                        <p className="text-gray-300 text-sm mb-2 line-clamp-2">
-                          {result.overview}
-                        </p>
-                        <div className="flex items-center space-x-4 text-xs text-gray-400">
-                          <div className="flex items-center space-x-1">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <span>{result.address}</span>
-                          </div>
-                          <div className="flex items-center space-x-1">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                            </svg>
-                            <span className="capitalize">{result.category}</span>
+            {/* 스크롤 가능한 검색 결과 컨테이너 - 화면의 절반 높이로 제한 */}
+            <div 
+              className="overflow-y-auto bg-[#0F1A31]/30 rounded-2xl p-4 scrollbar-thin scrollbar-thumb-[#3E68FF] scrollbar-track-transparent"
+              style={{ 
+                height: '50vh', 
+                maxHeight: '400px',
+                scrollbarWidth: 'thin',
+                scrollbarColor: '#3E68FF transparent'
+              }}
+            >
+              {searchError && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-4">
+                  <p className="text-red-300">{searchError}</p>
+                </div>
+              )}
+              
+              {searchResults.length === 0 && !isSearching && !searchError ? (
+                <div className="text-center py-8">
+                  <div className="text-6xl mb-4">🔍</div>
+                  <p className="text-gray-400 text-lg mb-2">검색 결과가 없습니다</p>
+                  <p className="text-gray-500 text-sm">다른 키워드로 검색해보세요</p>
+                </div>
+              ) : (
+                <div className="space-y-4 pr-2">
+                  {searchResults.map((result, index) => (
+                    <div
+                      key={`${result.name}-${result.address}-${index}`}
+                      onClick={() => router.push(`/attraction/${result.id}`)}
+                      className="bg-gray-800/50 hover:bg-gray-700/50 p-4 rounded-2xl cursor-pointer transition-colors border border-gray-700/50"
+                    >
+                      <div className="flex items-start space-x-4">
+                        {/* 카테고리 아이콘 */}
+                        <div className="flex-shrink-0 w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                          <span className="text-2xl">
+                            {result.category === 'nature' && '🌲'}
+                            {result.category === 'restaurants' && '🍽️'}
+                            {result.category === 'shopping' && '🛍️'}
+                            {result.category === 'accommodation' && '🏨'}
+                            {result.category === 'humanities' && '🏛️'}
+                            {result.category === 'leisure_sports' && '⚽'}
+                          </span>
+                        </div>
+                        
+                        {/* 정보 */}
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-white font-semibold text-lg mb-1 truncate">
+                            {result.name}
+                          </h3>
+                          <p className="text-gray-300 text-sm mb-2 line-clamp-2">
+                            {result.overview}
+                          </p>
+                          <div className="flex items-center space-x-4 text-xs text-gray-400">
+                            <div className="flex items-center space-x-1">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              <span>{result.address}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                              </svg>
+                              <span className="capitalize">{result.category}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Filter Section - 검색 결과가 표시될 때는 숨김 */}
-      {!showSearchResults && (
+      {/* Filter Section - 검색창 포커스 시에만 표시 */}
+      {showFilters && !showSearchResults && (
         <div className="px-4 mb-16">
-        <div className="w-[90%] mx-auto">
-          {/* Filter Toggle Button */}
-          <div className="flex items-center justify-between mb-4">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2 px-4 py-2 bg-[#1F3C7A]/30 rounded-full text-[#6FA0E6] hover:bg-[#1F3C7A]/50 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              <span className="text-sm font-medium">필터</span>
+          <div className="w-[90%] mx-auto">
+            {/* Filter Panel */}
+            <div className="bg-[#0F1A31]/50 rounded-2xl p-4 space-y-4 filter-panel">
+              {/* Clear Filters Button */}
               {(selectedRegion || selectedCategory) && (
-                <span className="bg-[#3E68FF] text-white text-xs px-2 py-1 rounded-full">
-                  {[selectedRegion, selectedCategory].filter(Boolean).length}
-                </span>
+                <div className="flex justify-end mb-2">
+                  <button
+                    onClick={() => {
+                      setSelectedRegion('')
+                      setSelectedCategory('')
+                      // 필터 초기화 후 로그인 상태에 따라 적절한 데이터 로드
+                      setTimeout(() => {
+                        loadRecommendedCities(0)
+                      }, 100)
+                    }}
+                    className="text-[#6FA0E6] hover:text-white text-sm transition-colors"
+                  >
+                    필터 초기화
+                  </button>
+                </div>
               )}
-            </button>
-            
-            {/* Clear Filters */}
-            {(selectedRegion || selectedCategory) && (
-              <button
-                onClick={() => {
-                  setSelectedRegion('')
-                  setSelectedCategory('')
-                  // 필터 초기화 후 로그인 상태에 따라 적절한 데이터 로드
-                  setTimeout(() => {
-                    loadRecommendedCities(0)
-                  }, 100)
-                }}
-                className="text-[#6FA0E6] hover:text-white text-sm transition-colors"
-              >
-                필터 초기화
-              </button>
-            )}
-          </div>
-
-          {/* Filter Panel */}
-          {showFilters && (
-            <div className="bg-[#0F1A31]/50 rounded-2xl p-4 space-y-4">
               {/* Region Filter */}
               <div>
                 <label className="block text-[#94A9C9] text-sm font-medium mb-2">지역</label>
@@ -499,8 +513,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          )}
-        </div>
+          </div>
         </div>
       )}
 
