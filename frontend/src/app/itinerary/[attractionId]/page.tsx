@@ -806,127 +806,21 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     router.push(`/map?${queryParams.toString()}`)
   }
 
-  if (loading) {
+  const renderMainContent = () => {
+    if (loading) {
+      return (
+        <div className="px-4 space-y-3">
+          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+            <p className="text-[#6FA0E6] text-lg mb-2">일정을 준비하는 중...</p>
+            <p className="text-[#94A9C9] text-sm">잠시만 기다려주세요</p>
+          </div>
+        </div>
+      )
+    }
+
     return (
-      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
-          <p className="text-[#94A9C9]">일정을 준비하는 중...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error || (!attraction && params.attractionId !== 'general')) {
-    return (
-      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-[#94A9C9] text-lg mb-4">{error || '명소를 찾을 수 없습니다'}</p>
-          <button 
-            onClick={() => router.back()}
-            className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
-          >
-            돌아가기
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen bg-[#0B1220] text-white relative">
-      {/* Scrollable Content */}
-      <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-4">
-          <button
-            onClick={handleBack}
-            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-
-          <h1 className="text-lg font-semibold text-[#94A9C9]">
-            {params.attractionId === 'general' ? '여행 일정 만들기' : '여행 기간이 어떻게 되시나요?'}
-          </h1>
-
-          <div className="w-10 h-10" /> {/* Spacer */}
-        </div>
-
-      {/* Travel Period Info */}
-      <div className="px-4 mb-6 text-center">
-        <p className="text-[#6FA0E6] text-sm mb-2">
-          {dateRange[0].getMonth() + 1}월 {dateRange[0].getDate()}일 - {dateRange[dateRange.length - 1].getMonth() + 1}월 {dateRange[dateRange.length - 1].getDate()}일
-        </p>
-        <p className="text-[#94A9C9] text-xs">
-          {dateRange.length}일간의 여행 • 선택된 장소: {getAllSelectedPlaces().length}개
-        </p>
-      </div>
-
-      {/* Day Selection Tabs */}
-      <div className="px-4 mb-6">
-        {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
-        <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
-          {dateRange.map((date, index) => {
-            const dayNumber = index + 1
-            const isSelected = selectedDayForAdding === dayNumber
-            const placesForDay = getPlacesForDay(dayNumber).length
-
-            return (
-              <button
-                key={dayNumber}
-                onClick={() => setSelectedDayForAdding(dayNumber)}
-                className={`
-                  flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-w-[70px]
-                  ${isSelected
-                    ? 'bg-[#3E68FF] text-white shadow-lg'
-                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
-                  }
-                `}
-              >
-                <div className="text-center">
-                  <div className="font-semibold">Day {dayNumber}</div>
-                  <div className="text-xs opacity-80">
-                    {date.getMonth() + 1}/{date.getDate() + 1}
-                  </div>
-                  {placesForDay > 0 && (
-                    <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
-                      {placesForDay}개
-                    </div>
-                  )}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Category Tabs */}
-      <div className="px-4 mb-6">
-        <div className="flex space-x-2 overflow-x-auto no-scrollbar">
-          {categories.map(category => (
-            <button
-              key={category.key}
-              onClick={() => setSelectedCategory(category.key)}
-              className={`
-                flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-1
-                ${selectedCategory === category.key
-                  ? 'bg-[#3E68FF] text-white shadow-lg'
-                  : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
-                }
-              `}
-            >
-              <span>{category.icon}</span>
-              <span>{category.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Places List */}
-      <div className="px-4 space-y-3 transition-all duration-300 ease-in-out">
+      <div className="px-4 space-y-3 opacity-100 transition-opacity duration-200 ease-in-out">
         {/* 북마크 카테고리 로딩 상태 */}
         {selectedCategory === 'bookmarked' && loadingSavedLocations ? (
           <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
@@ -1042,53 +936,167 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             )
           })
         )}
+
+        {/* Load More Button / No More Results Message */}
+        {!loading && (
+          <div className="px-4 mb-6">
+            {hasMore && !noMoreResults ? (
+              <button
+                onClick={() => {
+                  if (!loadingMore) {
+                    const cityName = attraction?.city?.name || '전국'
+                    const region = attraction?.region || '전국'
+                    loadMoreAttractions(cityName, region, currentPage + 1, false)
+                  }
+                }}
+                disabled={loadingMore}
+                className={`
+                  w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
+                  ${loadingMore 
+                    ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed' 
+                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
+                  }
+                `}
+              >
+                {loadingMore ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#6FA0E6]"></div>
+                    더 많은 장소 로딩 중...
+                  </div>
+                ) : (
+                  '더 많은 장소 보기'
+                )}
+              </button>
+            ) : noMoreResults || !hasMore ? (
+              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
+                <div className="text-[#6FA0E6] text-sm mb-1">🏁</div>
+                <p className="text-[#94A9C9] text-sm">더 이상 추천할 장소가 없습니다</p>
+                <p className="text-[#6FA0E6] text-xs mt-1">위의 장소들 중에서 선택해보세요!</p>
+              </div>
+            ) : (
+              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
+                <div className="text-[#3E68FF] text-sm mb-1">✨</div>
+                <p className="text-[#94A9C9] text-sm">개인화 추천 알고리즘이 적용된 장소들입니다</p>
+                <p className="text-[#6FA0E6] text-xs mt-1">취향에 맞는 {filteredPlaces.length}개 장소를 추천해드려요!</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (error || (!attraction && params.attractionId !== 'general')) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-[#94A9C9] text-lg mb-4">{error || '명소를 찾을 수 없습니다'}</p>
+          <button 
+            onClick={() => router.back()}
+            className="text-[#3E68FF] hover:text-[#6FA0E6] transition-colors"
+          >
+            돌아가기
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0B1220] text-white relative">
+      {/* Scrollable Content */}
+      <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4">
+          <button
+            onClick={handleBack}
+            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <h1 className="text-lg font-semibold text-[#94A9C9]">
+            {params.attractionId === 'general' ? '여행 일정 만들기' : '여행 기간이 어떻게 되시나요?'}
+          </h1>
+
+          <div className="w-10 h-10" /> {/* Spacer */}
+        </div>
+
+      {/* Travel Period Info */}
+      <div className="px-4 mb-6 text-center">
+        <p className="text-[#6FA0E6] text-sm mb-2">
+          {dateRange[0].getMonth() + 1}월 {dateRange[0].getDate()}일 - {dateRange[dateRange.length - 1].getMonth() + 1}월 {dateRange[dateRange.length - 1].getDate()}일
+        </p>
+        <p className="text-[#94A9C9] text-xs">
+          {dateRange.length}일간의 여행 • 선택된 장소: {getAllSelectedPlaces().length}개
+        </p>
       </div>
 
-      {/* Load More Button / No More Results Message */}
-      {!loading && (
-        <div className="px-4 mb-6">
-          {hasMore && !noMoreResults ? (
+      {/* Day Selection Tabs */}
+      <div className="px-4 mb-6">
+        {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
+        <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
+          {dateRange.map((date, index) => {
+            const dayNumber = index + 1
+            const isSelected = selectedDayForAdding === dayNumber
+            const placesForDay = getPlacesForDay(dayNumber).length
+
+            return (
+              <button
+                key={dayNumber}
+                onClick={() => setSelectedDayForAdding(dayNumber)}
+                className={`
+                  flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 min-w-[70px]
+                  ${isSelected
+                    ? 'bg-[#3E68FF] text-white shadow-lg'
+                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
+                  }
+                `}
+              >
+                <div className="text-center">
+                  <div className="font-semibold">Day {dayNumber}</div>
+                  <div className="text-xs opacity-80">
+                    {date.getMonth() + 1}/{date.getDate() + 1}
+                  </div>
+                  {placesForDay > 0 && (
+                    <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
+                      {placesForDay}개
+                    </div>
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="px-4 mb-6">
+        <div className="flex space-x-2 overflow-x-auto no-scrollbar">
+          {categories.map(category => (
             <button
-              onClick={() => {
-                if (!loadingMore) {
-                  const cityName = attraction?.city?.name || '전국'
-                  const region = attraction?.region || '전국'
-                  loadMoreAttractions(cityName, region, currentPage + 1, false)
-                }
-              }}
-              disabled={loadingMore}
+              key={category.key}
+              onClick={() => setSelectedCategory(category.key)}
               className={`
-                w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
-                ${loadingMore 
-                  ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed' 
-                  : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
+                flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-1
+                ${selectedCategory === category.key
+                  ? 'bg-[#3E68FF] text-white shadow-lg'
+                  : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
                 }
               `}
             >
-              {loadingMore ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#6FA0E6]"></div>
-                  더 많은 장소 로딩 중...
-                </div>
-              ) : (
-                '더 많은 장소 보기'
-              )}
+              <span>{category.icon}</span>
+              <span>{category.name}</span>
             </button>
-          ) : noMoreResults || !hasMore ? (
-            <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
-              <div className="text-[#6FA0E6] text-sm mb-1">🏁</div>
-              <p className="text-[#94A9C9] text-sm">더 이상 추천할 장소가 없습니다</p>
-              <p className="text-[#6FA0E6] text-xs mt-1">위의 장소들 중에서 선택해보세요!</p>
-            </div>
-          ) : (
-            <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
-              <div className="text-[#3E68FF] text-sm mb-1">✨</div>
-              <p className="text-[#94A9C9] text-sm">개인화 추천 알고리즘이 적용된 장소들입니다</p>
-              <p className="text-[#6FA0E6] text-xs mt-1">취향에 맞는 {filteredPlaces.length}개 장소를 추천해드려요!</p>
-            </div>
-          )}
+          ))}
         </div>
-      )}
+      </div>
+
+      {/* Places List */}
+      {renderMainContent()}
+
 
         {/* Selected Places Summary */}
         {getAllSelectedPlaces().length > 0 && (
