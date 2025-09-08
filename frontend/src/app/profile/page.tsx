@@ -1487,32 +1487,28 @@ export default function ProfilePage() {
       {/* Trip Delete Confirmation Modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-2xl w-full max-w-sm">
-            <div className="p-6">
-              <div className="text-center mb-6">
-                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-white mb-2">일정을 삭제하시겠습니까?</h3>
-                <p className="text-gray-400 text-sm">
-                  삭제된 일정은 복구할 수 없습니다.<br/>
-                  정말로 삭제하시겠습니까?
-                </p>
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
               </div>
-
-              {/* 버튼 */}
+              <h3 className="text-lg font-semibold text-white mb-2">여행 일정 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                여행 일정을 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 일정은 복구할 수 없습니다.</span>
+              </p>
               <div className="flex space-x-3">
                 <button
                   onClick={cancelDeleteTrip}
-                  className="flex-1 py-3 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
                 >
                   취소
                 </button>
                 <button
                   onClick={executeDeleteTrip}
-                  className="flex-1 py-3 px-4 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
                 >
                   삭제
                 </button>
@@ -1525,32 +1521,28 @@ export default function ProfilePage() {
       {/* Post Delete Confirmation Modal */}
       {showPostDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-2xl w-full max-w-sm">
-            <div className="p-6">
-              <div className="text-center mb-6">
-                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-white mb-2">포스트를 삭제하시겠습니까?</h3>
-                <p className="text-gray-400 text-sm">
-                  삭제된 포스트는 복구할 수 없습니다.<br/>
-                  정말로 삭제하시겠습니까?
-                </p>
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
               </div>
-
-              {/* 버튼 */}
+              <h3 className="text-lg font-semibold text-white mb-2">포스트 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                포스트를 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 포스트는 복구할 수 없습니다.</span>
+              </p>
               <div className="flex space-x-3">
                 <button
                   onClick={cancelDeletePost}
-                  className="flex-1 py-3 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
                 >
                   취소
                 </button>
                 <button
                   onClick={executeDeletePost}
-                  className="flex-1 py-3 px-4 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
                 >
                   삭제
                 </button>
@@ -1563,33 +1555,29 @@ export default function ProfilePage() {
       {/* Saved Location Delete Confirmation Modal */}
       {showSavedLocationDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-2xl w-full max-w-sm">
-            <div className="p-6">
-              <div className="text-center mb-6">
-                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-white mb-2">저장된 장소를 삭제하시겠습니까?</h3>
-                <p className="text-gray-400 text-sm">
-                  삭제된 장소는 복구할 수 없습니다.<br/>
-                  정말로 삭제하시겠습니까?
-                </p>
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
               </div>
-
-              {/* 버튼 */}
+              <h3 className="text-lg font-semibold text-white mb-2">저장된 장소 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                저장된 장소를 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 장소는 복구할 수 없습니다.</span>
+              </p>
               <div className="flex space-x-3">
                 <button
                   onClick={cancelDeleteSavedLocation}
-                  className="flex-1 py-3 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
                 >
                   취소
                 </button>
                 <button
                   onClick={executeDeleteSavedLocation}
-                  className="flex-1 py-3 px-4 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
                 >
                   삭제
                 </button>
