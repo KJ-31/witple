@@ -634,7 +634,6 @@ export default function ProfilePage() {
     const lockedPlaceKeys = trip.places
       .filter(place => place.isLocked)
       .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
-    console.log('lockedPlaceKeys:', lockedPlaceKeys)
     
     // 날짜 차이 계산
     const startDate = new Date(trip.start_date)
@@ -677,7 +676,6 @@ export default function ProfilePage() {
     const lockedPlaceKeys = trip.places
       .filter(place => place.isLocked)
       .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
-    console.log('lockedPlaceKeys:', lockedPlaceKeys)
     
     // 날짜 차이 계산
     const startDate = new Date(trip.start_date)

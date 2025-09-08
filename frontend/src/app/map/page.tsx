@@ -320,14 +320,11 @@ export default function MapPage() {
         
         // 잠금 상태 복원
         if (lockedPlacesParam) {
-          console.log('lockedPlacesParam:', lockedPlacesParam)
           const lockedKeys = lockedPlacesParam.split(',')
-          console.log('lockedKeys:', lockedKeys)
           const restoredLockedPlaces: {[key: string]: boolean} = {}
           lockedKeys.forEach(key => {
             restoredLockedPlaces[key] = true
           })
-          console.log('restoredLockedPlaces:', restoredLockedPlaces)
           setLockedPlaces(restoredLockedPlaces)
         }
       } catch (error) {
@@ -2036,12 +2033,7 @@ export default function MapPage() {
                                 }`}
                                 title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
                               >
-                              {(() => {
-                                const lockKey = `${place.id}_${day}`;
-                                const isLocked = lockedPlaces[lockKey];
-                                console.log(`장소 ${place.name} (${place.id}) - 키: ${lockKey}, 잠금상태: ${isLocked}`);
-                                return isLocked;
-                              })() ? (
+                              {lockedPlaces[`${place.id}_${day}`] ? (
                                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                 </svg>
