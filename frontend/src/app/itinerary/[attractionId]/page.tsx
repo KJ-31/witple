@@ -887,7 +887,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
                       <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
                         {/* 북마크 버튼 */}
-                        <button
+                        {/* <button
                           onClick={(e) => {
                             e.stopPropagation()
                             handleBookmarkToggle(place)
@@ -904,7 +904,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                           <svg className="w-4 h-4" fill={bookmarkedPlaces.has(place.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                           </svg>
-                        </button>
+                        </button> */}
 
                         {/* 일정 추가 버튼 */}
                         <button
@@ -996,8 +996,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-white relative">
-      {/* Scrollable Content */}
-      <div className="overflow-y-auto no-scrollbar" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Fixed Header Area */}
+      <div className="fixed top-0 left-0 right-0 bg-[#0B1220] z-30">
         {/* Header */}
         <div className="flex items-center justify-between p-4">
           {/* 뒤로가기 버튼 - 상세 페이지에서 온 경우에만 표시 */}
@@ -1033,7 +1033,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
         {/* Day Selection Tabs */}
         <div className="px-4 mb-6">
-          {/* <p className="text-[#94A9C9] text-sm mb-3 text-center">어느 날에 추가하실까요?</p> */}
           <div className="flex justify-center gap-2 overflow-x-auto no-scrollbar">
             {dateRange.map((date, index) => {
               const dayNumber = index + 1
@@ -1070,7 +1069,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         </div>
 
         {/* Category Tabs */}
-        <div className="px-4 mb-6">
+        <div className="px-4 pb-4">
           <div className="flex space-x-2 overflow-x-auto no-scrollbar">
             {categories.map(category => (
               <button
@@ -1090,15 +1089,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             ))}
           </div>
         </div>
+      </div>
 
+      {/* Scrollable Content Area */}
+      <div className="pt-80 pb-32 overflow-y-auto no-scrollbar" style={{ height: '100vh' }}>
         {/* Places List */}
         {renderMainContent()}
-
 
         {/* Selected Places Summary */}
         {getAllSelectedPlaces().length > 0 && (
           <div className="px-4 py-6">
-            <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-4">
+            <div className="bg-[#12345D]/50 rounded-2xl p-4">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-white font-semibold">선택된 장소</h4>
                 <span className="text-[#3E68FF] font-semibold">{getAllSelectedPlaces().length}개</span>
@@ -1134,20 +1135,22 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Fixed Bottom Button - Create Itinerary */}
-      <div className="absolute bottom-16 left-0 right-0 bg-[#0B1220] p-4 z-10">
-        <button
-          onClick={handleCreateItinerary}
-          disabled={getAllSelectedPlaces().length === 0}
-          className={`
-            w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
-            ${getAllSelectedPlaces().length > 0
-              ? 'bg-[#3E68FF] hover:bg-[#4C7DFF] text-white shadow-lg'
-              : 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
-            }
-          `}
-        >
-          여행 일정 만들기
-        </button>
+      <div className="absolute bottom-0 left-0 right-0 bg-[#0B1220] pt-4 pb-24 z-10">
+        <div className="px-4">
+          <button
+            onClick={handleCreateItinerary}
+            disabled={getAllSelectedPlaces().length === 0}
+            className={`
+              w-full py-4 rounded-2xl text-lg font-semibold transition-all duration-200
+              ${getAllSelectedPlaces().length > 0
+                ? 'bg-[#3E68FF] hover:bg-[#4C7DFF] text-white shadow-lg'
+                : 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
+              }
+            `}
+          >
+            여행 일정 만들기
+          </button>
+        </div>
       </div>
 
       <BottomNavigation />
