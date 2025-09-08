@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../../components'
 
 interface ItineraryBuilderProps {
@@ -53,11 +54,12 @@ interface SelectedPlace {
   sourceTable?: string // 어떤 테이블에서 온 데이터인지 추적
 }
 
-type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
+type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' | 'bookmarked'
 
 export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { data: session } = useSession()
 
   // URL에서 선택된 날짜들 파싱
   const startDateParam = searchParams.get('startDate')
@@ -76,6 +78,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
   const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 현재 선택된 날짜 탭
   const [placesByDay, setPlacesByDay] = useState<{ [dayNumber: number]: SelectedPlace[] }>({}) // 날짜별로 장소 저장
+  const [bookmarkedPlaces, setBookmarkedPlaces] = useState<Set<string>>(new Set()) // 북마크된 장소들
+  const [savedLocations, setSavedLocations] = useState<any[]>([]) // 저장된 장소 목록
+  const [loadingSavedLocations, setLoadingSavedLocations] = useState(false)
+  const [categoryCache, setCategoryCache] = useState<{ [key in CategoryKey]?: any[] }>({}) // 카테고리별 데이터 캐시
+  const [loadedCategories, setLoadedCategories] = useState<Set<CategoryKey>>(new Set()) // 로드된 카테고리 추적
 
   // 선택된 날짜 범위 생성
   const generateDateRange = () => {
@@ -108,6 +115,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // 추천 알고리즘 기반 관광지 로드 함수
   const loadFilteredAttractions = async (region: string, category: CategoryKey = 'all', isFirstLoad: boolean = false) => {
+    // 캐시 확인 - 이미 로드된 카테고리면 캐시된 데이터 사용
+    if (loadedCategories.has(category) && categoryCache[category]) {
+      console.log(`캐시된 데이터 사용: ${category}`)
+      if (isFirstLoad) {
+        setRelatedAttractions(categoryCache[category] || [])
+      }
+      return
+    }
+
     if (isFirstLoad) {
       setLoading(true)
     } else {
@@ -142,6 +158,20 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           setNoMoreResults(false)
           // 추천 API에서 50개 받았으면 더 많은 데이터를 위해 hasMore = true로 설정
           setHasMore(filtered.length >= 50)
+          
+          // 캐시에 저장
+          if (isFirstLoad) {
+            setCategoryCache(prev => ({
+              ...prev,
+              [category]: filtered
+            }))
+            setLoadedCategories(prev => {
+              const newSet = new Set(prev)
+              newSet.add(category)
+              return newSet
+            })
+            console.log(`카테고리 캐시 저장 완료: ${category}`)
+          }
         } else {
           // 추천 알고리즘에서는 페이지네이션 없이 한 번에 모든 결과 반환
           setNoMoreResults(true)
@@ -379,6 +409,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
   }, [params.attractionId])
 
+  // 세션이 있을 때 저장된 장소들 초기 로드
+  useEffect(() => {
+    if (session) {
+      loadSavedLocations()
+    }
+  }, [session])
 
   // 전체 카테고리의 데이터를 미리 로드하여 카운트 계산
   const loadAllCategoriesForCount = async (region: string) => {
@@ -414,12 +450,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 카테고리 변경 시 추천 관광지 다시 로드
   useEffect(() => {
     if (selectedCategory) {
-      const loadCategoryPlaces = async () => {
-        // 1차: 추천 알고리즘 시도
-        const region = attraction?.region || '전국'
-        await loadFilteredAttractions(region, selectedCategory, true)
+      if (selectedCategory === 'bookmarked') {
+        // 북마크 카테고리인 경우 저장된 장소들 로드
+        loadSavedLocations()
+      } else {
+        // 다른 카테고리인 경우 추천 관광지 로드
+        const loadCategoryPlaces = async () => {
+          const region = attraction?.region || '전국'
+          await loadFilteredAttractions(region, selectedCategory, true)
+        }
+        loadCategoryPlaces()
       }
-      loadCategoryPlaces()
     }
   }, [selectedCategory, attraction])
 
@@ -445,6 +486,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   // 카테고리 정의
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
+    { key: 'bookmarked' as CategoryKey, name: '북마크', icon: '🔖' },
     { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
     { key: 'humanities' as CategoryKey, name: '인문', icon: '🏛️' },
     { key: 'leisure_sports' as CategoryKey, name: '레포츠', icon: '⚽' },
@@ -453,8 +495,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     { key: 'shopping' as CategoryKey, name: '쇼핑', icon: '🛍️' }
   ]
 
-  // 모든 장소 가져오기
+  // 모든 장소 가져오기 (캐시 우선 사용)
   const getAllPlaces = () => {
+    // 현재 선택된 카테고리의 캐시된 데이터가 있으면 사용
+    if (selectedCategory !== 'bookmarked' && categoryCache[selectedCategory]) {
+      return categoryCache[selectedCategory] || []
+    }
+    
     // allCategoryPlaces가 비어있지 않으면 그것을 사용, 아니면 relatedAttractions 사용
     return allCategoryPlaces.length > 0 ? allCategoryPlaces : relatedAttractions
   }
@@ -465,6 +512,21 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const getFilteredPlaces = () => {
     if (selectedCategory === 'all') {
       return allPlaces
+    }
+    
+    // 북마크 카테고리인 경우 저장된 장소들을 반환
+    if (selectedCategory === 'bookmarked') {
+      return savedLocations.map(location => ({
+        id: location.id,
+        name: location.name,
+        address: location.address,
+        description: location.address,
+        image: location.image || '',
+        latitude: location.latitude ? parseFloat(location.latitude) : undefined,
+        longitude: location.longitude ? parseFloat(location.longitude) : undefined,
+        category: location.category || '저장된 장소',
+        sourceTable: 'saved'
+      }))
     }
     
     // sourceTable 기준으로 필터링 + 키워드 기반 매칭
@@ -557,6 +619,165 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     })
   }
 
+  // 토큰 가져오기 함수
+  const getToken = () => {
+    // 먼저 세션에서 토큰 확인
+    if ((session as any)?.backendToken) {
+      return (session as any).backendToken
+    }
+    // 세션에 없으면 localStorage에서 확인
+    return localStorage.getItem('access_token')
+  }
+
+  // 북마크 토글 함수
+  const handleBookmarkToggle = async (place: any) => {
+    if (!session) {
+      alert('로그인이 필요합니다.')
+      router.push('/auth/login')
+      return
+    }
+
+    try {
+      const token = getToken()
+      if (!token) {
+        alert('로그인이 필요합니다.')
+        router.push('/auth/login')
+        return
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const isBookmarked = bookmarkedPlaces.has(place.id)
+
+      if (isBookmarked) {
+        // 북마크 해제
+        const checkResponse = await fetch(`${API_BASE_URL}/api/v1/saved-locations/check`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: place.name,
+            address: place.address,
+            latitude: place.latitude?.toString(),
+            longitude: place.longitude?.toString()
+          })
+        })
+
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json()
+          if (checkData.location_id) {
+            const deleteResponse = await fetch(`${API_BASE_URL}/api/v1/saved-locations/${checkData.location_id}`, {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            })
+
+            if (deleteResponse.ok) {
+              setBookmarkedPlaces(prev => {
+                const newSet = new Set(prev)
+                newSet.delete(place.id)
+                return newSet
+              })
+            }
+          }
+        }
+      } else {
+        // 북마크 추가
+        const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: place.name,
+            address: place.address,
+            latitude: place.latitude?.toString(),
+            longitude: place.longitude?.toString()
+          })
+        })
+
+        if (response.ok) {
+          setBookmarkedPlaces(prev => {
+            const newSet = new Set(prev)
+            newSet.add(place.id)
+            return newSet
+          })
+        }
+      }
+    } catch (error) {
+      console.error('북마크 처리 오류:', error)
+    }
+  }
+
+  // 저장된 장소들을 가져오는 함수
+  const loadSavedLocations = async () => {
+    if (!session) return
+    
+    // 북마크 카테고리가 이미 캐시에 있으면 재사용
+    if (loadedCategories.has('bookmarked') && categoryCache.bookmarked) {
+      console.log('캐시된 북마크 데이터 사용')
+      setSavedLocations(categoryCache.bookmarked)
+      return
+    }
+    
+    try {
+      setLoadingSavedLocations(true)
+      const token = getToken()
+      
+      if (!token) {
+        console.log('토큰 없음 - 저장된 장소 로딩 건너뛰기')
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        console.log('=== 저장된 장소 API 응답 디버깅 ===')
+        console.log('전체 응답:', data)
+        console.log('locations:', data.locations)
+        console.log('saved_locations:', data.saved_locations)
+        console.log('============================')
+        
+        // 프로필 페이지와 동일하게 data.locations 사용
+        const locations = data.locations || data.saved_locations || []
+        setSavedLocations(locations)
+        
+        // 북마크된 장소 ID들도 함께 업데이트
+        const bookmarkedIds = new Set<string>(locations.map((loc: any) => String(loc.id)) || [])
+        setBookmarkedPlaces(bookmarkedIds)
+        
+        // 북마크 데이터를 캐시에 저장
+        setCategoryCache(prev => ({
+          ...prev,
+          bookmarked: locations
+        }))
+        
+        setLoadedCategories(prev => {
+          const newSet = new Set(prev)
+          newSet.add('bookmarked')
+          return newSet
+        })
+        console.log('북마크 캐시 저장 완료')
+      } else {
+        console.error('저장된 장소 로딩 실패:', response.status)
+        setSavedLocations([])
+      }
+    } catch (error) {
+      console.error('저장된 장소 로딩 중 오류:', error)
+      setSavedLocations([])
+    } finally {
+      setLoadingSavedLocations(false)
+    }
+  }
 
   const handleCreateItinerary = () => {
     const allSelectedPlaces = getAllSelectedPlaces()
@@ -705,8 +926,30 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       </div>
 
       {/* Places List */}
-      <div key={selectedCategory} className="px-4 space-y-3">
-        {filteredPlaces.length === 0 && !loading && !loadingMore ? (
+      <div className="px-4 space-y-3 transition-all duration-300 ease-in-out">
+        {/* 북마크 카테고리 로딩 상태 */}
+        {selectedCategory === 'bookmarked' && loadingSavedLocations ? (
+          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
+            <p className="text-[#6FA0E6] text-lg mb-2">저장된 장소를 불러오는 중...</p>
+            <p className="text-[#94A9C9] text-sm">잠시만 기다려주세요</p>
+          </div>
+        ) : 
+        /* 북마크 카테고리 빈 상태 */
+        selectedCategory === 'bookmarked' && filteredPlaces.length === 0 && !loadingSavedLocations ? (
+          <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
+            <div className="text-6xl mb-4">🔖</div>
+            <p className="text-[#6FA0E6] text-lg mb-2">저장된 장소가 없습니다</p>
+            <p className="text-[#94A9C9] text-sm mb-4">마음에 드는 장소를 북마크해보세요!</p>
+            <div className="flex justify-center">
+              <div className="bg-[#3E68FF]/20 px-4 py-2 rounded-full text-[#6FA0E6] text-sm">
+                다른 카테고리에서 장소를 둘러보세요
+              </div>
+            </div>
+          </div>
+        ) :
+        /* 일반 카테고리 빈 상태 */
+        filteredPlaces.length === 0 && !loading && !loadingMore ? (
           <div className="bg-[#0F1A31]/30 rounded-xl p-8 text-center">
             <p className="text-[#6FA0E6] text-lg mb-2">🔍 더 많은 장소를 찾아보고 있어요!</p>
             <p className="text-[#94A9C9] text-sm mb-4">잠시 후 다른 카테고리의 인기 장소들이 표시됩니다</p>
@@ -728,7 +971,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             const isSelectedOnAnyOtherDay = isPlaceSelectedOnAnyDay(place.id) && !isSelectedOnCurrentDay
             return (
               <div
-                key={`${selectedCategory}-${place.id}-${place.sourceTable}`}
+                key={`place-${place.id}-${place.sourceTable || 'default'}`}
                 className={`
                   bg-[#0F1A31]/50 rounded-xl p-4 transition-all duration-200
                   ${isSelectedOnCurrentDay ? 'ring-2 ring-[#3E68FF] bg-[#3E68FF]/10' :
@@ -756,21 +999,44 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleAddToItinerary(place)}
-                    className={`
-                      ml-4 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex-shrink-0
-                      ${isSelectedOnCurrentDay
-                        ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
-                        : isSelectedOnAnyOtherDay
-                          ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
+                  <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                    {/* 북마크 버튼 */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleBookmarkToggle(place)
+                      }}
+                      className={`
+                        p-2 rounded-lg transition-all duration-200
+                        ${bookmarkedPlaces.has(place.id)
+                          ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
                           : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
-                      }
-                    `}
-                  >
-                    {isSelectedOnCurrentDay ? '선택됨' :
-                      isSelectedOnAnyOtherDay ? `다른날` : '+ 추가'}
-                  </button>
+                        }
+                      `}
+                      title={bookmarkedPlaces.has(place.id) ? '북마크 해제' : '북마크 추가'}
+                    >
+                      <svg className="w-4 h-4" fill={bookmarkedPlaces.has(place.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                    </button>
+
+                    {/* 일정 추가 버튼 */}
+                    <button
+                      onClick={() => handleAddToItinerary(place)}
+                      className={`
+                        px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                        ${isSelectedOnCurrentDay
+                          ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                          : isSelectedOnAnyOtherDay
+                            ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
+                            : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
+                        }
+                      `}
+                    >
+                      {isSelectedOnCurrentDay ? '선택됨' :
+                        isSelectedOnAnyOtherDay ? `다른날` : '+ 추가'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )
