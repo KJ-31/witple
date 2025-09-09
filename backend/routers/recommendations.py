@@ -363,11 +363,11 @@ async def get_personalized_region_categories(
             # 로그인 상태: 개인화 추천 기반
             user_id = str(current_user.user_id)
             
-            # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴
+            # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴 (속도 최적화)
             logger.info(f"Getting personalized recommendations for user: {user_id}")
             personalized_places = await recommendation_engine.get_personalized_recommendations(
                 user_id=user_id,
-                limit=500  # 충분한 데이터를 가져와서 카테고리별 분석
+                limit=100  # 속도 개선: 500개 → 100개로 축소
             )
             logger.info(f"Retrieved {len(personalized_places)} personalized places")
             
@@ -395,30 +395,41 @@ async def get_personalized_region_categories(
             top_regions.sort(key=lambda x: x[1], reverse=True)
             selected_regions = top_regions[:limit]
             
-            # 사용자 선호도 가져오기 (카테고리별 차등 배분용)
+            # 사용자 선호도 가져오기 (카테고리별 차등 배분 및 우선순위용)
             user_preferences = await recommendation_engine.get_user_preferences(user_id)
             preferred_categories = set()
-            if user_preferences and user_preferences.get('tags'):
+            user_priority = None
+            
+            if user_preferences:
+                # 우선순위 정보 가져오기
+                basic_prefs = user_preferences.get('basic', {})
+                if basic_prefs and basic_prefs.get('priority'):
+                    user_priority = basic_prefs['priority']
+                    logger.info(f"User {user_id} priority: {user_priority}")
+                else:
+                    logger.info(f"User {user_id} has no priority set")
+                
                 # 태그를 카테고리로 매핑
-                tag_to_category = {
-                    '자연': 'nature', '바다': 'nature', '산': 'nature', '공원': 'nature',
-                    '맛집': 'restaurants', '음식': 'restaurants', '카페': 'restaurants',
-                    '쇼핑': 'shopping', '시장': 'shopping', '백화점': 'shopping',
-                    '숙박': 'accommodation', '호텔': 'accommodation',
-                    '문화': 'humanities', '박물관': 'humanities', '역사': 'humanities',
-                    '레저': 'leisure_sports', '스포츠': 'leisure_sports', '체험': 'leisure_sports'
-                }
-                for tag_info in user_preferences['tags']:
-                    tag = tag_info.get('tag', '')
-                    for keyword, category in tag_to_category.items():
-                        if keyword in tag:
-                            preferred_categories.add(category)
+                if user_preferences.get('tags'):
+                    tag_to_category = {
+                        '자연': 'nature', '바다': 'nature', '산': 'nature', '공원': 'nature',
+                        '맛집': 'restaurants', '음식': 'restaurants', '카페': 'restaurants',
+                        '쇼핑': 'shopping', '시장': 'shopping', '백화점': 'shopping',
+                        '숙박': 'accommodation', '호텔': 'accommodation',
+                        '문화': 'humanities', '박물관': 'humanities', '역사': 'humanities',
+                        '레저': 'leisure_sports', '스포츠': 'leisure_sports', '체험': 'leisure_sports'
+                    }
+                    for tag_info in user_preferences['tags']:
+                        tag = tag_info.get('tag', '')
+                        for keyword, category in tag_to_category.items():
+                            if keyword in tag:
+                                preferred_categories.add(category)
 
-            # 4. 각 지역별로 카테고리별 구분 (스마트 배분)
+            # 4. 각 지역별로 카테고리별 구분 (속도 최적화)
             result_data = []
             for region, avg_score, places in selected_regions:
-                # 카테고리별 충분한 데이터 확보를 위해 지역당 더 많은 장소 사용
-                region_places = places[:200]  # 지역당 최대 200개로 증가
+                # 속도 개선: 지역당 처리 장소 수 축소
+                region_places = places[:50]  # 지역당 최대 50개로 축소 (200개 → 50개)
                 
                 # 카테고리별 그룹핑
                 category_groups = {}
@@ -442,11 +453,11 @@ async def get_personalized_region_categories(
                 # 카테고리별 차등 배분 및 최소 보장
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
-                        # 사용자 선호도에 따른 차등 배분
+                        # 속도 개선: 카테고리별 장소 수 축소
                         if category in preferred_categories:
-                            target_count = min(15, len(category_places))  # 선호 카테고리: 최대 15개
+                            target_count = min(8, len(category_places))  # 선호 카테고리: 최대 8개 (15개 → 8개)
                         else:
-                            target_count = min(10, len(category_places))  # 일반 카테고리: 최대 10개
+                            target_count = min(6, len(category_places))  # 일반 카테고리: 최대 6개 (10개 → 6개)
                         
                         # 각 장소를 Attraction 형태로 변환
                         formatted_attractions = []
@@ -497,16 +508,70 @@ async def get_personalized_region_categories(
                                 'total': len(formatted_attractions)
                             })
                 
+                # 사용자 우선순위에 따른 카테고리 섹션 정렬
+                if user_priority and category_sections:
+                    logger.info(f"Applying priority sorting for user {user_id}, priority: {user_priority}")
+                    logger.info(f"Available categories before sorting: {[s['category'] for s in category_sections]}")
+                    
+                    # 우선순위 매핑 (프로필에서 설정한 우선순위 → 카테고리)
+                    priority_to_category = {
+                        'accommodation': 'accommodation',  # 숙박
+                        'restaurants': 'restaurants',      # 맛집
+                        'experience': 'leisure_sports',    # 체험/레저
+                        'shopping': 'shopping'             # 쇼핑
+                    }
+                    
+                    priority_category = priority_to_category.get(user_priority)
+                    logger.info(f"Priority category mapped to: {priority_category}")
+                    
+                    if priority_category:
+                        # 우선순위 카테고리를 맨 앞으로 이동
+                        priority_section = None
+                        other_sections = []
+                        
+                        for section in category_sections:
+                            if section['category'] == priority_category:
+                                priority_section = section
+                            else:
+                                other_sections.append(section)
+                        
+                        # 우선순위 섹션이 있으면 맨 앞에 배치
+                        if priority_section:
+                            category_sections = [priority_section] + other_sections
+                            logger.info(f"Categories after sorting: {[s['category'] for s in category_sections]}")
+                        else:
+                            logger.info(f"Priority category '{priority_category}' not found in available sections")
+                
                 if category_sections:  # 카테고리가 있는 지역만 추가
+                    # 우선순위 카테고리가 없는 지역은 점수를 낮춤 (뒤로 밀어내기 위해)
+                    priority_bonus = 0
+                    if user_priority:
+                        priority_category = {
+                            'accommodation': 'accommodation',
+                            'restaurants': 'restaurants', 
+                            'experience': 'leisure_sports',
+                            'shopping': 'shopping'
+                        }.get(user_priority)
+                        
+                        has_priority_category = any(section['category'] == priority_category for section in category_sections)
+                        if has_priority_category:
+                            priority_bonus = 50  # 우선순위 카테고리가 있으면 보너스 점수
+                        else:
+                            priority_bonus = -30  # 우선순위 카테고리가 없으면 패널티
+
                     result_data.append({
                         'id': f'personalized-{region}',
                         'cityName': region,
                         'description': f'{region}의 맞춤 추천 여행지',
                         'region': region,
-                        'recommendationScore': int(avg_score * 100),
+                        'recommendationScore': int(avg_score * 100) + priority_bonus,
                         'attractions': [],  # 카테고리별로 구분되므로 비어있음
                         'categorySections': category_sections
                     })
+            
+            # 우선순위 카테고리가 있는 지역을 앞에 배치하기 위해 점수순 정렬
+            result_data.sort(key=lambda x: x['recommendationScore'], reverse=True)
+            logger.info(f"Final region order with scores: {[(r['cityName'], r['recommendationScore']) for r in result_data]}")
             
             return {'data': result_data, 'hasMore': False}
             

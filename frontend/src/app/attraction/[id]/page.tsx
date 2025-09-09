@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { actionTracker } from '../../../lib/actionTracker'
 
 interface AttractionDetailProps {
   params: { id: string }
@@ -112,7 +113,25 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
     if (params.id) {
       fetchAttractionDetail()
     }
-  }, [params.id])
+    
+    // 세션이 있으면 actionTracker에 사용자 ID 설정
+    if (session?.user?.id) {
+      actionTracker.setUserId(session.user.id)
+    }
+  }, [params.id, session])
+
+  // 페이지 뷰 트래킹
+  useEffect(() => {
+    if (attraction && session?.user?.id) {
+      // 페이지 뷰 시작 트래킹
+      actionTracker.trackPageViewStart(attraction.id, attraction.category || 'general')
+
+      // 페이지 언마운트 시 체류 시간 종료 트래킹
+      return () => {
+        actionTracker.trackPageViewEnd(attraction.id, attraction.category || 'general')
+      }
+    }
+  }, [attraction, session])
 
   // 저장 상태 확인 함수
   const checkSavedStatus = async (attractionData: AttractionData) => {
@@ -191,6 +210,8 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
             
             if (deleteResponse.ok) {
               setIsSaved(false)
+              // 북마크 해제 트래킹
+              actionTracker.trackBookmark(params.id, attraction.category || 'general', false)
             } else if (deleteResponse.status === 401) {
               alert('세션이 만료되었습니다. 다시 로그인해주세요.')
               localStorage.removeItem('access_token')
@@ -222,6 +243,8 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         
         if (response.ok) {
           setIsSaved(true)
+          // 북마크 추가 트래킹
+          actionTracker.trackBookmark(params.id, attraction.category || 'general', true)
         } else if (response.status === 401) {
           alert('세션이 만료되었습니다. 다시 로그인해주세요.')
           localStorage.removeItem('access_token')

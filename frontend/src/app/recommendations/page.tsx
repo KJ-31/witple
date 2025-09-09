@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
+import { actionTracker } from '../../lib/actionTracker'
 
 interface RecommendationItem {
   id: string
@@ -143,6 +144,11 @@ export default function RecommendationsPage() {
   // DB에서 데이터 가져오기
   useEffect(() => {
     const fetchCategoryData = async () => {
+      // 세션이 있으면 actionTracker에 사용자 ID 설정
+      if (session?.user?.id) {
+        actionTracker.setUserId(session.user.id)
+      }
+
       // 저장된 데이터 확인
       const storedData = loadFromStorage()
       if (storedData && storedData.selectedCategory === selectedCategory && storedData.leftColumnItems) {
@@ -466,9 +472,13 @@ export default function RecommendationsPage() {
     }
   }
 
-  const handleItemClick = (item: RecommendationItem) => {
+  const handleItemClick = (item: RecommendationItem, position?: number) => {
     // 상세 페이지로 이동하기 전 현재 스크롤 위치 저장
     saveScrollPosition()
+    
+    // 카드 클릭 트래킹
+    actionTracker.trackCardClick(item.id, item.genre || 'general', position)
+    
     // 여행 상세 페이지로 이동
     router.push(`/attraction/${item.id}`)
   }
@@ -536,12 +546,12 @@ export default function RecommendationsPage() {
                   <div className="flex gap-6">
                     {/* Left Column of this page */}
                     <div className="flex-1 space-y-4">
-                      {pageItems.slice(0, 3).map((item) => {
+                      {pageItems.slice(0, 3).map((item, index) => {
                         return (
                           <div
                             key={item.id}
                             className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
-                            onClick={() => handleItemClick(item)}
+                            onClick={() => handleItemClick(item, index + 1)}
                           >
                             <div className="flex-shrink-0">
                               <img
@@ -571,12 +581,12 @@ export default function RecommendationsPage() {
 
                     {/* Right Column of this page */}
                     <div className="flex-1 space-y-4">
-                      {pageItems.slice(3, 6).map((item) => {
+                      {pageItems.slice(3, 6).map((item, index) => {
                         return (
                           <div
                             key={item.id}
                             className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
-                            onClick={() => handleItemClick(item)}
+                            onClick={() => handleItemClick(item, index + 1)}
                           >
                             <div className="flex-shrink-0">
                               <img
@@ -621,11 +631,11 @@ export default function RecommendationsPage() {
 
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {discoveryItems.map((item) => (
+              {discoveryItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
@@ -670,11 +680,11 @@ export default function RecommendationsPage() {
 
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {newItems.map((item) => (
+              {newItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
@@ -719,11 +729,11 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {popularItems.map((item) => (
+              {popularItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
@@ -768,11 +778,11 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {hiddenItems.map((item) => (
+              {hiddenItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
@@ -817,11 +827,11 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {themeItems.map((item) => (
+              {themeItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">
@@ -866,11 +876,11 @@ export default function RecommendationsPage() {
           
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
-              {seasonalItems.map((item) => (
+              {seasonalItems.map((item, index) => (
                 <div
                   key={item.id}
                   className="flex-shrink-0 w-52 cursor-pointer group"
-                  onClick={() => handleItemClick(item)}
+                  onClick={() => handleItemClick(item, index + 1)}
                 >
                   <div className="bg-[#1F2937] rounded-2xl overflow-hidden shadow-lg group-hover:shadow-xl transition-all duration-300">
                     <div className="relative">

@@ -48,6 +48,27 @@ services:
     networks:
       - witple_network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+  
+  # Collection Server (Node.js)
+  collection-server:
+    build:
+      context: ./collection-server
+      dockerfile: Dockerfile
+    container_name: witple_collection_server
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - PORT=8080
+    volumes:
+      - ./collection-server:/app
+      - ~/.aws:/root/.aws:ro
+    networks:
+      - witple_network
+    command: npm start
+  
   # Frontend (Next.js)
   frontend:
     build:

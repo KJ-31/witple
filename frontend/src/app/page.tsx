@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
 import { BottomNavigation } from '../components'
+import { actionTracker } from '../lib/actionTracker'
 
 export default function Home() {
   const router = useRouter()
@@ -213,7 +214,12 @@ export default function Home() {
   useEffect(() => {
     loadRecommendedCities(0)
     loadFilterData()
-  }, [loadRecommendedCities, loadFilterData])
+    
+    // 세션이 있으면 actionTracker에 사용자 ID 설정
+    if (session?.user?.id) {
+      actionTracker.setUserId(session.user.id)
+    }
+  }, [loadRecommendedCities, loadFilterData, session])
 
   // 필터 변경 시 데이터 다시 로드
   useEffect(() => {
@@ -289,6 +295,9 @@ export default function Home() {
 
       setSearchResults(uniqueResults)
       setShowSearchResults(true)
+
+      // 검색 트래킹
+      actionTracker.trackSearch(searchQuery, 'general', uniqueResults.length)
 
     } catch (error) {
       console.error('검색 오류:', error)
@@ -419,7 +428,11 @@ export default function Home() {
                   {searchResults.map((result, index) => (
                     <div
                       key={`${result.name}-${result.address}-${index}`}
-                      onClick={() => router.push(`/attraction/${result.id}`)}
+                      onClick={() => {
+                        // 클릭 트래킹
+                        actionTracker.trackCardClick(result.id, result.category || 'general', index + 1)
+                        router.push(`/attraction/${result.id}`)
+                      }}
                       className="bg-gray-800/50 hover:bg-gray-700/50 p-4 rounded-2xl cursor-pointer transition-colors border border-gray-700/50"
                     >
                       <div className="flex items-start space-x-4">
@@ -566,7 +579,13 @@ export default function Home() {
                 cityName={citySection.cityName}
                 attractions={citySection.attractions}
                 categorySections={citySection.categorySections}
-                onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
+                onAttractionClick={(attractionId, attraction, position) => {
+                  // 카드 클릭 트래킹
+                  if (attraction) {
+                    actionTracker.trackCardClick(attractionId, attraction.category || 'general', position)
+                  }
+                  router.push(`/attraction/${attractionId}`)
+                }}
               />
             </div>
           ))}
@@ -699,7 +718,7 @@ function SectionCarousel({
   cityName: string
   attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
   categorySections?: Array<{ category: string; categoryName: string; attractions: any[]; total: number }>
-  onAttractionClick: (attractionId: string) => void
+  onAttractionClick: (attractionId: string, attraction?: any, position?: number) => void
 }) {
   return (
     <section aria-label={`${cityName} ${title}`} className="w-full">
@@ -741,10 +760,11 @@ function SectionCarousel({
                   "
                   style={{ scrollBehavior: 'smooth' }}
                 >
-                  {categorySection.attractions.map((attraction) => (
+                  {categorySection.attractions.map((attraction, index) => (
                     <AttractionCard
                       key={attraction.id}
                       attraction={attraction}
+                      position={index + 1}
                       onAttractionClick={onAttractionClick}
                     />
                   ))}
@@ -769,10 +789,11 @@ function SectionCarousel({
             "
             style={{ scrollBehavior: 'smooth' }}
           >
-            {attractions.map((attraction) => (
+            {attractions.map((attraction, index) => (
               <AttractionCard
                 key={attraction.id}
                 attraction={attraction}
+                position={index + 1}
                 onAttractionClick={onAttractionClick}
               />
             ))}
@@ -790,10 +811,12 @@ function SectionCarousel({
 /** 관광지 카드 컴포넌트 */
 function AttractionCard({
   attraction,
+  position,
   onAttractionClick,
 }: {
   attraction: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }
-  onAttractionClick: (attractionId: string) => void
+  position?: number
+  onAttractionClick: (attractionId: string, attraction?: any, position?: number) => void
 }) {
   return (
     <figure
@@ -805,7 +828,7 @@ function AttractionCard({
         cursor-pointer hover:ring-[#3E68FF]/50 transition-all duration-300
         group
       "
-      onClick={() => onAttractionClick(attraction.id)}
+      onClick={() => onAttractionClick(attraction.id, attraction, position)}
     >
       {/* 이미지 영역 */}
       <div className="aspect-[4/3] relative overflow-hidden">

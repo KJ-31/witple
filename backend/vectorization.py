@@ -279,9 +279,16 @@ class RecommendationEngine:
     def __init__(self):
         self.db_url = os.getenv("DATABASE_URL")
         self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        # 사용자 선호도 캐시 (속도 개선)
+        self.user_preferences_cache = {}
 
     async def get_user_preferences(self, user_id: str) -> Dict:
-        """사용자 선호도 가져오기 (새로운 가중치 계산 시스템 적용)"""
+        """사용자 선호도 가져오기 (새로운 가중치 계산 시스템 적용) - 캐싱 적용"""
+        # 캐시 확인 (속도 개선)
+        if user_id in self.user_preferences_cache:
+            logger.info(f"Using cached preferences for user {user_id}")
+            return self.user_preferences_cache[user_id]
+            
         conn = await asyncpg.connect(self.db_url)
         
         try:
@@ -311,11 +318,17 @@ class RecommendationEngine:
             # 새로운 가중치 계산 시스템 적용
             calculated_tags = tag_weight_calculator.calculate_all_user_weights(user_tags) if user_tags else []
             
-            return {
+            result = {
                 'basic': dict(basic_prefs) if basic_prefs else None,
                 'tags': calculated_tags,  # 계산된 가중치가 포함된 태그
                 'original_tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []  # 원본 태그도 보관
             }
+            
+            # 결과를 캐시에 저장 (속도 개선)
+            self.user_preferences_cache[user_id] = result
+            logger.info(f"Cached preferences for user {user_id}")
+            
+            return result
             
         finally:
             await conn.close()
