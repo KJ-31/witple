@@ -72,9 +72,17 @@ export default function PlanCalendar() {
   const handleSelectComplete = () => {
     if (selectedDates.length === 0) return
 
+    // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
+    const formatLocalDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
     // 선택된 날짜들을 query parameter로 전달하며 세부 일정 페이지로 이동
-    const startDate = selectedDates[0].toISOString().split('T')[0]
-    const endDate = selectedDates[selectedDates.length - 1].toISOString().split('T')[0]
+    const startDate = formatLocalDate(selectedDates[0])
+    const endDate = formatLocalDate(selectedDates[selectedDates.length - 1])
 
     // 기존 itinerary 페이지를 활용, general을 attractionId로 사용
     router.push(`/itinerary/general?startDate=${startDate}&endDate=${endDate}&days=${selectedDates.length}`)
@@ -139,11 +147,9 @@ export default function PlanCalendar() {
         <div className="flex items-center justify-between mb-6">
           <button
             onClick={handlePrevMonth}
-            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+            className="text-[#3E68FF] text-2xl hover:text-[#4C7DFF] transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            ‹
           </button>
 
           <h2 className="text-xl font-semibold text-[#94A9C9]">
@@ -152,11 +158,9 @@ export default function PlanCalendar() {
 
           <button
             onClick={handleNextMonth}
-            className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+            className="text-[#3E68FF] text-2xl hover:text-[#4C7DFF] transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+            ›
           </button>
         </div>
 

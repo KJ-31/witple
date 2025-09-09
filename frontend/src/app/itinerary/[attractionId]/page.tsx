@@ -100,7 +100,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
 
     const dates = []
-    const startDate = new Date(startDateParam)
+    // 한국 시간 기준으로 날짜 생성 (UTC 해석 방지)
+    const createLocalDate = (dateString: string) => {
+      const [year, month, day] = dateString.split('-').map(Number)
+      return new Date(year, month - 1, day) // month는 0부터 시작
+    }
+    
+    const startDate = createLocalDate(startDateParam)
     const dayCount = parseInt(daysParam)
 
     for (let i = 0; i < dayCount; i++) {
@@ -782,8 +788,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
     const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
     const sourceTables = allSelectedPlaces.map(place => place.sourceTable || 'unknown').join(',')
-    const startDate = dateRange[0].toISOString().split('T')[0]
-    const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
+    
+    // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
+    const formatLocalDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    
+    const startDate = formatLocalDate(dateRange[0])
+    const endDate = formatLocalDate(dateRange[dateRange.length - 1])
 
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
@@ -1000,7 +1015,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       <div className="fixed top-0 left-0 right-0 bg-[#0B1220] z-30">
         {/* Header */}
         <div className="flex items-center justify-between p-4">
-          {/* 뒤로가기 버튼 - 상세 페이지에서 온 경우에만 표시 */}
+          {/* 뒤로가기 버튼 */}
           {params.attractionId !== 'general' ? (
             <button
               onClick={() => router.back()}
@@ -1011,7 +1026,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
               </svg>
             </button>
           ) : (
-            <div className="w-10 h-10" />
+            <button
+              onClick={() => router.push('/plan/calendar')}
+              className="text-[#3E68FF] text-2xl hover:text-[#4C7DFF] transition-colors"
+            >
+              ‹
+            </button>
           )}
 
           <h1 className="text-lg font-semibold text-[#94A9C9]">
@@ -1054,7 +1074,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                   <div className="text-center">
                     <div className="font-semibold">Day {dayNumber}</div>
                     <div className="text-xs opacity-80">
-                      {date.getMonth() + 1}/{date.getDate() + 1}
+                      {date.getMonth() + 1}/{date.getDate()}
                     </div>
                     {placesForDay > 0 && (
                       <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>
