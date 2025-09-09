@@ -209,11 +209,55 @@ export default function Home() {
     }
   }, [selectedRegion, selectedCategory, categories])
 
+  // 구글 로그인 후 선호도 체크
+  const checkUserPreferences = useCallback(async () => {
+    if (!session || !(session as any).backendToken) {
+      return
+    }
+
+    try {
+      // 개발용: URL에 reset_preferences=true가 있으면 플래그 초기화
+      if (typeof window !== 'undefined' && window.location.search.includes('reset_preferences=true')) {
+        localStorage.removeItem('preferences_completed')
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      
+      const response = await fetch(`${API_BASE_URL}/api/v1/users/preferences/check`, {
+        headers: {
+          'Authorization': `Bearer ${(session as any).backendToken}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        
+        if (!data.has_preferences) {
+          // 선호도가 없으면 설정 페이지로 이동
+          router.push('/preferences')
+          return
+        } else {
+          // 선호도가 있으면 완료 플래그 저장
+          localStorage.setItem('preferences_completed', 'true')
+        }
+      }
+    } catch (error) {
+      console.error('선호도 체크 오류:', error)
+    }
+  }, [session, router])
+
   // 초기 데이터 로드 및 세션 상태 변경 시 데이터 재로드
   useEffect(() => {
     loadRecommendedCities(0)
     loadFilterData()
   }, [loadRecommendedCities, loadFilterData])
+
+  // 세션 상태가 변경될 때마다 선호도 체크
+  useEffect(() => {
+    if (status === 'authenticated' && session) {
+      checkUserPreferences()
+    }
+  }, [status, session, checkUserPreferences])
 
   // 필터 변경 시 데이터 다시 로드
   useEffect(() => {

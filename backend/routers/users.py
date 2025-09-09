@@ -129,3 +129,20 @@ async def get_user_preferences(
         accommodation=prefs.accommodation,
         exploration=prefs.exploration
     )
+
+
+@router.get("/preferences/check")
+async def check_user_preferences(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Check if user has travel preferences set"""
+    
+    prefs = db.query(UserPreference).filter(
+        UserPreference.user_id == current_user.user_id
+    ).first()
+    
+    return {
+        "has_preferences": prefs is not None,
+        "user_id": current_user.user_id
+    }
