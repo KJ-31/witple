@@ -1892,9 +1892,17 @@ export default function MapPage() {
                   return acc;
                 }, {});
 
-                const sortedDays = Object.keys(groupedPlaces).map(Number).sort((a, b) => a - b);
+                // 날짜 범위가 있으면 모든 날짜를 표시, 없으면 기존 로직 사용
+                let allDays: number[] = [];
+                if (daysParam) {
+                  // 1일차부터 총 일수까지 모든 날짜 생성
+                  allDays = Array.from({length: parseInt(daysParam)}, (_, i) => i + 1);
+                } else {
+                  // 기존 로직: 장소가 있는 날짜만
+                  allDays = Object.keys(groupedPlaces).map(Number).sort((a, b) => a - b);
+                }
 
-                return sortedDays.map(day => (
+                return allDays.map(day => (
                   <div key={day} className={`mb-6 rounded-2xl transition-all duration-300 ${
                     highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
                   }`}>
@@ -1926,7 +1934,7 @@ export default function MapPage() {
                       </div>
                       
                       {/* 경로 버튼들 (2개 이상일 때만 표시) */}
-                      {groupedPlaces[day].length >= 2 && (
+                      {groupedPlaces[day] && groupedPlaces[day].length >= 2 && (
                         <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={(e) => {
@@ -1961,7 +1969,7 @@ export default function MapPage() {
                     </div>
                     
                     <div className="space-y-3 ml-5">
-                      {groupedPlaces[day].map((place, index) => (
+                      {(groupedPlaces[day] || []).map((place, index) => (
                         <React.Fragment key={`place-container-${place.id}-${day}-${index}`}>
                         <div>
                           {/* 드롭 존 - 위쪽 */}
@@ -2089,7 +2097,7 @@ export default function MapPage() {
                         </div>
 
                         {/* 구간 정보 (마지막 장소가 아닐 때만 표시) */}
-                        {index < groupedPlaces[day].length - 1 && (
+                        {groupedPlaces[day] && index < groupedPlaces[day].length - 1 && (
                           (() => {
                             const nextPlace = groupedPlaces[day][index + 1];
                             const segmentInfo = getRouteSegmentInfo(day, place.id, nextPlace.id);
@@ -2219,16 +2227,24 @@ export default function MapPage() {
                         </React.Fragment>
                       ))}
                       
+                      {/* 일정이 없을 때 안내 메시지 */}
+                      {(!groupedPlaces[day] || groupedPlaces[day].length === 0) && (
+                        <div className="text-center py-8 text-[#94A9C9]">
+                          <p className="text-sm">이 날에는 아직 일정이 없습니다.</p>
+                          <p className="text-xs mt-1">장소를 드래그해서 일정을 추가해보세요.</p>
+                        </div>
+                      )}
+                      
                       {/* 마지막 드롭 존 */}
                       <div
                         data-drop-zone="true"
                         data-day={day}
-                        data-index={groupedPlaces[day].length}
-                        onDragOver={(e) => handleDragOver(e, groupedPlaces[day].length, day)}
+                        data-index={(groupedPlaces[day] || []).length}
+                        onDragOver={(e) => handleDragOver(e, (groupedPlaces[day] || []).length, day)}
                         onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, groupedPlaces[day].length, day)}
+                        onDrop={(e) => handleDrop(e, (groupedPlaces[day] || []).length, day)}
                         className={`h-2 w-full transition-all duration-200 ${
-                          dragOverIndex?.day === day && dragOverIndex?.index === groupedPlaces[day].length && draggedItem 
+                          dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem 
                             ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
                             : ''
                         }`}
