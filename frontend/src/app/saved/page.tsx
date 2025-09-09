@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
+import { actionTracker } from '@/lib/actionTracker'
 
 interface SavedPlace {
   id: string
@@ -46,7 +47,12 @@ export default function SavedPage() {
 
   useEffect(() => {
     fetchSavedPlaces()
-  }, [])
+    
+    // actionTracker에 사용자 ID 설정
+    if (session?.user?.email) {
+      actionTracker.setUserId(session.user.email)
+    }
+  }, [session])
 
   const handleRemoveBookmark = async (placeId: string) => {
     try {
@@ -59,6 +65,14 @@ export default function SavedPage() {
       })
 
       if (response.ok) {
+        // 🔥 Collection Server로 북마크 제거 액션 전송
+        const place = savedPlaces.find(p => p.id === placeId)
+        actionTracker.trackBookmark(
+          placeId,
+          place?.category || 'unknown',
+          false // 북마크 제거
+        )
+        
         setSavedPlaces(prev => prev.filter(place => place.id !== placeId))
       } else {
         console.error('북마크 제거 실패')

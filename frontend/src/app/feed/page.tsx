@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
+import { actionTracker } from '@/lib/actionTracker'
 
 interface User {
   id: number
@@ -66,7 +67,12 @@ export default function FeedPage() {
   // 컴포넌트 마운트시 포스트 가져오기
   useEffect(() => {
     fetchPosts()
-  }, [])
+    
+    // actionTracker에 사용자 ID 설정
+    if (session?.user?.email) {
+      actionTracker.setUserId(session.user.email)
+    }
+  }, [session])
 
   const handleLike = async (postId: number) => {
     try {
@@ -89,6 +95,13 @@ export default function FeedPage() {
 
       if (response.ok) {
         const result = await response.json()
+        
+        // 🔥 Collection Server로 좋아요 액션 전송
+        actionTracker.trackLike(
+          postId.toString(),
+          'social_feed',
+          !currentPost.isLiked // 새로운 좋아요 상태
+        )
         
         // UI 업데이트 - 서버 응답의 likes_count 사용
         setPosts(prevPosts =>

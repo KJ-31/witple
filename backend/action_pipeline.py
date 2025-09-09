@@ -14,7 +14,6 @@ import uuid
 import os
 from dotenv import load_dotenv
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 # 환경 변수 로드
 load_dotenv()

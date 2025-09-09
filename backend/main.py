@@ -8,7 +8,6 @@ import logging
 import os
 from database import engine, Base
 from routers import auth, users, posts, attractions, recommendations, profile, saved_locations, trips, personalized_recommendations
-from api_tracking import router as tracking_router
 from config import settings
 
 # 로깅 설정
@@ -77,7 +76,6 @@ app.include_router(attractions.router, prefix="/api/v1/attractions", tags=["attr
 app.include_router(recommendations.router, prefix="/api/v1", tags=["recommendations"])
 app.include_router(profile.router, prefix="/api/v1/profile", tags=["profile"])
 app.include_router(saved_locations.router, prefix="/api/v1/saved-locations", tags=["saved-locations"])
-app.include_router(tracking_router)  # 트래킹 라우터 추가
 app.include_router(trips.router, prefix="/api/v1/trips", tags=["trips"])
 app.include_router(personalized_recommendations.router)  # 개인화 추천 라우터 추가
 

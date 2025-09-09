@@ -115,14 +115,14 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
     }
     
     // 세션이 있으면 actionTracker에 사용자 ID 설정
-    if (session?.user?.id) {
-      actionTracker.setUserId(session.user.id)
+    if (session?.user?.email) {
+      actionTracker.setUserId(session.user.email)
     }
   }, [params.id, session])
 
   // 페이지 뷰 트래킹
   useEffect(() => {
-    if (attraction && session?.user?.id) {
+    if (attraction && session?.user?.email) {
       // 페이지 뷰 시작 트래킹
       actionTracker.trackPageViewStart(attraction.id, attraction.category || 'general')
 

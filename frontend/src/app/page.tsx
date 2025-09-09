@@ -216,8 +216,8 @@ export default function Home() {
     loadFilterData()
     
     // 세션이 있으면 actionTracker에 사용자 ID 설정
-    if (session?.user?.id) {
-      actionTracker.setUserId(session.user.id)
+    if (session?.user?.email) {
+      actionTracker.setUserId(session.user.email)
     }
   }, [loadRecommendedCities, loadFilterData, session])
 

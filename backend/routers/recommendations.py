@@ -367,7 +367,7 @@ async def get_personalized_region_categories(
             logger.info(f"Getting personalized recommendations for user: {user_id}")
             personalized_places = await recommendation_engine.get_personalized_recommendations(
                 user_id=user_id,
-                limit=100  # 속도 개선: 500개 → 100개로 축소
+                limit=300  # 추천 데이터 증가: 100개 → 300개로 증가 (다양한 카테고리 확보)
             )
             logger.info(f"Retrieved {len(personalized_places)} personalized places")
             
@@ -428,8 +428,8 @@ async def get_personalized_region_categories(
             # 4. 각 지역별로 카테고리별 구분 (속도 최적화)
             result_data = []
             for region, avg_score, places in selected_regions:
-                # 속도 개선: 지역당 처리 장소 수 축소
-                region_places = places[:50]  # 지역당 최대 50개로 축소 (200개 → 50개)
+                # 다양한 카테고리 확보: 지역당 처리 장소 수 증가 
+                region_places = places[:100]  # 지역당 최대 100개로 증가 (50개 → 100개, 다양한 카테고리 확보)
                 
                 # 카테고리별 그룹핑
                 category_groups = {}
@@ -453,11 +453,11 @@ async def get_personalized_region_categories(
                 # 카테고리별 차등 배분 및 최소 보장
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
-                        # 속도 개선: 카테고리별 장소 수 축소
+                        # 카테고리별 장소 수 증가로 다양성 확보
                         if category in preferred_categories:
-                            target_count = min(8, len(category_places))  # 선호 카테고리: 최대 8개 (15개 → 8개)
+                            target_count = min(12, len(category_places))  # 선호 카테고리: 최대 12개 (8개 → 12개)
                         else:
-                            target_count = min(6, len(category_places))  # 일반 카테고리: 최대 6개 (10개 → 6개)
+                            target_count = min(8, len(category_places))   # 일반 카테고리: 최대 8개 (6개 → 8개)
                         
                         # 각 장소를 Attraction 형태로 변환
                         formatted_attractions = []
@@ -541,6 +541,66 @@ async def get_personalized_region_categories(
                             logger.info(f"Categories after sorting: {[s['category'] for s in category_sections]}")
                         else:
                             logger.info(f"Priority category '{priority_category}' not found in available sections")
+                            # 우선순위 카테고리가 없으면 전체 DB에서 해당 카테고리의 개인화된 데이터 가져오기
+                            try:
+                                logger.info(f"Fetching fallback data for priority category: {priority_category}")
+                                fallback_places = await recommendation_engine.get_personalized_recommendations(
+                                    user_id=user_id,
+                                    limit=50,
+                                    category=priority_category  # 특정 카테고리만 필터링
+                                )
+                                
+                                if fallback_places:
+                                    logger.info(f"Retrieved {len(fallback_places)} fallback places for {priority_category}")
+                                    # 우선순위 카테고리 섹션 생성
+                                    fallback_attractions = []
+                                    for place in fallback_places[:8]:  # 최대 8개
+                                        if place.get('place_id') and place.get('table_name'):
+                                            # 이미지 URL 처리 (동일한 로직)
+                                            image_url = None
+                                            image_urls = place.get('image_urls')
+                                            if image_urls:
+                                                if isinstance(image_urls, list) and len(image_urls) > 0:
+                                                    for img_url in image_urls:
+                                                        if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                            image_url = img_url
+                                                            break
+                                                elif isinstance(image_urls, str) and image_urls.strip():
+                                                    if image_urls.startswith('['):
+                                                        try:
+                                                            parsed_urls = json.loads(image_urls)
+                                                            if isinstance(parsed_urls, list) and len(parsed_urls) > 0:
+                                                                for img_url in parsed_urls:
+                                                                    if img_url and img_url.strip() and img_url != "/images/default.jpg":
+                                                                        image_url = img_url
+                                                                        break
+                                                        except:
+                                                            pass
+                                                    elif image_urls != "/images/default.jpg":
+                                                        image_url = image_urls
+                                            
+                                            fallback_attractions.append({
+                                                'id': f"{place['table_name']}_{place['place_id']}",
+                                                'name': place.get('name', '이름 없음'),
+                                                'description': place.get('description', '설명 없음'),
+                                                'imageUrl': image_url,
+                                                'rating': round((place.get('similarity_score', 0.5) + 0.3) * 5 * 10) / 10,
+                                                'category': priority_category
+                                            })
+                                    
+                                    if fallback_attractions:
+                                        # 우선순위 섹션을 맨 앞에 추가
+                                        priority_section = {
+                                            'category': priority_category,
+                                            'categoryName': category_names.get(priority_category, priority_category),
+                                            'attractions': fallback_attractions,
+                                            'total': len(fallback_attractions)
+                                        }
+                                        category_sections = [priority_section] + category_sections
+                                        logger.info(f"Added fallback priority section for {priority_category} with {len(fallback_attractions)} places")
+                                        
+                            except Exception as e:
+                                logger.error(f"Failed to get fallback data for {priority_category}: {e}")
                 
                 if category_sections:  # 카테고리가 있는 지역만 추가
                     # 우선순위 카테고리가 없는 지역은 점수를 낮춤 (뒤로 밀어내기 위해)
