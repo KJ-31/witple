@@ -31,17 +31,6 @@ export default function Home() {
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
 
-  // 챗봇 상태
-  const [showChatbot, setShowChatbot] = useState(false)
-  const [chatMessage, setChatMessage] = useState('')
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      type: 'bot',
-      message: '쉽게 여행 계획을 작성해볼래?',
-      timestamp: new Date()
-    }
-  ])
 
   // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
@@ -350,79 +339,6 @@ export default function Home() {
     setSearchError(null)
   }
 
-  // 챗봇 관련 함수
-  const handleChatSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!chatMessage.trim()) return
-
-    // 사용자 메시지 추가
-    const userMessage = {
-      id: Date.now(),
-      type: 'user',
-      message: chatMessage,
-      timestamp: new Date()
-    }
-
-    setChatMessages(prev => [...prev, userMessage])
-    const userMessageText = chatMessage
-    setChatMessage('')
-
-    // 로딩 메시지 추가
-    const loadingMessage = {
-      id: Date.now() + 1,
-      type: 'bot',
-      message: '답변을 생성하고 있습니다...',
-      timestamp: new Date()
-    }
-    setChatMessages(prev => [...prev, loadingMessage])
-
-    try {
-      // API 호출
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userMessageText
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      // 로딩 메시지 제거 후 실제 응답 추가
-      setChatMessages(prev => {
-        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
-        const botResponse = {
-          id: Date.now() + 2,
-          type: 'bot',
-          message: data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
-          timestamp: new Date()
-        }
-        return [...filteredMessages, botResponse]
-      })
-
-    } catch (error) {
-      console.error('Chat API error:', error)
-      
-      // 로딩 메시지 제거 후 에러 메시지 추가
-      setChatMessages(prev => {
-        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
-        const errorResponse = {
-          id: Date.now() + 2,
-          type: 'bot',
-          message: '죄송합니다. 현재 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.',
-          timestamp: new Date()
-        }
-        return [...filteredMessages, errorResponse]
-      })
-    }
-  }
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
@@ -693,84 +609,6 @@ export default function Home() {
         </main>
       )}
 
-      {/* Chatbot Icon - Fixed Position */}
-      <button
-        onClick={() => setShowChatbot(true)}
-        className="fixed bottom-24 right-6 z-50 w-14 h-14 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
-      >
-        <img
-          src="/images/chat_icon.svg"
-          alt="챗봇"
-          className="w-10 h-10"
-        />
-      </button>
-
-      {/* Chatbot Modal */}
-      {showChatbot && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl">
-            {/* Header */}
-            <div className="bg-[#3E68FF] p-4 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <img
-                  src="/images/chat_icon.svg"
-                  alt="챗봇"
-                  className="w-12 h-12 bg-white rounded-full p-2"
-                />
-                <div>
-                  <h3 className="text-white font-semibold">쿼카</h3>
-                  <p className="text-blue-100 text-sm">여행 마스터</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowChatbot(false)}
-                className="text-white hover:text-blue-200 text-xl font-bold w-8 h-8 flex items-center justify-center"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-              {chatMessages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] ${msg.type === 'user'
-                    ? 'bg-[#3E68FF] text-white'
-                    : 'bg-white border border-gray-200'
-                    } rounded-2xl px-4 py-2 shadow-sm`}>
-                    <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
-                      {msg.message}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-
-            {/* Input */}
-            <div className="p-4 border-t border-gray-200 bg-white">
-              <form onSubmit={handleChatSubmit} className="flex items-center space-x-2">
-                <input
-                  type="text"
-                  value={chatMessage}
-                  onChange={(e) => setChatMessage(e.target.value)}
-                  placeholder="메시지를 입력하세요..."
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent text-gray-800"
-                />
-                <button
-                  type="submit"
-                  disabled={!chatMessage.trim()}
-                  className="w-10 h-10 bg-[#3E68FF] hover:bg-[#4C7DFF] disabled:bg-gray-300 rounded-full flex items-center justify-center transition-colors"
-                >
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
 
       <BottomNavigation />
     </div>
