@@ -69,14 +69,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#0B1220] text-white">
       {/* Header with back button */}
-      <div className="flex items-center justify-between p-4 h-20">
+      <div className="relative p-4">
         <button
           onClick={() => router.back()}
-          className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+          className="absolute left-4 top-4 text-[#3E68FF] text-2xl hover:text-[#4C7DFF] transition-colors"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          ‹
         </button>
       </div>
 
