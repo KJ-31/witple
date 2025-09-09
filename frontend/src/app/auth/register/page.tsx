@@ -98,14 +98,14 @@ export default function RegisterPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">기본 정보를 입력해주세요</h3>
+              <h3 className="text-lg font-medium text-white mb-4">기본 정보를 입력해주세요</h3>
             </div>
             <div className="space-y-4">
               <input
                 name="full_name"
                 type="text"
                 required
-                className="relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 bg-[#12345D]/50 border border-[#1F3C7A] rounded-2xl text-white placeholder-[#6FA0E6] focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent"
                 placeholder="이름"
                 value={formData.full_name}
                 onChange={handleChange}
@@ -114,7 +114,7 @@ export default function RegisterPage() {
                 name="email"
                 type="email"
                 required
-                className="relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 bg-[#12345D]/50 border border-[#1F3C7A] rounded-2xl text-white placeholder-[#6FA0E6] focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent"
                 placeholder="이메일"
                 value={formData.email}
                 onChange={handleChange}
@@ -123,7 +123,7 @@ export default function RegisterPage() {
                 name="password"
                 type="password"
                 required
-                className="relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 bg-[#12345D]/50 border border-[#1F3C7A] rounded-2xl text-white placeholder-[#6FA0E6] focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent"
                 placeholder="비밀번호"
                 value={formData.password}
                 onChange={handleChange}
@@ -132,7 +132,7 @@ export default function RegisterPage() {
                 name="confirmPassword"
                 type="password"
                 required
-                className="relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-4 py-3 bg-[#12345D]/50 border border-[#1F3C7A] rounded-2xl text-white placeholder-[#6FA0E6] focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent"
                 placeholder="비밀번호 확인"
                 value={formData.confirmPassword}
                 onChange={handleChange}
@@ -142,7 +142,7 @@ export default function RegisterPage() {
               <button
                 type="button"
                 onClick={nextStep}
-                className="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="w-full py-3 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-2xl text-white font-semibold transition-colors"
               >
                 다음 단계 → 여행 취향 알아보기
               </button>
@@ -177,8 +177,8 @@ export default function RegisterPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">최고의 여행 모습 👉</h3>
-              <p className="text-sm text-gray-600">어떤 여행이 가장 매력적으로 느껴지시나요?</p>
+              <h3 className="text-lg font-medium text-white mb-2">최고의 여행 모습 👉</h3>
+              <p className="text-sm text-[#94A9C9]">어떤 여행이 가장 매력적으로 느껴지시나요?</p>
             </div>
             <div className="space-y-3">
               {[
@@ -189,9 +189,9 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.travelStyle === option.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.travelStyle === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
                     }`}
                 >
                   <input
@@ -205,8 +205,8 @@ export default function RegisterPage() {
                   <div className="flex items-center space-x-3">
                     <span className="text-2xl">{option.emoji}</span>
                     <div>
-                      <p className="font-medium text-gray-900">{option.label}</p>
-                      <p className="text-sm text-gray-600">{option.desc}</p>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
                     </div>
                   </div>
                 </label>
@@ -219,8 +219,8 @@ export default function RegisterPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">아끼고 싶지 않은 것 👉</h3>
-              <p className="text-sm text-gray-600">여행에서 투자를 아끼지 않고 싶은 부분은?</p>
+              <h3 className="text-lg font-medium text-white mb-2">아끼고 싶지 않은 것 👉</h3>
+              <p className="text-sm text-[#94A9C9]">여행에서 투자를 아끼지 않고 싶은 부분은?</p>
             </div>
             <div className="space-y-3">
               {[
@@ -231,9 +231,9 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.investment === option.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.investment === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
                     }`}
                 >
                   <input
@@ -247,8 +247,8 @@ export default function RegisterPage() {
                   <div className="flex items-center space-x-3">
                     <span className="text-2xl">{option.emoji}</span>
                     <div>
-                      <p className="font-medium text-gray-900">{option.label}</p>
-                      <p className="text-sm text-gray-600">{option.desc}</p>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
                     </div>
                   </div>
                 </label>
@@ -261,8 +261,8 @@ export default function RegisterPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">선호하는 숙소 유형 👉</h3>
-              <p className="text-sm text-gray-600">여행의 피로를 풀어줄 숙소, 어떤 곳을 선호하시나요?</p>
+              <h3 className="text-lg font-medium text-white mb-2">선호하는 숙소 유형 👉</h3>
+              <p className="text-sm text-[#94A9C9]">여행의 피로를 풀어줄 숙소, 어떤 곳을 선호하시나요?</p>
             </div>
             <div className="space-y-3">
               {[
@@ -273,9 +273,9 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.accommodation === option.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.accommodation === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
                     }`}
                 >
                   <input
@@ -289,8 +289,8 @@ export default function RegisterPage() {
                   <div className="flex items-center space-x-3">
                     <span className="text-2xl">{option.emoji}</span>
                     <div>
-                      <p className="font-medium text-gray-900">{option.label}</p>
-                      <p className="text-sm text-gray-600">{option.desc}</p>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
                     </div>
                   </div>
                 </label>
@@ -303,8 +303,8 @@ export default function RegisterPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">여행지 선택 스타일 👉</h3>
-              <p className="text-sm text-gray-600">낯선 여행지에서 당신의 선택은?</p>
+              <h3 className="text-lg font-medium text-white mb-2">여행지 선택 스타일 👉</h3>
+              <p className="text-sm text-[#94A9C9]">낯선 여행지에서 당신의 선택은?</p>
             </div>
             <div className="space-y-3">
               {[
@@ -315,9 +315,9 @@ export default function RegisterPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${preferences.destination === option.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.destination === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
                     }`}
                 >
                   <input
@@ -331,8 +331,8 @@ export default function RegisterPage() {
                   <div className="flex items-center space-x-3">
                     <span className="text-2xl">{option.emoji}</span>
                     <div>
-                      <p className="font-medium text-gray-900">{option.label}</p>
-                      <p className="text-sm text-gray-600">{option.desc}</p>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
                     </div>
                   </div>
                 </label>
@@ -341,7 +341,7 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+              className="w-full py-3 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-2xl text-white font-semibold transition-colors disabled:opacity-50"
             >
               {loading ? '가입 중...' : '🎉 회원가입 완료'}
             </button>
@@ -354,58 +354,74 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step - 1}/4)`}
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            또는{' '}
-            <Link href="/auth/login" className="font-medium text-blue-600 hover:text-blue-500">
-              기존 계정으로 로그인
-            </Link>
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#0B1220] text-white">
+      {/* Header with back button */}
+      <div className="flex items-center justify-between p-4 h-20">
+        <button
+          onClick={() => router.back()}
+          className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h1 className="text-lg font-semibold text-white">회원가입</h1>
+        <div className="w-10"></div>
+      </div>
 
-        {/* 진행 표시줄 */}
-        {step > 1 && (
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${((step - 1) / 4) * 100}%` }}
-            ></div>
+      <div className="flex items-center justify-center px-6 pb-20">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold text-[#3E68FF] mb-2">
+              {step === 1 ? '회원가입' : `여행 취향 알아보기 (${step - 1}/4)`}
+            </h2>
+            <p className="text-[#94A9C9] text-sm">
+              또는{' '}
+              <Link href="/auth/login" className="font-medium text-[#3E68FF] hover:text-[#4C7DFF]">
+                기존 계정으로 로그인
+              </Link>
+            </p>
           </div>
-        )}
 
-        <form onSubmit={handleSubmit}>
-          {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-              {error}
+          {/* 진행 표시줄 */}
+          {step > 1 && (
+            <div className="w-full bg-[#1F3C7A]/30 rounded-full h-2">
+              <div
+                className="bg-[#3E68FF] h-2 rounded-full transition-all duration-300"
+                style={{ width: `${((step - 1) / 4) * 100}%` }}
+              ></div>
             </div>
           )}
 
-          {renderStep()}
+          <form onSubmit={handleSubmit}>
+            {error && (
+              <div className="bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-3 rounded-2xl mb-4">
+                {error}
+              </div>
+            )}
 
-          {step > 1 && step < 5 && (
-            <div className="flex justify-between space-x-4 mt-6">
-              <button
-                type="button"
-                onClick={prevStep}
-                className="flex-1 flex justify-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                ← 이전
-              </button>
-              <button
-                type="button"
-                onClick={nextStep}
-                className="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                다음 →
-              </button>
-            </div>
-          )}
-        </form>
+            {renderStep()}
+
+            {step > 1 && step < 5 && (
+              <div className="flex justify-between space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={prevStep}
+                  className="flex-1 flex justify-center py-3 px-4 border border-[#1F3C7A] text-sm font-medium rounded-2xl text-[#94A9C9] bg-[#1F3C7A]/50 hover:bg-[#1F3C7A]/70 focus:outline-none focus:ring-2 focus:ring-[#3E68FF]"
+                >
+                  ← 이전
+                </button>
+                <button
+                  type="button"
+                  onClick={nextStep}
+                  className="flex-1 flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-2xl text-white bg-[#3E68FF] hover:bg-[#4C7DFF] focus:outline-none focus:ring-2 focus:ring-[#3E68FF]"
+                >
+                  다음 →
+                </button>
+              </div>
+            )}
+          </form>
+        </div>
       </div>
     </div>
   )

@@ -139,6 +139,12 @@ const authOptions: NextAuthOptions = {
         }
       }
       return session
+    },
+    async redirect({ url, baseUrl }) {
+      // 구글 로그인 후 선호도 체크를 위한 리다이렉트 처리
+      if (url.startsWith("/")) return `${baseUrl}${url}`
+      else if (new URL(url).origin === baseUrl) return url
+      return baseUrl
     }
   }
 }
