@@ -209,55 +209,11 @@ export default function Home() {
     }
   }, [selectedRegion, selectedCategory, categories])
 
-  // 구글 로그인 후 선호도 체크
-  const checkUserPreferences = useCallback(async () => {
-    if (!session || !(session as any).backendToken) {
-      return
-    }
-
-    try {
-      // 개발용: URL에 reset_preferences=true가 있으면 플래그 초기화
-      if (typeof window !== 'undefined' && window.location.search.includes('reset_preferences=true')) {
-        localStorage.removeItem('preferences_completed')
-      }
-
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
-      const response = await fetch(`${API_BASE_URL}/api/v1/users/preferences/check`, {
-        headers: {
-          'Authorization': `Bearer ${(session as any).backendToken}`
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        
-        if (!data.has_preferences) {
-          // 선호도가 없으면 설정 페이지로 이동
-          router.push('/preferences')
-          return
-        } else {
-          // 선호도가 있으면 완료 플래그 저장
-          localStorage.setItem('preferences_completed', 'true')
-        }
-      }
-    } catch (error) {
-      console.error('선호도 체크 오류:', error)
-    }
-  }, [session, router])
-
   // 초기 데이터 로드 및 세션 상태 변경 시 데이터 재로드
   useEffect(() => {
     loadRecommendedCities(0)
     loadFilterData()
   }, [loadRecommendedCities, loadFilterData])
-
-  // 세션 상태가 변경될 때마다 선호도 체크
-  useEffect(() => {
-    if (status === 'authenticated' && session) {
-      checkUserPreferences()
-    }
-  }, [status, session, checkUserPreferences])
 
   // 필터 변경 시 데이터 다시 로드
   useEffect(() => {
@@ -351,7 +307,7 @@ export default function Home() {
   }
 
   // 챗봇 관련 함수
-  const handleChatSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleChatSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!chatMessage.trim()) return
 
@@ -364,25 +320,71 @@ export default function Home() {
     }
 
     setChatMessages(prev => [...prev, userMessage])
+    const userMessageText = chatMessage
     setChatMessage('')
 
-    // 간단한 봇 응답 (실제로는 API 호출)
-    setTimeout(() => {
-      const botResponse = {
-        id: Date.now() + 1,
-        type: 'bot',
-        message: '여행 계획 작성을 도와드릴게요! 어떤 지역으로 여행을 계획하고 계신가요?',
-        timestamp: new Date()
+    // 로딩 메시지 추가
+    const loadingMessage = {
+      id: Date.now() + 1,
+      type: 'bot',
+      message: '답변을 생성하고 있습니다...',
+      timestamp: new Date()
+    }
+    setChatMessages(prev => [...prev, loadingMessage])
+
+    try {
+      // API 호출
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessageText
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
-      setChatMessages(prev => [...prev, botResponse])
-    }, 1000)
+
+      const data = await response.json()
+
+      // 로딩 메시지 제거 후 실제 응답 추가
+      setChatMessages(prev => {
+        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
+        const botResponse = {
+          id: Date.now() + 2,
+          type: 'bot',
+          message: data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
+          timestamp: new Date()
+        }
+        return [...filteredMessages, botResponse]
+      })
+
+    } catch (error) {
+      console.error('Chat API error:', error)
+      
+      // 로딩 메시지 제거 후 에러 메시지 추가
+      setChatMessages(prev => {
+        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
+        const errorResponse = {
+          id: Date.now() + 2,
+          type: 'bot',
+          message: '죄송합니다. 현재 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.',
+          timestamp: new Date()
+        }
+        return [...filteredMessages, errorResponse]
+      })
+    }
   }
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
       {/* Logo */}
       <div className="text-center mt-20 mb-8">
-        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
+        <h1 className="text-6xl font-extrabold text-[#3E68FF] tracking-tight">witple</h1>
       </div>
 
       {/* Search Bar */}
@@ -650,12 +652,12 @@ export default function Home() {
       {/* Chatbot Icon - Fixed Position */}
       <button
         onClick={() => setShowChatbot(true)}
-        className="fixed bottom-24 right-6 z-50 w-14 h-14 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+        className="fixed bottom-24 right-6 z-50 w-16 h-16 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
       >
         <img
           src="/images/chat_icon.svg"
           alt="챗봇"
-          className="w-10 h-10"
+          className="w-12 h-12"
         />
       </button>
 
