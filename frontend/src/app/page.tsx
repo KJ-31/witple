@@ -338,7 +338,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
       {/* Logo */}
       <div className="text-center mt-20 mb-8">
-        <h1 className="text-6xl font-extrabold text-[#3E68FF] tracking-tight">witple</h1>
+        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
       </div>
 
       {/* Search Bar */}
