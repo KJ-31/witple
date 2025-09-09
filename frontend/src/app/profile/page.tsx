@@ -635,9 +635,33 @@ export default function ProfilePage() {
       .filter(place => place.isLocked)
       .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
     
-    // 날짜 차이 계산
-    const startDate = new Date(trip.start_date)
-    const endDate = new Date(trip.end_date)
+    // 안전한 날짜 생성 및 포맷팅 함수
+    const createSafeDate = (dateString: string) => {
+      if (!dateString) return null
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number)
+        return new Date(year, month - 1, day)
+      }
+      const date = new Date(dateString)
+      return isNaN(date.getTime()) ? null : date
+    }
+    
+    const formatDateForURL = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    // 날짜 처리
+    const startDate = createSafeDate(trip.start_date)
+    const endDate = createSafeDate(trip.end_date)
+    
+    if (!startDate || !endDate) {
+      console.error('Invalid date format:', trip.start_date, trip.end_date)
+      return
+    }
+    
     const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
     
     // URL 파라미터 생성 (보기 모드)
@@ -645,8 +669,8 @@ export default function ProfilePage() {
       places: placeIds.join(','),
       dayNumbers: dayNumbers.join(','),
       sourceTables: sourceTables.join(','),
-      startDate: trip.start_date,
-      endDate: trip.end_date,
+      startDate: formatDateForURL(startDate),
+      endDate: formatDateForURL(endDate),
       days: daysDiff.toString(),
       baseAttraction: 'general',
       source: 'profile',
@@ -677,9 +701,33 @@ export default function ProfilePage() {
       .filter(place => place.isLocked)
       .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
     
-    // 날짜 차이 계산
-    const startDate = new Date(trip.start_date)
-    const endDate = new Date(trip.end_date)
+    // 안전한 날짜 생성 및 포맷팅 함수 (동일한 로직)
+    const createSafeDate = (dateString: string) => {
+      if (!dateString) return null
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number)
+        return new Date(year, month - 1, day)
+      }
+      const date = new Date(dateString)
+      return isNaN(date.getTime()) ? null : date
+    }
+    
+    const formatDateForURL = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    // 날짜 처리
+    const startDate = createSafeDate(trip.start_date)
+    const endDate = createSafeDate(trip.end_date)
+    
+    if (!startDate || !endDate) {
+      console.error('Invalid date format:', trip.start_date, trip.end_date)
+      return
+    }
+    
     const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
     
     // URL 파라미터 생성 (편집 모드)
@@ -687,8 +735,8 @@ export default function ProfilePage() {
       places: placeIds.join(','),
       dayNumbers: dayNumbers.join(','),
       sourceTables: sourceTables.join(','),
-      startDate: trip.start_date,
-      endDate: trip.end_date,
+      startDate: formatDateForURL(startDate),
+      endDate: formatDateForURL(endDate),
       days: daysDiff.toString(),
       baseAttraction: 'general',
       source: 'profile',
@@ -705,8 +753,27 @@ export default function ProfilePage() {
 
   // 날짜 포맷 함수
   const formatDateRange = (startDate: string, endDate: string) => {
-    const start = new Date(startDate)
-    const end = new Date(endDate)
+    // 안전한 날짜 생성 함수
+    const createSafeDate = (dateString: string) => {
+      if (!dateString) return null
+      
+      // YYYY-MM-DD 형식인 경우 로컬 시간으로 생성
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-').map(Number)
+        return new Date(year, month - 1, day)
+      }
+      
+      // 다른 형식인 경우 기본 Date 생성자 사용
+      const date = new Date(dateString)
+      return isNaN(date.getTime()) ? null : date
+    }
+    
+    const start = createSafeDate(startDate)
+    const end = createSafeDate(endDate)
+    
+    if (!start || !end) {
+      return '날짜 정보 없음'
+    }
     
     const formatDate = (date: Date) => {
       const year = date.getFullYear()
