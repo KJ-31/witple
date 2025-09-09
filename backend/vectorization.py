@@ -370,39 +370,17 @@ class RecommendationEngine:
         conn = await asyncpg.connect(self.db_url)
         
         try:
-            # 인기도와 신선성 기반 가중 샘플링
+            # 단순히 place_recommendations에서 랜덤하게 데이터 가져오기
             query = """
-                WITH place_popularity AS (
-                    SELECT 
-                        ual.place_category as table_name,
-                        ual.place_id,
-                        SUM(aw.weight * COALESCE(ual.action_value, 1)) as popularity_score,
-                        MAX(ual.created_at) as last_activity,
-                        COUNT(*) as interaction_count
-                    FROM user_action_logs ual
-                    JOIN action_weights aw ON ual.action_type = aw.action_type
-                    WHERE ual.created_at >= NOW() - INTERVAL '90 days'
-                    GROUP BY ual.place_category, ual.place_id
-                )
-                SELECT pr.place_id, pr.table_name, pr.name, pr.region, pr.city, pr.latitude, pr.longitude, 
-                       pr.overview as description, pr.image_urls,
-                       COALESCE(pp.popularity_score, 0) as popularity_score,
-                       -- 신선성과 인기도를 반영한 가중치
-                       (COALESCE(pp.popularity_score, 0) * 0.4 + 
-                        CASE 
-                            WHEN pp.last_activity IS NULL THEN 0.2
-                            WHEN pp.last_activity >= NOW() - INTERVAL '7 days' THEN 1.0
-                            WHEN pp.last_activity >= NOW() - INTERVAL '30 days' THEN 0.6
-                            ELSE 0.2
-                        END * 0.3 +
-                        random() * 0.3) as final_weight
+                SELECT place_id, table_name, name, region, city, latitude, longitude, 
+                       overview as description, image_urls,
+                       random() as final_weight
                 FROM place_recommendations pr
-                LEFT JOIN place_popularity pp ON pr.place_id = pp.place_id AND pr.table_name = pp.table_name
                 WHERE pr.name IS NOT NULL 
                   AND pr.overview IS NOT NULL 
                   AND pr.image_urls IS NOT NULL 
                   AND pr.image_urls != 'null'::jsonb
-                ORDER BY final_weight DESC
+                ORDER BY random()
                 LIMIT $1
             """
             
@@ -453,7 +431,7 @@ class RecommendationEngine:
                     COALESCE(pp.popularity_score, 0) as popularity_score,
                     COALESCE(pp.action_count, 0) as action_count
                 FROM place_recommendations pr
-                LEFT JOIN place_popularity pp ON pr.table_name = pp.table_name AND pr.place_id = pp.place_id
+                LEFT JOIN place_popularity pp ON pr.table_name = pp.table_name AND pr.place_id::text = pp.place_id::text
             """
             
             conditions = []
@@ -514,7 +492,7 @@ class RecommendationEngine:
                 SELECT pf.place_id, pf.table_name, pf.name, pf.region, pf.city, pf.latitude, pf.longitude, 
                        pf.vector, pr.overview as description, pr.image_urls
                 FROM place_features pf
-                LEFT JOIN place_recommendations pr ON pf.place_id = pr.place_id AND pf.table_name = pr.table_name
+                LEFT JOIN place_recommendations pr ON pf.place_id::text = pr.place_id::text AND pf.table_name = pr.table_name
                 WHERE pf.vector IS NOT NULL
             """
             conditions = []
@@ -528,7 +506,7 @@ class RecommendationEngine:
             
             if category:
                 param_count += 1
-                conditions.append(f"table_name = ${param_count}")
+                conditions.append(f"pf.table_name = ${param_count}")
                 params.append(category)
             
             if conditions:
@@ -601,6 +579,7 @@ class RecommendationEngine:
             
         except Exception as e:
             logger.error(f"Error in personalized recommendations: {str(e)}")
+            logger.error(f"Error traceback: ", exc_info=True)  # 전체 스택 트레이스 출력
             # 개인화 추천 실패 시 간단한 fallback
             try:
                 fallback_places = await self.get_fallback_places(limit)
@@ -694,7 +673,7 @@ class RecommendationEngine:
                         FROM user_action_logs ual
                         JOIN action_weights aw ON ual.action_type = aw.action_type
                         GROUP BY ual.place_category, ual.place_id
-                    ) pp ON pf.table_name = pp.table_name AND pf.place_id = pp.place_id
+                    ) pp ON pf.table_name = pp.table_name AND pf.place_id::text = pp.place_id::text
                     WHERE pf.region IS NOT NULL
                     GROUP BY pf.region
                 )

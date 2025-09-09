@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
 
 interface RecommendationItem {
@@ -20,6 +21,7 @@ interface RecommendationItem {
 
 export default function RecommendationsPage() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState(() => {
     // 초기값을 sessionStorage에서 가져오기
@@ -171,19 +173,47 @@ export default function RecommendationsPage() {
           '인문': 'humanities'
         }
         const categoryFilter = categoryMap[selectedCategory] || 'leisure_sports'
-        const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`)
+        
+        // 헤더 설정 - 로그인 상태에 따른 인증 처리
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'accept': 'application/json',
+        }
+        
+        // 세션에서 토큰 가져오기
+        if (session && (session as any).backendToken) {
+          headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+        }
+        
+        // 로그인 상태에 따라 다른 API 엔드포인트 사용
+        let apiUrl = `${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`
+        if (session && (session as any).backendToken) {
+          // 로그인 상태: 개인화 추천 API 사용
+          apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=15`
+        }
+        
+        const response = await fetch(apiUrl, { headers })
         if (response.ok) {
           const data = await response.json()
-          const attractions = data.results || []
+          
+          // API 응답 형식에 따라 데이터 추출
+          let attractions = []
+          if (session && (session as any).backendToken) {
+            // 개인화 추천 API 응답 (배열 형식)
+            attractions = Array.isArray(data) ? data : []
+          } else {
+            // 일반 검색 API 응답 (results 필드 있음)
+            attractions = data.results || []
+          }
 
           const formattedItems = attractions.map((attraction: any, index: number) => ({
-            id: attraction.id,
-            title: attraction.name,
+            id: attraction.id || `${attraction.table_name}_${attraction.place_id}`,
+            title: attraction.name || attraction.title,
             author: attraction.city?.name || attraction.region || '여행지',
             genre: selectedCategory,
-            rating: attraction.rating || (4.9 - index * 0.1),
-            views: Math.floor(Math.random() * 5000) + 1000,
-            imageUrl: attraction.imageUrl || `https://picsum.photos/100/100?random=${Date.now() + index}`
+            rating: attraction.rating || Math.round((attraction.similarity_score + 0.3) * 5 * 10) / 10 || (4.9 - index * 0.1),
+            views: attraction.views || Math.floor(Math.random() * 5000) + 1000,
+            imageUrl: attraction.imageUrl || getImageUrl(attraction.image_urls) || `https://picsum.photos/100/100?random=${Date.now() + index}`
           }))
 
           const leftItems = formattedItems.slice(0, 8)
@@ -202,6 +232,8 @@ export default function RecommendationsPage() {
           })
         } else {
           console.error('API 응답 실패:', response.status)
+          const errorText = await response.text()
+          console.error('오류 응답:', errorText)
           setLeftColumnItems([])
           setRightColumnItems([])
         }
@@ -216,7 +248,7 @@ export default function RecommendationsPage() {
 
 
     fetchCategoryData()
-  }, [selectedCategory])
+  }, [selectedCategory, session])
 
   // 추가 섹션 데이터 가져오기
   useEffect(() => {
@@ -247,7 +279,7 @@ export default function RecommendationsPage() {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
         // "오늘의 발견" 섹션 데이터 (다양한 카테고리에서 인기 장소들)
-        const discoveryResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=4`)
+        const discoveryResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=4`)
         if (discoveryResponse.ok) {
           const discoveryData = await discoveryResponse.json()
           const discoveryAttractions = discoveryData.results || []
@@ -267,7 +299,7 @@ export default function RecommendationsPage() {
         }
 
         // "새로 나온 코스" 섹션 데이터 (최근 추가된 장소들)
-        const newResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=3`)
+        const newResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=3`)
         if (newResponse.ok) {
           const newData = await newResponse.json()
           const newAttractions = newData.results || []
@@ -286,7 +318,7 @@ export default function RecommendationsPage() {
         }
 
         // "인기 여행지" 섹션 데이터 (높은 평점 위주)
-        const popularResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=5`)
+        const popularResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=5`)
         if (popularResponse.ok) {
           const popularData = await popularResponse.json()
           const popularAttractions = popularData.results?.sort((a: any, b: any) => (b.rating || 0) - (a.rating || 0)) || []
@@ -305,7 +337,7 @@ export default function RecommendationsPage() {
         }
 
         // "숨은 명소" 섹션 데이터 (자연/인문 카테고리 위주)
-        const hiddenResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&category=nature&limit=4`)
+        const hiddenResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=nature&limit=4`)
         if (hiddenResponse.ok) {
           const hiddenData = await hiddenResponse.json()
           const hiddenAttractions = hiddenData.results || []
@@ -324,7 +356,7 @@ export default function RecommendationsPage() {
         }
 
         // "테마별 여행" 섹션 데이터 (다양한 카테고리 혼합)
-        const themeResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&limit=6`)
+        const themeResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=6`)
         if (themeResponse.ok) {
           const themeData = await themeResponse.json()
           const themeAttractions = themeData.results || []
@@ -343,7 +375,7 @@ export default function RecommendationsPage() {
         }
 
         // "계절 추천" 섹션 데이터 (레저/자연 카테고리 위주)
-        const seasonalResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=&category=leisure_sports&limit=4`)
+        const seasonalResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=leisure_sports&limit=4`)
         if (seasonalResponse.ok) {
           const seasonalData = await seasonalResponse.json()
           const seasonalAttractions = seasonalData.results || []
@@ -414,6 +446,26 @@ export default function RecommendationsPage() {
     return categoryMap[category] || '여행'
   }
 
+  // 이미지 URL 추출 함수
+  const getImageUrl = (imageUrls: any): string => {
+    if (!imageUrls) return '';
+    
+    try {
+      // JSON 문자열인 경우 파싱
+      const urls = typeof imageUrls === 'string' ? JSON.parse(imageUrls) : imageUrls;
+      
+      // 배열인 경우 첫 번째 이미지 반환
+      if (Array.isArray(urls) && urls.length > 0) {
+        return urls[0];
+      }
+      
+      return '';
+    } catch (error) {
+      console.error('이미지 URL 파싱 오류:', error);
+      return '';
+    }
+  }
+
   const handleItemClick = (item: RecommendationItem) => {
     // 상세 페이지로 이동하기 전 현재 스크롤 위치 저장
     saveScrollPosition()
@@ -463,7 +515,9 @@ export default function RecommendationsPage() {
       {/* Content */}
       <div className="px-4 py-6">
         <div className="mb-4">
-          <h2 className="text-xl font-semibold text-white">지금 많이 찾고 있는 {selectedCategory}</h2>
+          <h2 className="text-xl font-semibold text-white">
+            {session ? `${selectedCategory} 맞춤 추천` : `지금 많이 찾고 있는 ${selectedCategory}`}
+          </h2>
         </div>
 
         {/* Horizontal Slide Layout */}
@@ -482,15 +536,14 @@ export default function RecommendationsPage() {
                   <div className="flex gap-6">
                     {/* Left Column of this page */}
                     <div className="flex-1 space-y-4">
-                      {pageItems.slice(0, 3).map((item, index) => {
-                        const globalIndex = pageIndex * 6 + index
+                      {pageItems.slice(0, 3).map((item) => {
                         return (
                           <div
                             key={item.id}
                             className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
                             onClick={() => handleItemClick(item)}
                           >
-                            <div className="flex-shrink-0 relative">
+                            <div className="flex-shrink-0">
                               <img
                                 src={item.imageUrl}
                                 alt={item.title}
@@ -499,9 +552,6 @@ export default function RecommendationsPage() {
                                   e.currentTarget.src = `https://picsum.photos/100/100?random=${Math.random() * 1000}`
                                 }}
                               />
-                              <div className="absolute top-1 left-1 bg-[#3E68FF] text-white text-xs px-1 py-0.5 rounded font-bold">
-                                {globalIndex + 1}
-                              </div>
                             </div>
                             <div className="w-[116px] flex flex-col justify-center h-16 overflow-hidden">
                               <h3 className="font-semibold text-white text-sm mb-1 truncate w-full">{item.title}</h3>
@@ -521,15 +571,14 @@ export default function RecommendationsPage() {
 
                     {/* Right Column of this page */}
                     <div className="flex-1 space-y-4">
-                      {pageItems.slice(3, 6).map((item, index) => {
-                        const globalIndex = pageIndex * 6 + index + 3
+                      {pageItems.slice(3, 6).map((item) => {
                         return (
                           <div
                             key={item.id}
                             className="flex items-start space-x-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-lg p-2 transition-colors min-h-[80px]"
                             onClick={() => handleItemClick(item)}
                           >
-                            <div className="flex-shrink-0 relative">
+                            <div className="flex-shrink-0">
                               <img
                                 src={item.imageUrl}
                                 alt={item.title}
@@ -538,9 +587,6 @@ export default function RecommendationsPage() {
                                   e.currentTarget.src = `https://picsum.photos/100/100?random=${Math.random() * 1000}`
                                 }}
                               />
-                              <div className="absolute top-1 left-1 bg-[#3E68FF] text-white text-xs px-1 py-0.5 rounded font-bold">
-                                {globalIndex + 1}
-                              </div>
                             </div>
                             <div className="w-[116px] flex flex-col justify-center h-16 overflow-hidden">
                               <h3 className="font-semibold text-white text-sm mb-1 truncate w-full">{item.title}</h3>
