@@ -388,12 +388,17 @@ export default function MapPage() {
 
         console.log(`Place parsing: ${place.id} -> table_name: ${tableName}, id: ${placeId}`)
 
+        // 잠금 상태 확인
+        const lockKey = `${place.id}_${dayNumber}`;
+        const isLocked = lockedPlaces[lockKey] || false;
+
         return {
           table_name: tableName,
           id: placeId,
           name: place.name || '',
           dayNumber: dayNumber,
-          order: dayOrderMap[dayNumber]
+          order: dayOrderMap[dayNumber],
+          isLocked: isLocked
         }
       })
       
@@ -436,7 +441,7 @@ export default function MapPage() {
     } finally {
       setIsUpdatingTrip(false)
     }
-  }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam])
+  }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam, lockedPlaces])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
@@ -2810,13 +2815,21 @@ export default function MapPage() {
                         return `${year}-${month}-${day}`;
                       };
                       
-                      // URL 파라미터 업데이트
+                      // URL 파라미터 업데이트 (새로고침 없이)
                       const searchParams = new URLSearchParams(window.location.search);
                       searchParams.set('startDate', formatLocalDate(dateEditModal.selectedStartDate));
                       searchParams.set('endDate', formatLocalDate(dateEditModal.selectedEndDate));
                       searchParams.set('days', daysDiff.toString());
                       
-                      window.location.search = searchParams.toString();
+                      // 새로고침 없이 URL만 변경
+                      router.replace(`/map?${searchParams.toString()}`);
+                      
+                      // 모달 닫기
+                      setDateEditModal(prev => ({ ...prev, isOpen: false }));
+                      
+                      // 성공 토스트 메시지
+                      setSaveToast({ show: true, message: '여행 날짜가 변경되었습니다!', type: 'success' });
+                      setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 3000);
                     }
                   }}
                   disabled={!dateEditModal.selectedStartDate || !dateEditModal.selectedEndDate}
