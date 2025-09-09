@@ -338,7 +338,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
       {/* Logo */}
       <div className="text-center mt-20 mb-8">
-        <h1 className="text-6xl font-extrabold text-[#3E68FF] tracking-tight">witple</h1>
+        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
       </div>
 
       {/* Search Bar */}
@@ -606,12 +606,12 @@ export default function Home() {
       {/* Chatbot Icon - Fixed Position */}
       <button
         onClick={() => setShowChatbot(true)}
-        className="fixed bottom-24 right-6 z-50 w-16 h-16 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+        className="fixed bottom-24 right-6 z-50 w-14 h-14 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
       >
         <img
           src="/images/chat_icon.svg"
           alt="챗봇"
-          className="w-12 h-12"
+          className="w-10 h-10"
         />
       </button>
 

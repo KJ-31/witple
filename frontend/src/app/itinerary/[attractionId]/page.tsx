@@ -1000,7 +1000,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       <div className="fixed top-0 left-0 right-0 bg-[#0B1220] z-30">
         {/* Header */}
         <div className="flex items-center justify-between p-4">
-          {/* 뒤로가기 버튼 - 상세 페이지에서 온 경우에만 표시 */}
+          {/* 뒤로가기 버튼 */}
           {params.attractionId !== 'general' ? (
             <button
               onClick={() => router.back()}
@@ -1011,7 +1011,12 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
               </svg>
             </button>
           ) : (
-            <div className="w-10 h-10" />
+            <button
+              onClick={() => router.push('/plan/calendar')}
+              className="text-[#3E68FF] text-2xl hover:text-[#4C7DFF] transition-colors"
+            >
+              ‹
+            </button>
           )}
 
           <h1 className="text-lg font-semibold text-[#94A9C9]">

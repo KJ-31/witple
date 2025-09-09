@@ -43,7 +43,7 @@ export default function FeedPage() {
         console.log('첫 번째 포스트 사용자:', data.posts?.[0]?.user)
         console.log('OAuth 계정:', data.posts?.[0]?.user?.oauth_accounts)
         console.log('==============================')
-        
+
         // API 응답 형태에 맞게 데이터 변환
         const postsWithLiked = data.posts.map((post: any) => ({
           ...post,
@@ -74,7 +74,7 @@ export default function FeedPage() {
       const currentPost = posts.find(post => post.id === postId)
       if (!currentPost) return
 
-      const endpoint = currentPost.isLiked 
+      const endpoint = currentPost.isLiked
         ? `/api/proxy/api/v1/posts/${postId}/like`  // DELETE 요청
         : `/api/proxy/api/v1/posts/${postId}/like`  // POST 요청
 
@@ -89,7 +89,7 @@ export default function FeedPage() {
 
       if (response.ok) {
         const result = await response.json()
-        
+
         // UI 업데이트 - 서버 응답의 likes_count 사용
         setPosts(prevPosts =>
           prevPosts.map(post =>
@@ -216,10 +216,10 @@ export default function FeedPage() {
                     onClick={() => handleLike(post.id)}
                     className="transition-colors hover:scale-110 transform"
                   >
-                    <svg 
-                      className="w-6 h-6" 
-                      fill={post.isLiked ? '#ef4444' : 'none'} 
-                      stroke={post.isLiked ? '#ef4444' : '#ffffff'} 
+                    <svg
+                      className="w-6 h-6"
+                      fill={post.isLiked ? '#ef4444' : 'none'}
+                      stroke={post.isLiked ? '#ef4444' : '#ffffff'}
                       viewBox="0 0 24 24"
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
@@ -239,11 +239,11 @@ export default function FeedPage() {
                     </svg>
                   </button> */}
                 </div>
-                <button className="text-gray-400 hover:text-white transition-colors">
+                {/* <button className="text-gray-400 hover:text-white transition-colors">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                   </svg>
-                </button>
+                </button> */}
               </div>
 
               {/* Likes Count */}
