@@ -92,23 +92,22 @@ export default function PreferencesPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-2xl font-bold text-white mb-2">🏖️ 최고의 여행 모습</h3>
-              <p className="text-[#94A9C9]">어떤 여행을 선호하시나요?</p>
+              <h3 className="text-lg font-medium text-white mb-2">최고의 여행 모습 👈</h3>
+              <p className="text-sm text-[#94A9C9]">어떤 여행이 가장 매력적으로 느껴지시나요?</p>
             </div>
             <div className="space-y-3">
               {[
-                { id: 'luxury', label: '럭셔리 리조트 휴식', desc: '편안하고 여유로운 휴식' },
-                { id: 'modern', label: '도시 문화와 쇼핑', desc: '활기찬 도시 생활 체험' },
-                { id: 'nature_activity', label: '대자연 속 모험', desc: '자연 속에서의 모험과 액티비티' },
-                { id: 'foodie', label: '현지 맛집 탐방', desc: '다양한 현지 음식 체험' },
+                { id: 'luxury', emoji: '🏖️', label: '럭셔리 리조트 휴식', desc: '편안하고 여유로운 휴식' },
+                { id: 'modern', emoji: '🌇', label: '도시 문화와 쇼핑', desc: '활기찬 도시 생활 체험' },
+                { id: 'nature_activity', emoji: '⛰️', label: '대자연 속 모험', desc: '자연 속에서의 모험과 액티비티' },
+                { id: 'foodie', emoji: '🍽️', label: '현지 맛집 탐방', desc: '다양한 현지 음식 체험' },
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${
-                    preferences.persona === option.id
-                      ? 'border-[#3E68FF] bg-[#3E68FF]/10'
-                      : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
-                  }`}
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.persona === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -118,9 +117,12 @@ export default function PreferencesPage() {
                     onChange={(e) => handlePreferenceChange('persona', e.target.value)}
                     className="hidden"
                   />
-                  <div>
-                    <p className="font-medium text-white">{option.label}</p>
-                    <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl">{option.emoji}</span>
+                    <div>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                    </div>
                   </div>
                 </label>
               ))}
@@ -132,8 +134,8 @@ export default function PreferencesPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-2xl font-bold text-white mb-2">💰 아끼고 싶지 않은 것</h3>
-              <p className="text-[#94A9C9]">여행에서 투자를 아끼지 않고 싶은 부분은?</p>
+              <h3 className="text-lg font-medium text-white mb-2">아끼고 싶지 않은 것 👈</h3>
+              <p className="text-sm text-[#94A9C9]">여행에서 투자를 아끼지 않고 싶은 부분은?</p>
             </div>
             <div className="space-y-3">
               {[
@@ -144,11 +146,10 @@ export default function PreferencesPage() {
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${
-                    preferences.priority === option.id
-                      ? 'border-[#3E68FF] bg-[#3E68FF]/10'
-                      : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
-                  }`}
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.priority === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -175,23 +176,22 @@ export default function PreferencesPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-2xl font-bold text-white mb-2">🏨 선호하는 숙소</h3>
-              <p className="text-[#94A9C9]">어떤 숙소를 선호하시나요?</p>
+              <h3 className="text-lg font-medium text-white mb-2">선호하는 숙소 유형 👈</h3>
+              <p className="text-sm text-[#94A9C9]">여행의 피로를 풀어줄 숙소, 어떤 곳을 선호하시나요?</p>
             </div>
             <div className="space-y-3">
               {[
-                { id: 'comfort', label: '편안함', desc: '편리하고 쾌적한 숙소' },
-                { id: 'healing', label: '힐링', desc: '휴식과 힐링이 가능한 숙소' },
-                { id: 'traditional', label: '전통', desc: '현지 전통을 체험할 수 있는 숙소' },
-                { id: 'community', label: '커뮤니티', desc: '다른 여행자들과 교류할 수 있는 숙소' },
+                { id: 'comfort', emoji: '🏨', label: '완벽한 서비스와 편리함', desc: '모든 것이 갖춰진 편안함 (관광호텔, 서비스드레지던스)' },
+                { id: 'healing', emoji: '🏡', label: '자연 속 아늑한 휴식처', desc: '프라이빗한 우리만의 공간 (펜션, 콘도미니엄)' },
+                { id: 'traditional', emoji: '🏯', label: '한국의 멋과 정취', desc: '전통 가옥에서의 특별한 하룻밤 (한옥, 템플스테이)' },
+                { id: 'community', emoji: '🥂', label: '새로운 만남과 교류', desc: '여행의 즐거움을 나누는 공간 (게스트하우스, 민박)' },
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${
-                    preferences.accommodation === option.id
-                      ? 'border-[#3E68FF] bg-[#3E68FF]/10'
-                      : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
-                  }`}
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.accommodation === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -201,9 +201,12 @@ export default function PreferencesPage() {
                     onChange={(e) => handlePreferenceChange('accommodation', e.target.value)}
                     className="hidden"
                   />
-                  <div>
-                    <p className="font-medium text-white">{option.label}</p>
-                    <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl">{option.emoji}</span>
+                    <div>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                    </div>
                   </div>
                 </label>
               ))}
@@ -215,23 +218,22 @@ export default function PreferencesPage() {
         return (
           <div className="space-y-6">
             <div className="text-center">
-              <h3 className="text-2xl font-bold text-white mb-2">🗺️ 탐험 스타일</h3>
-              <p className="text-[#94A9C9]">어떤 방식으로 여행지를 탐험하고 싶으신가요?</p>
+              <h3 className="text-lg font-medium text-white mb-2">여행지 선택 스타일 👈</h3>
+              <p className="text-sm text-[#94A9C9]">낯선 여행지에서 당신의 선택은?</p>
             </div>
             <div className="space-y-3">
               {[
-                { id: 'hot', label: '핫플레이스', desc: '인기 있는 관광지 위주' },
-                { id: 'local', label: '로컬', desc: '현지인들이 가는 곳' },
-                { id: 'balance', label: '밸런스', desc: '인기 장소와 숨은 장소의 균형' },
-                { id: 'authentic_experience', label: '진정한 경험', desc: '진짜 현지 문화 체험' },
+                { id: 'hot', emoji: '🗺️', label: '모두가 인정하는 필수 명소', desc: '실패 없는 여행을 위한 검증된 랜드마크' },
+                { id: 'local', emoji: '🤫', label: '현지인만 아는 숨은 명소', desc: '나만 알고 싶은 골목길과 로컬 스팟' },
+                { id: 'balance', emoji: '🧭', label: '유명한 곳과 숨은 곳의 조화', desc: '중심가를 여행하되, 가끔은 골목으로!' },
+                { id: 'authentic_experience', emoji: '✨', label: '장소보다는 특별한 경험', desc: '그곳에서만 할 수 있는 독특한 활동과 체험' },
               ].map((option) => (
                 <label
                   key={option.id}
-                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${
-                    preferences.exploration === option.id
-                      ? 'border-[#3E68FF] bg-[#3E68FF]/10'
-                      : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
-                  }`}
+                  className={`block p-4 border-2 rounded-2xl cursor-pointer transition-all ${preferences.exploration === option.id
+                    ? 'border-[#3E68FF] bg-[#3E68FF]/10'
+                    : 'border-[#1F3C7A] bg-[#0F1A31]/50 hover:border-[#3E68FF]/50'
+                    }`}
                 >
                   <input
                     type="radio"
@@ -241,9 +243,12 @@ export default function PreferencesPage() {
                     onChange={(e) => handlePreferenceChange('exploration', e.target.value)}
                     className="hidden"
                   />
-                  <div>
-                    <p className="font-medium text-white">{option.label}</p>
-                    <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl">{option.emoji}</span>
+                    <div>
+                      <p className="font-medium text-white">{option.label}</p>
+                      <p className="text-sm text-[#94A9C9]">{option.desc}</p>
+                    </div>
                   </div>
                 </label>
               ))}
