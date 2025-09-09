@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
-import { saveTrip } from '@/app/api'
+import { saveTrip, updateTrip } from '@/app/api'
 
 type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
@@ -79,6 +79,30 @@ export default function MapPage() {
   const startDateParam = searchParams.get('startDate')
   const endDateParam = searchParams.get('endDate')
   const daysParam = searchParams.get('days')
+  const sourceParam = searchParams.get('source')
+  const tripTitleParam = searchParams.get('tripTitle')
+  const tripDescriptionParam = searchParams.get('tripDescription')
+  const tripIdParam = searchParams.get('tripId')
+  const editModeParam = searchParams.get('editMode')
+  const lockedPlacesParam = searchParams.get('lockedPlaces')
+  
+  // profile에서 온 경우 판단
+  const isFromProfile = sourceParam === 'profile'
+  
+  // 편집 모드 상태 (profile에서 온 경우에만 사용, editMode 파라미터가 있으면 자동 활성화)
+  const [isEditMode, setIsEditMode] = useState(editModeParam === 'true')
+  
+  // long press 활성화 조건 계산 (동적으로 변경되도록)
+  // 1. profile이 아닌 곳에서 온 경우: 항상 가능
+  // 2. profile에서 왔지만 편집 모드가 활성화된 경우: 가능
+  // 3. profile에서 왔고 편집 모드가 비활성화된 경우: 불가능
+  const isLongPressEnabled = !isFromProfile || isEditMode
+  const [editTitle, setEditTitle] = useState(tripTitleParam ? decodeURIComponent(tripTitleParam) : '')
+  const [editDescription, setEditDescription] = useState(tripDescriptionParam && tripDescriptionParam.trim() 
+    ? decodeURIComponent(tripDescriptionParam) 
+    : ''
+  )
+  const [isUpdatingTrip, setIsUpdatingTrip] = useState(false)
   
   const [selectedItineraryPlaces, setSelectedItineraryPlaces] = useState<SelectedPlace[]>([])
   const [categoryPlaces, setCategoryPlaces] = useState<AttractionData[]>([])
@@ -142,6 +166,7 @@ export default function MapPage() {
     message: string
     type: 'success' | 'error'
   }>({ show: false, message: '', type: 'success' })
+
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -292,6 +317,16 @@ export default function MapPage() {
         }
         
         setSelectedItineraryPlaces(places)
+        
+        // 잠금 상태 복원
+        if (lockedPlacesParam) {
+          const lockedKeys = lockedPlacesParam.split(',')
+          const restoredLockedPlaces: {[key: string]: boolean} = {}
+          lockedKeys.forEach(key => {
+            restoredLockedPlaces[key] = true
+          })
+          setLockedPlaces(restoredLockedPlaces)
+        }
       } catch (error) {
         setError('선택된 장소들을 불러올 수 없습니다.')
       } finally {
@@ -300,7 +335,99 @@ export default function MapPage() {
     }
 
     loadSelectedPlaces()
-  }, [placesParam, dayNumbersParam, sourceTablesParam])
+  }, [placesParam, dayNumbersParam, sourceTablesParam, lockedPlacesParam])
+
+  // Trip 업데이트 함수
+  const handleUpdateTrip = useCallback(async () => {
+    if (!tripIdParam || !isFromProfile) return
+    
+    setIsUpdatingTrip(true)
+    try {
+      // places 데이터를 백엔드 형식에 맞게 변환
+      // 일차별로 order를 1부터 시작하도록 계산
+      const dayOrderMap: { [key: number]: number } = {}
+      
+      const placesForBackend = selectedItineraryPlaces.map((place) => {
+        let tableName = 'general'
+        let placeId = place.id || ''
+        const dayNumber = place.dayNumber || 1
+
+        // 각 일차별로 order 카운트
+        if (!dayOrderMap[dayNumber]) {
+          dayOrderMap[dayNumber] = 0
+        }
+        dayOrderMap[dayNumber] += 1
+
+        // ID 파싱 로직 개선
+        if (place.id && typeof place.id === 'string' && place.id.includes('_')) {
+          const parts = place.id.split('_')
+          if (parts.length >= 2) {
+            // leisure_sports_123 같은 경우 처리
+            if (parts[0] === 'leisure' && parts[1] === 'sports' && parts.length >= 3) {
+              tableName = 'leisure_sports'
+              placeId = parts[2]
+            } else {
+              tableName = parts[0]
+              placeId = parts[1]
+            }
+          }
+        } else {
+          // place.id가 없거나 _가 없는 경우
+          tableName = 'general'
+          placeId = place.id || ''
+        }
+
+        console.log(`Place parsing: ${place.id} -> table_name: ${tableName}, id: ${placeId}`)
+
+        return {
+          table_name: tableName,
+          id: placeId,
+          name: place.name || '',
+          dayNumber: dayNumber,
+          order: dayOrderMap[dayNumber]
+        }
+      })
+      
+      const tripData = {
+        title: editTitle,
+        description: editDescription || null,
+        places: placesForBackend,
+        start_date: startDateParam || undefined,
+        end_date: endDateParam || undefined,
+        days: daysParam ? parseInt(daysParam) : undefined
+      }
+      
+      console.log('Original selectedItineraryPlaces:', JSON.stringify(selectedItineraryPlaces, null, 2))
+      console.log('Transformed placesForBackend:', JSON.stringify(placesForBackend, null, 2))
+      
+      await updateTrip(parseInt(tripIdParam), tripData)
+      
+      // 성공 메시지 표시
+      console.log('여행 일정이 성공적으로 업데이트되었습니다!')
+      
+      // 편집 모드 종료
+      setIsEditMode(false)
+      
+    } catch (error: any) {
+      console.error('Trip 업데이트 오류:', error)
+      console.error('에러 응답 데이터:', error.response?.data)
+      
+      let errorMessage = error.message
+      if (error.response?.data?.detail) {
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map((err: any) => 
+            typeof err === 'string' ? err : JSON.stringify(err)
+          ).join(', ')
+        } else {
+          errorMessage = error.response.data.detail
+        }
+      }
+      
+      console.error(`여행 일정 업데이트에 실패했습니다: ${errorMessage}`)
+    } finally {
+      setIsUpdatingTrip(false)
+    }
+  }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
@@ -1513,8 +1640,9 @@ export default function MapPage() {
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="absolute top-4 left-16 right-4 z-40">
+      {/* Search Bar - profile에서 온 경우 편집 모드에서만 표시 */}
+      {(!isFromProfile || isEditMode) && (
+        <div className="absolute top-4 left-16 right-4 z-40">
         <form onSubmit={handleSearch} className="relative">
           <div className="relative">
             <input
@@ -1534,9 +1662,11 @@ export default function MapPage() {
             </button>
           </div>
         </form>
-      </div>
+        </div>
+      )}
 
-      {/* Category Filter */}
+      {/* Category Filter - profile에서 온 경우 편집 모드에서만 표시 */}
+      {(!isFromProfile || isEditMode) && (
       <div className="absolute top-20 left-4 right-4 z-40">
         <div className="flex space-x-2 overflow-x-auto no-scrollbar">
           {categories.map(category => (
@@ -1558,6 +1688,7 @@ export default function MapPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Route Status Toast */}
       {routeStatus && (
@@ -1651,8 +1782,60 @@ export default function MapPage() {
             /* 일정 보기 모드 */
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
+                {isFromProfile && tripTitleParam ? (
+                  <div className="flex-1 mr-4">
+                    {isEditMode ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="text-xl font-bold text-[#3E68FF] bg-transparent border-b border-[#3E68FF]/30 focus:border-[#3E68FF] outline-none w-full"
+                          placeholder="여행 제목"
+                        />
+                        <input
+                          type="text"
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          className="text-sm text-[#94A9C9] bg-transparent border-b border-[#94A9C9]/30 focus:border-[#94A9C9] outline-none w-full"
+                          placeholder="여행 설명"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <h2 className="text-xl font-bold text-[#3E68FF]">{editTitle}</h2>
+                        <p className="text-sm text-[#94A9C9]">
+                          {editDescription || '저장된 여행 일정'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <h2 className="text-xl font-bold text-[#3E68FF]">내 일정</h2>
+                )}
                 <div className="flex items-center space-x-2">
+                  {isFromProfile && (
+                    <button
+                      onClick={async () => {
+                        if (isEditMode) {
+                          // 편집 완료 - trip 업데이트
+                          await handleUpdateTrip()
+                        } else {
+                          // 편집 시작
+                          setIsEditMode(true)
+                        }
+                      }}
+                      disabled={isUpdatingTrip}
+                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors flex items-center space-x-1 disabled:opacity-50"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      <span>
+                        {isUpdatingTrip ? '저장 중...' : (isEditMode ? '편집 완료' : '편집')}
+                      </span>
+                    </button>
+                  )}
                   {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (
                     <button
                       onClick={clearRoute}
@@ -1665,12 +1848,14 @@ export default function MapPage() {
                       <span>경로 지우기</span>
                     </button>
                   )}
-                  <button
-                    onClick={() => setShowItinerary(false)}
-                    className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
-                  >
-                    장소 찾기
-                  </button>
+                  {(!isFromProfile || isEditMode) && (
+                    <button
+                      onClick={() => setShowItinerary(false)}
+                      className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
+                    >
+                      장소 찾기
+                    </button>
+                  )}
                 </div>
               </div>
               
@@ -1799,16 +1984,24 @@ export default function MapPage() {
                             data-place-card="true"
                             className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors relative cursor-pointer select-none group"
                             onTouchStart={(e) => {
-                              handleLongPressStart(e, place, day, index);
+                              if (isLongPressEnabled) {
+                                handleLongPressStart(e, place, day, index);
+                              }
                             }}
                             onTouchMove={(e) => {
-                              handleLongPressMove(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressMove(e);
+                              }
                             }}
                             onTouchEnd={(e) => {
-                              handleLongPressEnd(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressEnd(e);
+                              }
                             }}
                             onTouchCancel={(e) => {
-                              handleLongPressEnd(e);
+                              if (isLongPressEnabled) {
+                                handleLongPressEnd(e);
+                              }
                             }}
                             style={{ 
                               touchAction: 'none',
@@ -1817,26 +2010,29 @@ export default function MapPage() {
                               WebkitTouchCallout: 'none'
                             } as React.CSSProperties}
                           >
-                            {/* Long press 말풍선 힌트 */}
-                            <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
-                              <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
-                                꾹 눌러 이동
+                            {/* Long press 말풍선 힌트 (long press가 활성화된 경우에만 표시) */}
+                            {isLongPressEnabled && (
+                              <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-20">
+                                <div className="relative bg-[#0B1220] text-white text-xs px-3 py-2 rounded-xl shadow-xl whitespace-nowrap border border-gray-300/60">
+                                  꾹 눌러 이동
+                                </div>
                               </div>
-                            </div>
+                            )}
                             
                             {/* 잠금 버튼 - 휴지통 왼쪽 */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleLockPlace(place.id, day);
-                              }}
-                              className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
-                                lockedPlaces[`${place.id}_${day}`] 
-                                  ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
-                                  : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
-                              }`}
-                              title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
-                            >
+                            {(!isFromProfile || isEditMode) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleLockPlace(place.id, day);
+                                }}
+                                className={`absolute -top-2 right-8 w-8 h-8 border rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10 ${
+                                  lockedPlaces[`${place.id}_${day}`] 
+                                    ? 'bg-[#FF9800]/80 hover:bg-[#FF9800] border-[#FF9800]/30 hover:border-[#FF9800]/50' 
+                                    : 'bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border-[#3E68FF]/30 hover:border-[#3E68FF]/50'
+                                }`}
+                                title={lockedPlaces[`${place.id}_${day}`] ? "순서 고정 해제" : "순서 고정"}
+                              >
                               {lockedPlaces[`${place.id}_${day}`] ? (
                                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -1846,10 +2042,12 @@ export default function MapPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
                                 </svg>
                               )}
-                            </button>
+                              </button>
+                            )}
 
                             {/* 휴지통 버튼 - 오른쪽 상단 모서리 */}
-                            <button
+                            {(!isFromProfile || isEditMode) && (
+                              <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openDeleteConfirm(place, day);
@@ -1857,10 +2055,11 @@ export default function MapPage() {
                               className="absolute -top-2 -right-2 w-8 h-8 bg-[#1F3C7A]/80 hover:bg-[#1F3C7A] border border-[#3E68FF]/30 hover:border-[#3E68FF]/50 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 group hover:scale-110 z-10"
                               title="일정에서 제거"
                             >
-                              <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-                            </button>
+                                <svg className="w-4 h-4 text-[#94A9C9] group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            )}
 
                             <div className="flex items-start justify-between">
                               <div 
@@ -2117,8 +2316,8 @@ export default function MapPage() {
             </div>
           )}
           
-          {/* 일정 저장하기 버튼 */}
-          {showItinerary && selectedItineraryPlaces.length > 0 && (
+          {/* 일정 저장/수정하기 버튼 - 편집 모드에서는 숨기기 */}
+          {showItinerary && selectedItineraryPlaces.length > 0 && !isFromProfile && (
             <div className="px-4 pb-8 pt-4">
               <button
                 onClick={openSaveItinerary}
@@ -2324,11 +2523,17 @@ export default function MapPage() {
                     }
                     
                     try {
+                      // places에 잠금 상태 추가
+                      const placesWithLockStatus = selectedItineraryPlaces.map(place => ({
+                        ...place,
+                        isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                      }));
+
                       // API로 DB에 저장
                       const tripData = {
                         title: saveItineraryModal.title.trim(),
                         description: saveItineraryModal.description.trim() || undefined,
-                        places: selectedItineraryPlaces,
+                        places: placesWithLockStatus,
                         startDate: startDateParam || undefined,
                         endDate: endDateParam || undefined,
                         days: daysParam ? parseInt(daysParam) : undefined
@@ -2344,7 +2549,7 @@ export default function MapPage() {
                       setTimeout(() => {
                         setSaveToast({ show: false, message: '', type: 'success' });
                         router.push('/profile');
-                      }, 1500);
+                      }, 1000);
                       
                       closeSaveItinerary();
                     } catch (error) {

@@ -62,7 +62,8 @@ async function proxyRequest(
     const url = new URL(request.url);
     const queryString = url.search;
     
-    const backendUrl = `${API_INTERNAL_URL}/${path}${queryString}`;
+    const cleanPath = path.startsWith('proxy/') ? path.substring(6) : path;
+    const backendUrl = `${API_INTERNAL_URL}/${cleanPath}${queryString}`;
     
     console.log('API_INTERNAL_URL:', API_INTERNAL_URL);
     console.log('Final backend URL:', backendUrl);

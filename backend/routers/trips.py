@@ -142,7 +142,6 @@ async def create_trip(
             day_counters = {}  # 각 일차별 카운터
             
             for place in places:
-                place_id = place.get("id", "")
                 day_number = place.get("dayNumber", 1)
                 
                 # 일차별 카운터 관리
@@ -151,20 +150,27 @@ async def create_trip(
                 else:
                     day_counters[day_number] += 1
                 
-                # id에서 테이블명과 실제 ID 분리 (예: leisure_sports_950 -> leisure_sports, 950)
-                table_name = ""
-                actual_id = ""
-                if "_" in place_id:
-                    parts = place_id.rsplit("_", 1)  # 마지막 언더스코어로 분리
-                    if len(parts) == 2:
-                        table_name = parts[0]
-                        actual_id = parts[1]
+                # 프론트엔드에서 이미 분리된 데이터를 보낸 경우
+                if place.get("table_name") and place.get("id"):
+                    table_name = place.get("table_name", "")
+                    actual_id = place.get("id", "")
+                else:
+                    # 아직 분리되지 않은 데이터를 보낸 경우 (레거시 호환성)
+                    place_id = place.get("id", "")
+                    table_name = ""
+                    actual_id = ""
+                    if "_" in place_id:
+                        parts = place_id.rsplit("_", 1)  # 마지막 언더스코어로 분리
+                        if len(parts) == 2:
+                            table_name = parts[0]
+                            actual_id = parts[1]
                 
                 simplified_place = {
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number]  # 일차별로 1부터 시작
+                    "order": day_counters[day_number],  # 일차별로 1부터 시작
+                    "isLocked": place.get("isLocked", False)  # 잠금 상태 추가
                 }
                 simplified_places.append(simplified_place)
         
@@ -211,10 +217,10 @@ async def create_trip(
         )
 
 
-@router.put("/{trip_id}", response_model=TripResponse)
+@router.put("/{trip_id}")
 async def update_trip(
     trip_id: int,
-    trip_data: TripCreate,
+    trip_data: dict,  # 프론트엔드 데이터를 직접 받음
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -231,60 +237,75 @@ async def update_trip(
         )
     
     try:
-        # feat 브랜치의 최적화된 places 저장 방식 적용
+        # feat 브랜치의 최적화된 places 저장 방식 적용 (POST와 동일한 로직)
         simplified_places = []
-        if trip_data.places:
-            day_counters = {}
+        places = trip_data.get("places", [])
+        if places:
+            # 일차별로 그룹핑하여 각 일차마다 order를 1부터 시작
+            day_counters = {}  # 각 일차별 카운터
             
-            for place in trip_data.places:
-                place_dict = place.dict() if hasattr(place, 'dict') else place
+            for place in places:
+                day_number = place.get("dayNumber", 1)
                 
-                place_id = place_dict.get("id", "")
-                day_number = place_dict.get("dayNumber", 1)
-                
+                # 일차별 카운터 관리
                 if day_number not in day_counters:
                     day_counters[day_number] = 1
                 else:
                     day_counters[day_number] += 1
                 
-                table_name = ""
-                actual_id = ""
-                if "_" in place_id:
-                    parts = place_id.rsplit("_", 1)
-                    if len(parts) == 2:
-                        table_name = parts[0]
-                        actual_id = parts[1]
+                # 프론트엔드에서 이미 분리된 데이터를 보낸 경우
+                if place.get("table_name") and place.get("id"):
+                    table_name = place.get("table_name", "")
+                    actual_id = place.get("id", "")
+                else:
+                    # 아직 분리되지 않은 데이터를 보낸 경우 (레거시 호환성)
+                    place_id = place.get("id", "")
+                    table_name = ""
+                    actual_id = ""
+                    if "_" in place_id:
+                        parts = place_id.rsplit("_", 1)  # 마지막 언더스코어로 분리
+                        if len(parts) == 2:
+                            table_name = parts[0]
+                            actual_id = parts[1]
                 
                 simplified_place = {
                     "table_name": table_name,
                     "id": actual_id,
                     "dayNumber": day_number,
-                    "order": day_counters[day_number]
+                    "order": day_counters[day_number],  # 일차별로 1부터 시작
+                    "isLocked": place.get("isLocked", False)  # 잠금 상태 추가
                 }
                 simplified_places.append(simplified_place)
         
         places_json = json.dumps(simplified_places) if simplified_places else None
         
+        # 날짜 문자열을 datetime으로 변환 (프론트엔드에서 camelCase로 보냄)
+        start_date = None
+        end_date = None
+        
+        if trip_data.get("start_date"):
+            start_date = datetime.fromisoformat(trip_data["start_date"])
+        if trip_data.get("end_date"):
+            end_date = datetime.fromisoformat(trip_data["end_date"])
+        
         # Trip 정보 업데이트
-        trip.title = trip_data.title
+        trip.title = trip_data.get("title", trip.title)
         trip.places = places_json
-        trip.start_date = trip_data.start_date
-        trip.end_date = trip_data.end_date
-        trip.status = trip_data.status.value if hasattr(trip_data, 'status') and trip_data.status else trip.status
-        trip.total_budget = trip_data.total_budget if hasattr(trip_data, 'total_budget') else trip.total_budget
-        trip.cover_image = trip_data.cover_image if hasattr(trip_data, 'cover_image') else trip.cover_image
-        trip.description = trip_data.description
+        trip.start_date = start_date if start_date else trip.start_date
+        trip.end_date = end_date if end_date else trip.end_date
+        trip.total_budget = trip_data.get("total_budget", trip.total_budget)
+        trip.cover_image = trip_data.get("cover_image", trip.cover_image)
+        trip.description = trip_data.get("description", trip.description)
         
         db.commit()
         db.refresh(trip)
         
-        # places를 파싱하여 반환
-        if trip.places:
-            trip.places = json.loads(trip.places)
-        else:
-            trip.places = []
-        
-        return trip
+        # 성공 응답 반환 (POST와 유사한 형식)
+        return {
+            "message": "여행이 성공적으로 수정되었습니다.",
+            "trip_id": trip.id,
+            "title": trip.title
+        }
         
     except Exception as e:
         db.rollback()

@@ -94,4 +94,16 @@ export const saveTrip = async (tripData: {
   return response.data
 }
 
+export const updateTrip = async (tripId: number, tripData: {
+  title: string
+  description?: string | null
+  places: any[]
+  start_date?: string
+  end_date?: string
+  days?: number
+}) => {
+  const response = await apiClient.put(`/api/v1/trips/${tripId}`, tripData)
+  return response.data
+}
+
 export default apiClient

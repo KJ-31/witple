@@ -234,7 +234,8 @@ async def get_mixed_recommendations(
     current_user = Depends(get_current_user_optional),
     region: Optional[str] = Query(None, description="지역 필터"),
     category: Optional[str] = Query(None, description="카테고리 필터"),
-    limit: int = Query(20, ge=1, le=100, description="결과 개수 제한")
+    limit: int = Query(20, ge=1, le=100, description="결과 개수 제한"),
+    test_user: Optional[str] = Query(None, description="테스트용 사용자 ID")  # 임시 테스트용
 ):
     """
     혼합 추천 (로그인 상태에 따라 자동 분기)
@@ -242,9 +243,16 @@ async def get_mixed_recommendations(
     - 비로그인: 인기 추천 100%
     """
     try:
-        if current_user and hasattr(current_user, 'user_id'):
+        # 테스트용 사용자 ID가 있으면 사용, 없으면 기존 로직
+        if test_user:
+            user_id = test_user
+        elif current_user and hasattr(current_user, 'user_id'):
             # 로그인 상태: 실제 개인화 추천
             user_id = str(current_user.user_id)
+        else:
+            user_id = None
+            
+        if user_id:
             
             try:
                 personalized_places = await recommendation_engine.get_personalized_recommendations(
