@@ -100,7 +100,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
 
     const dates = []
-    const startDate = new Date(startDateParam)
+    // 한국 시간 기준으로 날짜 생성 (UTC 해석 방지)
+    const createLocalDate = (dateString: string) => {
+      const [year, month, day] = dateString.split('-').map(Number)
+      return new Date(year, month - 1, day) // month는 0부터 시작
+    }
+    
+    const startDate = createLocalDate(startDateParam)
     const dayCount = parseInt(daysParam)
 
     for (let i = 0; i < dayCount; i++) {
@@ -782,8 +788,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     const selectedPlaceIds = allSelectedPlaces.map(place => place.id).join(',')
     const dayNumbers = allSelectedPlaces.map(place => place.dayNumber || 1).join(',')
     const sourceTables = allSelectedPlaces.map(place => place.sourceTable || 'unknown').join(',')
-    const startDate = dateRange[0].toISOString().split('T')[0]
-    const endDate = dateRange[dateRange.length - 1].toISOString().split('T')[0]
+    
+    // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
+    const formatLocalDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    
+    const startDate = formatLocalDate(dateRange[0])
+    const endDate = formatLocalDate(dateRange[dateRange.length - 1])
 
     const queryParams = new URLSearchParams({
       places: selectedPlaceIds,
@@ -1059,7 +1074,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                   <div className="text-center">
                     <div className="font-semibold">Day {dayNumber}</div>
                     <div className="text-xs opacity-80">
-                      {date.getMonth() + 1}/{date.getDate() + 1}
+                      {date.getMonth() + 1}/{date.getDate()}
                     </div>
                     {placesForDay > 0 && (
                       <div className={`text-xs mt-1 ${isSelected ? 'text-white' : 'text-[#3E68FF]'}`}>

@@ -72,9 +72,17 @@ export default function PlanCalendar() {
   const handleSelectComplete = () => {
     if (selectedDates.length === 0) return
 
+    // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
+    const formatLocalDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
     // 선택된 날짜들을 query parameter로 전달하며 세부 일정 페이지로 이동
-    const startDate = selectedDates[0].toISOString().split('T')[0]
-    const endDate = selectedDates[selectedDates.length - 1].toISOString().split('T')[0]
+    const startDate = formatLocalDate(selectedDates[0])
+    const endDate = formatLocalDate(selectedDates[selectedDates.length - 1])
 
     // 기존 itinerary 페이지를 활용, general을 attractionId로 사용
     router.push(`/itinerary/general?startDate=${startDate}&endDate=${endDate}&days=${selectedDates.length}`)
