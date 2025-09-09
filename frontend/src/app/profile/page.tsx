@@ -262,37 +262,46 @@ export default function ProfilePage() {
           const enrichedLocations = await Promise.all(
             savedLocationIds.map(async (savedLocation: any) => {
               try {
-                // 장소 이름과 주소로 실제 장소 DB에서 검색
-                const searchQuery = savedLocation.name || savedLocation.address
-                if (!searchQuery) return savedLocation
+                // places 필드에서 table_name:table_id 파싱
+                const places = savedLocation.places
+                if (!places || !places.includes(':')) {
+                  console.error('Invalid places format:', places)
+                  return null
+                }
                 
-                const searchResponse = await fetch(
-                  `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}&limit=1`
+                const [tableName, tableId] = places.split(':')
+                
+                // table_name과 table_id로 실제 장소 정보 가져오기
+                const attractionResponse = await fetch(
+                  `${API_BASE_URL}/api/v1/attractions/${tableName}/${tableId}`
                 )
                 
-                if (searchResponse.ok) {
-                  const searchData = await searchResponse.json()
-                  const matchedPlace = searchData.results?.[0]
+                if (attractionResponse.ok) {
+                  const attractionData = await attractionResponse.json()
                   
-                  if (matchedPlace) {
-                    // 실제 장소 정보와 저장된 장소 정보 결합
-                    return {
-                      ...savedLocation,
-                      image: matchedPlace.imageUrl || matchedPlace.image,
-                      imageUrl: matchedPlace.imageUrl || matchedPlace.image,
-                      description: matchedPlace.description || savedLocation.address,
-                      category: matchedPlace.category,
-                      rating: matchedPlace.rating
-                    }
+                  // 실제 장소 정보와 저장된 장소 정보 결합
+                  return {
+                    id: savedLocation.id,
+                    places: savedLocation.places,
+                    name: attractionData.name || '이름 없음',
+                    address: attractionData.address || attractionData.location || '주소 정보 없음',
+                    image: attractionData.imageUrl || attractionData.image,
+                    imageUrl: attractionData.imageUrl || attractionData.image,
+                    description: attractionData.description || attractionData.address,
+                    category: attractionData.category,
+                    rating: attractionData.rating,
+                    latitude: attractionData.latitude,
+                    longitude: attractionData.longitude,
+                    created_at: savedLocation.created_at
                   }
                 }
               } catch (error) {
-                console.error(`장소 ${savedLocation.name} 정보 가져오기 실패:`, error)
+                console.error(`장소 ${savedLocation.places} 정보 가져오기 실패:`, error)
               }
               
-              return savedLocation
+              return null
             })
-          )
+          ).then(results => results.filter(Boolean)) // null 값 제거
           
           setSavedLocations(enrichedLocations)
         } else {
@@ -939,6 +948,19 @@ export default function ProfilePage() {
     setDeletingTripId(null)
   }
 
+  // 카테고리 한국어 변환 함수
+  const getCategoryName = (category: string): string => {
+    const categoryMap: { [key: string]: string } = {
+      nature: '자연',
+      restaurants: '맛집',
+      shopping: '쇼핑',
+      accommodation: '숙박',
+      humanities: '인문',
+      leisure_sports: '레저'
+    }
+    return categoryMap[category] || category
+  }
+
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -1188,26 +1210,34 @@ export default function ProfilePage() {
                           {location.address || '주소 정보 없음'}
                         </p>
                         
-                        {/* 카테고리와 평점 */}
-                        <div className="flex items-center space-x-2 mb-2">
-                          {location.category && (
-                            <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full">
-                              {location.category}
-                            </span>
-                          )}
-                          {location.rating && (
-                            <div className="flex items-center">
-                              <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                              </svg>
-                              <span className="text-yellow-400 text-xs font-medium">{location.rating}</span>
-                            </div>
-                          )}
+                        {/* 카테고리와 평점, 날짜 */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            {location.category && (
+                              <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full">
+                                {getCategoryName(location.category)}
+                              </span>
+                            )}
+                            {location.rating && (
+                              <div className="flex items-center">
+                                <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                </svg>
+                                <span className="text-yellow-400 text-xs font-medium">{location.rating}</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <p className="text-gray-400 text-xs">
+                            {(() => {
+                              const date = new Date(location.created_at)
+                              const year = date.getFullYear().toString().slice(-2)
+                              const month = String(date.getMonth() + 1).padStart(2, '0')
+                              const day = String(date.getDate()).padStart(2, '0')
+                              return `${year}.${month}.${day}에 저장`
+                            })()}
+                          </p>
                         </div>
-                        
-                        <p className="text-gray-400 text-xs">
-                          {new Date(location.created_at).toLocaleDateString('ko-KR')}에 저장됨
-                        </p>
                       </div>
                       
                       {/* 삭제 버튼 */}

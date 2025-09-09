@@ -521,17 +521,24 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
     // 북마크 카테고리인 경우 저장된 장소들을 반환
     if (selectedCategory === 'bookmarked') {
-      return savedLocations.map(location => ({
-        id: location.id,
-        name: location.name,
-        address: location.address,
-        description: location.address,
-        image: location.image || '',
-        latitude: location.latitude ? parseFloat(location.latitude) : undefined,
-        longitude: location.longitude ? parseFloat(location.longitude) : undefined,
-        category: location.category || '저장된 장소',
-        sourceTable: 'saved'
-      }))
+      return savedLocations.map(location => {
+        // places 필드에서 테이블명과 ID 파싱
+        const [tableName, tableId] = (location.places || '').split(':')
+        
+        return {
+          id: tableId || location.id,
+          name: location.name || '저장된 장소',
+          address: location.address || '',
+          description: location.description || location.address || '저장된 장소입니다',
+          image: location.image || '',
+          latitude: location.latitude ? parseFloat(location.latitude) : undefined,
+          longitude: location.longitude ? parseFloat(location.longitude) : undefined,
+          category: tableName || location.category || '저장된 장소',
+          rating: location.rating || 0,
+          sourceTable: tableName || 'saved',
+          places: location.places // 원본 places 정보 보존
+        }
+      })
     }
 
     // sourceTable 기준으로 필터링 + 키워드 기반 매칭
@@ -634,6 +641,20 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     return localStorage.getItem('access_token')
   }
 
+  // URL ID에서 places 형식으로 변환하는 함수
+  const getPlacesFromPlace = (place: any): string => {
+    // 북마크된 장소의 경우 places 필드가 이미 있으면 그것을 사용
+    if (place.places) {
+      return place.places
+    }
+    // sourceTable이 있으면 사용
+    if (place.sourceTable && place.id) {
+      return `${place.sourceTable}:${place.id}`
+    }
+    // 없으면 기본값
+    return place.id
+  }
+
   // 북마크 토글 함수
   const handleBookmarkToggle = async (place: any) => {
     if (!session) {
@@ -662,10 +683,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
-            name: place.name,
-            address: place.address,
-            latitude: place.latitude?.toString(),
-            longitude: place.longitude?.toString()
+            places: getPlacesFromPlace(place)
           })
         })
 
@@ -697,10 +715,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
-            name: place.name,
-            address: place.address,
-            latitude: place.latitude?.toString(),
-            longitude: place.longitude?.toString()
+            places: getPlacesFromPlace(place)
           })
         })
 
@@ -748,16 +763,60 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
         // 프로필 페이지와 동일하게 data.locations 사용
         const locations = data.locations || data.saved_locations || []
-        setSavedLocations(locations)
+        
+        // 각 저장된 장소에 대해 실제 장소 정보 가져오기 시도
+        const enrichedLocations = await Promise.all(
+          locations.map(async (location: any) => {
+            try {
+              if (location.places) {
+                const [tableName, tableId] = location.places.split(':')
+                if (tableName && tableId) {
+                  // 실제 장소 정보 가져오기 시도
+                  const placeResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/${tableName}/${tableId}`)
+                  if (placeResponse.ok) {
+                    const placeData = await placeResponse.json()
+                    // 실제 데이터와 저장된 데이터 병합
+                    return {
+                      ...location,
+                      name: placeData.name || location.name || '저장된 장소',
+                      description: placeData.description || location.description || '저장된 장소입니다',
+                      address: placeData.address || location.address || '',
+                      rating: placeData.rating || location.rating || 0,
+                      latitude: placeData.latitude || location.latitude,
+                      longitude: placeData.longitude || location.longitude,
+                      category: placeData.category || tableName,
+                      imageUrls: placeData.imageUrls || [],
+                      sourceTable: tableName
+                    }
+                  }
+                }
+              }
+              return location
+            } catch (error) {
+              console.error('장소 정보 가져오기 실패:', error)
+              return location
+            }
+          })
+        )
+        
+        setSavedLocations(enrichedLocations)
 
-        // 북마크된 장소 ID들도 함께 업데이트
-        const bookmarkedIds = new Set<string>(locations.map((loc: any) => String(loc.id)) || [])
+        // 북마크된 장소 ID들도 함께 업데이트 - places 필드에서 실제 ID 추출
+        const bookmarkedIds = new Set<string>(
+          enrichedLocations.map((loc: any) => {
+            if (loc.places) {
+              const [, tableId] = loc.places.split(':')
+              return tableId || String(loc.id)
+            }
+            return String(loc.id)
+          })
+        )
         setBookmarkedPlaces(bookmarkedIds)
 
-        // 북마크 데이터를 캐시에 저장
+        // 북마크 데이터를 캐시에 저장 (enriched 버전 저장)
         setCategoryCache(prev => ({
           ...prev,
-          bookmarked: locations
+          bookmarked: enrichedLocations
         }))
 
         setLoadedCategories(prev => {
