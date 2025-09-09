@@ -2805,7 +2805,8 @@ export default function MapPage() {
                 <button
                   onClick={() => {
                     if (dateEditModal.selectedStartDate && dateEditModal.selectedEndDate) {
-                      const daysDiff = Math.ceil((dateEditModal.selectedEndDate.getTime() - dateEditModal.selectedStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      const newDaysDiff = Math.ceil((dateEditModal.selectedEndDate.getTime() - dateEditModal.selectedStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      const currentDays = daysParam ? parseInt(daysParam) : 0;
                       
                       // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
                       const formatLocalDate = (date: Date) => {
@@ -2815,11 +2816,41 @@ export default function MapPage() {
                         return `${year}-${month}-${day}`;
                       };
                       
+                      // 일정 기간 변경 시 장소 재조정
+                      if (newDaysDiff < currentDays) {
+                        // 기간이 줄어들 때: 삭제될 날짜의 일정을 마지막 유효 날짜로 이동
+                        const placesToMove = selectedItineraryPlaces.filter(place => 
+                          (place.dayNumber || 1) > newDaysDiff
+                        );
+                        
+                        if (placesToMove.length > 0) {
+                          // 이동할 장소들을 마지막 날짜로 이동
+                          const updatedPlaces = selectedItineraryPlaces.map(place => {
+                            if ((place.dayNumber || 1) > newDaysDiff) {
+                              return { ...place, dayNumber: newDaysDiff };
+                            }
+                            return place;
+                          });
+                          
+                          setSelectedItineraryPlaces(updatedPlaces);
+                          
+                          // 이동된 장소 개수 알림
+                          setTimeout(() => {
+                            setSaveToast({ 
+                              show: true, 
+                              message: `${placesToMove.length}개 장소가 ${newDaysDiff}일차로 이동되었습니다!`, 
+                              type: 'success' 
+                            });
+                            setTimeout(() => setSaveToast({ show: false, message: '', type: 'success' }), 4000);
+                          }, 3500);
+                        }
+                      }
+                      
                       // URL 파라미터 업데이트 (새로고침 없이)
                       const searchParams = new URLSearchParams(window.location.search);
                       searchParams.set('startDate', formatLocalDate(dateEditModal.selectedStartDate));
                       searchParams.set('endDate', formatLocalDate(dateEditModal.selectedEndDate));
-                      searchParams.set('days', daysDiff.toString());
+                      searchParams.set('days', newDaysDiff.toString());
                       
                       // 새로고침 없이 URL만 변경
                       router.replace(`/map?${searchParams.toString()}`);
