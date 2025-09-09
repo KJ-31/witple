@@ -351,7 +351,7 @@ export default function Home() {
   }
 
   // 챗봇 관련 함수
-  const handleChatSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleChatSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!chatMessage.trim()) return
 
@@ -364,18 +364,64 @@ export default function Home() {
     }
 
     setChatMessages(prev => [...prev, userMessage])
+    const userMessageText = chatMessage
     setChatMessage('')
 
-    // 간단한 봇 응답 (실제로는 API 호출)
-    setTimeout(() => {
-      const botResponse = {
-        id: Date.now() + 1,
-        type: 'bot',
-        message: '여행 계획 작성을 도와드릴게요! 어떤 지역으로 여행을 계획하고 계신가요?',
-        timestamp: new Date()
+    // 로딩 메시지 추가
+    const loadingMessage = {
+      id: Date.now() + 1,
+      type: 'bot',
+      message: '답변을 생성하고 있습니다...',
+      timestamp: new Date()
+    }
+    setChatMessages(prev => [...prev, loadingMessage])
+
+    try {
+      // API 호출
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessageText
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
-      setChatMessages(prev => [...prev, botResponse])
-    }, 1000)
+
+      const data = await response.json()
+
+      // 로딩 메시지 제거 후 실제 응답 추가
+      setChatMessages(prev => {
+        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
+        const botResponse = {
+          id: Date.now() + 2,
+          type: 'bot',
+          message: data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
+          timestamp: new Date()
+        }
+        return [...filteredMessages, botResponse]
+      })
+
+    } catch (error) {
+      console.error('Chat API error:', error)
+      
+      // 로딩 메시지 제거 후 에러 메시지 추가
+      setChatMessages(prev => {
+        const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
+        const errorResponse = {
+          id: Date.now() + 2,
+          type: 'bot',
+          message: '죄송합니다. 현재 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.',
+          timestamp: new Date()
+        }
+        return [...filteredMessages, errorResponse]
+      })
+    }
   }
 
   return (
