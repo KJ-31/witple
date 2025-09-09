@@ -127,6 +127,15 @@ export default function MapPage() {
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
   
+  // 날짜 수정 모달 상태
+  const [dateEditModal, setDateEditModal] = useState({
+    isOpen: false,
+    selectedStartDate: null as Date | null,
+    selectedEndDate: null as Date | null,
+    currentMonth: new Date(),
+    isSelectingRange: false
+  })
+
   // Long press 상태
   const [longPressData, setLongPressData] = useState<{
     isLongPressing: boolean,
@@ -1861,7 +1870,25 @@ export default function MapPage() {
               
               {/* 여행 정보 */}
               {startDateParam && endDateParam && daysParam && (
-                <div className="bg-[#12345D]/50 rounded-2xl p-4 mb-6">
+                <div 
+                  className="bg-[#12345D]/50 rounded-2xl p-4 mb-6 cursor-pointer hover:bg-[#12345D]/70 transition-colors"
+                  onClick={() => {
+                    // 한국 시간 기준으로 날짜 생성 (UTC 해석 방지)
+                    const createLocalDate = (dateString: string) => {
+                      const [year, month, day] = dateString.split('-').map(Number);
+                      return new Date(year, month - 1, day); // month는 0부터 시작
+                    };
+                    
+                    setDateEditModal({
+                      isOpen: true,
+                      selectedStartDate: createLocalDate(startDateParam),
+                      selectedEndDate: createLocalDate(endDateParam),
+                      currentMonth: createLocalDate(startDateParam),
+                      isSelectingRange: false
+                    })
+                  }}
+                  title="클릭해서 여행 날짜 수정"
+                >
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[#6FA0E6] text-sm mb-1">여행 기간</p>
@@ -1878,6 +1905,11 @@ export default function MapPage() {
                     <div className="text-right">
                       <p className="text-[#6FA0E6] text-sm mb-1">총 일수</p>
                       <p className="text-white font-semibold">{daysParam}일</p>
+                    </div>
+                    <div className="ml-4 text-[#6FA0E6]">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
                     </div>
                   </div>
                 </div>
@@ -2583,6 +2615,211 @@ export default function MapPage() {
                   }`}
                 >
                   저장하기
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 날짜 수정 모달 */}
+      {dateEditModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0B1220] rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            {/* 모달 헤더 */}
+            <div className="p-6 border-b border-[#1F3C7A]/30">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white">여행 날짜 수정</h3>
+                <button
+                  onClick={() => setDateEditModal(prev => ({ ...prev, isOpen: false }))}
+                  className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5 text-[#94A9C9]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* 선택된 날짜 표시 */}
+              <div className="bg-[#12345D]/50 rounded-lg p-3">
+                <p className="text-[#6FA0E6] text-sm mb-1">선택된 기간</p>
+                <p className="text-white font-semibold">
+                  {dateEditModal.selectedStartDate && dateEditModal.selectedEndDate ? (
+                    `${dateEditModal.selectedStartDate.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} - ${dateEditModal.selectedEndDate.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}`
+                  ) : dateEditModal.selectedStartDate ? (
+                    `${dateEditModal.selectedStartDate.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} - 종료일을 선택하세요`
+                  ) : (
+                    "시작일을 선택하세요"
+                  )}
+                </p>
+                {dateEditModal.selectedStartDate && dateEditModal.selectedEndDate && (
+                  <p className="text-[#94A9C9] text-sm mt-1">
+                    총 {Math.ceil((dateEditModal.selectedEndDate.getTime() - dateEditModal.selectedStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1}일
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 달력 */}
+            <div className="px-6 mb-8">
+              <div className="flex items-center justify-between mb-6">
+                <button 
+                  onClick={() => {
+                    const newMonth = new Date(dateEditModal.currentMonth);
+                    newMonth.setMonth(newMonth.getMonth() - 1);
+                    setDateEditModal(prev => ({ ...prev, currentMonth: newMonth }));
+                  }}
+                  className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <h2 className="text-xl font-semibold text-[#94A9C9]">
+                  {dateEditModal.currentMonth.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' })}
+                </h2>
+                <button 
+                  onClick={() => {
+                    const newMonth = new Date(dateEditModal.currentMonth);
+                    newMonth.setMonth(newMonth.getMonth() + 1);
+                    setDateEditModal(prev => ({ ...prev, currentMonth: newMonth }));
+                  }}
+                  className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* 요일 헤더 */}
+              <div className="grid grid-cols-7 gap-1 mb-2">
+                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(day => (
+                  <div key={day} className="text-center text-[#6FA0E6] text-sm font-medium py-2">{day}</div>
+                ))}
+              </div>
+
+              {/* 달력 날짜들 */}
+              <div className="grid grid-cols-7 gap-1">
+                {(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const currentMonth = dateEditModal.currentMonth;
+                  const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+                  const lastDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+                  const startDate = new Date(firstDay);
+                  
+                  // 월요일을 첫 번째 요일로 설정 (0=일요일, 1=월요일)
+                  const firstDayOfWeek = firstDay.getDay();
+                  const mondayOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+                  startDate.setDate(startDate.getDate() - mondayOffset);
+                  
+                  const days = [];
+                  for (let i = 0; i < 42; i++) {
+                    const day = new Date(startDate);
+                    day.setDate(startDate.getDate() + i);
+                    days.push(day);
+                  }
+                  
+                  return days.map((day) => {
+                    const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
+                    const isPast = day < today;
+                    const isSelected = (dateEditModal.selectedStartDate && 
+                      day.toDateString() === dateEditModal.selectedStartDate.toDateString()) ||
+                      (dateEditModal.selectedEndDate && 
+                      day.toDateString() === dateEditModal.selectedEndDate.toDateString());
+                    const isInRange = dateEditModal.selectedStartDate && dateEditModal.selectedEndDate &&
+                      day >= dateEditModal.selectedStartDate && day <= dateEditModal.selectedEndDate;
+                    
+                    return (
+                      <button
+                        key={day.toISOString()}
+                        disabled={isPast}
+                        onClick={() => {
+                          if (!dateEditModal.selectedStartDate || (dateEditModal.selectedStartDate && dateEditModal.selectedEndDate)) {
+                            // 시작일 선택 또는 새로운 범위 시작
+                            setDateEditModal(prev => ({
+                              ...prev,
+                              selectedStartDate: day,
+                              selectedEndDate: null,
+                              isSelectingRange: true
+                            }));
+                          } else if (day >= dateEditModal.selectedStartDate) {
+                            // 종료일 선택
+                            setDateEditModal(prev => ({
+                              ...prev,
+                              selectedEndDate: day,
+                              isSelectingRange: false
+                            }));
+                          } else {
+                            // 시작일보다 이전 날짜 선택시 새로운 시작일로 설정
+                            setDateEditModal(prev => ({
+                              ...prev,
+                              selectedStartDate: day,
+                              selectedEndDate: null,
+                              isSelectingRange: true
+                            }));
+                          }
+                        }}
+                        className={`aspect-square rounded-full flex items-center justify-center text-sm font-medium transition-all duration-200 
+                          ${!isCurrentMonth 
+                            ? 'text-[#6FA0E6]/20 cursor-not-allowed' 
+                            : isPast 
+                              ? 'text-[#6FA0E6]/20 cursor-not-allowed'
+                              : isSelected
+                                ? 'bg-[#3E68FF] text-white'
+                                : isInRange
+                                  ? 'bg-[#3E68FF]/30 text-white'
+                                  : 'hover:bg-[#1F3C7A]/30 ring-1 ring-transparent hover:ring-[#3E68FF]/50'
+                          } text-[#94A9C9]`}
+                      >
+                        {day.getDate()}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
+            {/* 모달 버튼 */}
+            <div className="px-6 pb-6 pt-0 border-t border-[#1F3C7A]/30">
+              <div className="flex space-x-3 mt-6">
+                <button
+                  onClick={() => setDateEditModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    if (dateEditModal.selectedStartDate && dateEditModal.selectedEndDate) {
+                      const daysDiff = Math.ceil((dateEditModal.selectedEndDate.getTime() - dateEditModal.selectedStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      
+                      // 로컬 시간 기준으로 YYYY-MM-DD 포맷팅 (UTC 변환 없이)
+                      const formatLocalDate = (date: Date) => {
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        return `${year}-${month}-${day}`;
+                      };
+                      
+                      // URL 파라미터 업데이트
+                      const searchParams = new URLSearchParams(window.location.search);
+                      searchParams.set('startDate', formatLocalDate(dateEditModal.selectedStartDate));
+                      searchParams.set('endDate', formatLocalDate(dateEditModal.selectedEndDate));
+                      searchParams.set('days', daysDiff.toString());
+                      
+                      window.location.search = searchParams.toString();
+                    }
+                  }}
+                  disabled={!dateEditModal.selectedStartDate || !dateEditModal.selectedEndDate}
+                  className={`flex-1 py-2.5 px-4 border rounded-xl transition-all duration-200 font-medium ${
+                    dateEditModal.selectedStartDate && dateEditModal.selectedEndDate
+                      ? 'bg-[#3E68FF]/20 hover:bg-[#3E68FF]/30 border-[#3E68FF]/50 hover:border-[#3E68FF]/70 text-[#3E68FF] hover:text-[#6FA0E6] cursor-pointer'
+                      : 'bg-[#1F3C7A]/30 border-[#1F3C7A]/50 text-[#94A9C9] cursor-not-allowed'
+                  }`}
+                >
+                  적용하기
                 </button>
               </div>
             </div>
