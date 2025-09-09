@@ -166,10 +166,7 @@ class UserActionLog(BaseModel):
 
 # Saved Location schemas
 class SavedLocationBase(BaseModel):
-    name: str
-    address: Optional[str] = None
-    latitude: Optional[str] = None
-    longitude: Optional[str] = None
+    places: str  # "table_name:table_id" 형식
 
 
 class SavedLocationCreate(SavedLocationBase):
