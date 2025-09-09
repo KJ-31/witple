@@ -7,11 +7,27 @@ import { useSession, signOut } from 'next-auth/react'
 
 
 interface TripPlace {
-  name: string
+  table_name: string
+  id: string
+  dayNumber: number
   order: number
-  latitude?: string
-  longitude?: string
+  name?: string
+  category?: string
+  rating?: number
+  description?: string
+  latitude?: string | number
+  longitude?: string | number
   address?: string
+  region?: string
+  imageUrl?: string
+  city?: {
+    id: string
+    name: string
+    region: string
+  }
+  cityName?: string
+  isPinned?: boolean
+  isLocked?: boolean
 }
 
 interface Trip {
@@ -104,8 +120,43 @@ export default function ProfilePage() {
   const [isUpdatingPost, setIsUpdatingPost] = useState(false)
   const editFileInputRef = useRef<HTMLInputElement>(null)
 
+  // 여행 삭제 관련 상태
+  const [deletingTripId, setDeletingTripId] = useState<number | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+
+  // 포스트 삭제 확인 모달 상태
+  const [deletingPostId, setDeletingPostId] = useState<number | null>(null)
+  const [showPostDeleteModal, setShowPostDeleteModal] = useState(false)
+
+  // 저장된 장소 삭제 확인 모달 상태
+  const [deletingSavedLocationId, setDeletingSavedLocationId] = useState<number | null>(null)
+  const [showSavedLocationDeleteModal, setShowSavedLocationDeleteModal] = useState(false)
+
+  // 토스트 메시지 상태
+  const [toast, setToast] = useState<{
+    show: boolean
+    message: string
+    type: 'success' | 'error' | 'info'
+  }>({
+    show: false,
+    message: '',
+    type: 'info'
+  })
+
   const router = useRouter()
   const { data: session, status } = useSession()
+
+  // 토스트 메시지 함수들
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ show: true, message, type })
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'info' })
+    }, 2000) // 3초 후 자동 사라짐
+  }
+
+  const hideToast = () => {
+    setToast({ show: false, message: '', type: 'info' })
+  }
 
   // 사용자 프로필 정보 가져오기
   const fetchUserProfile = useCallback(async () => {
@@ -300,7 +351,7 @@ export default function ProfilePage() {
   // 프로필 이미지 업로드
   const handleProfileImageUpload = async () => {
     if (!selectedImage || !session?.user?.id) {
-      alert('업로드 취소: 이미지 또는 세션 없음')
+      showToast('업로드 취소: 이미지 또는 세션 없음', 'error')
       return
     }
 
@@ -330,14 +381,14 @@ export default function ProfilePage() {
 
       const result = await response.json()
 
-      alert('프로필 이미지가 업데이트되었습니다!')
+      showToast('프로필 이미지가 업데이트되었습니다!', 'success')
       setSelectedImage(null)
 
       // 프로필 데이터 다시 가져오기 (페이지 새로고침 없이)
       await fetchUserProfile()
     } catch (error: any) {
       console.error('프로필 이미지 업데이트 오류:', error)
-      alert(`이미지 업데이트에 실패했습니다: ${error.message}`)
+      showToast(`이미지 업데이트에 실패했습니다: ${error.message}`, 'error')
     } finally {
       setIsUploadingImage(false)
     }
@@ -372,11 +423,11 @@ export default function ProfilePage() {
 
       const result = await response.json()
       console.log('기본 정보 업데이트 성공:', result)
-      alert('기본 정보가 업데이트되었습니다!')
+      showToast('기본 정보가 업데이트되었습니다!', 'success')
 
     } catch (error: any) {
       console.error('기본 정보 업데이트 오류:', error)
-      alert(`기본 정보 업데이트에 실패했습니다: ${error.message}`)
+      showToast(`기본 정보 업데이트에 실패했습니다: ${error.message}`, 'error')
     } finally {
       setIsUpdatingBasicInfo(false)
     }
@@ -411,14 +462,14 @@ export default function ProfilePage() {
       }
 
       const result = await response.json()
-      alert('여행 취향이 업데이트되었습니다!')
+      showToast('여행 취향이 업데이트되었습니다!', 'success')
 
       // 프로필 정보 다시 가져오기 (여행 취향 정보 포함)
       await fetchUserProfile()
 
     } catch (error: any) {
       console.error('여행 취향 업데이트 오류:', error)
-      alert(`여행 취향 업데이트에 실패했습니다: ${error.message}`)
+      showToast(`여행 취향 업데이트에 실패했습니다: ${error.message}`, 'error')
     } finally {
       setIsUpdatingPreferences(false)
     }
@@ -496,22 +547,26 @@ export default function ProfilePage() {
         )
       )
 
-      alert('포스트가 수정되었습니다!')
+      showToast('포스트가 수정되었습니다!', 'success')
       handleCancelEdit()
 
     } catch (error: any) {
       console.error('포스트 수정 오류:', error)
-      alert(`포스트 수정에 실패했습니다: ${error.message}`)
+      showToast(`포스트 수정에 실패했습니다: ${error.message}`, 'error')
     } finally {
       setIsUpdatingPost(false)
     }
   }
 
-  // 포스트 삭제
-  const handleDeletePost = async (postId: number) => {
-    if (!session) return
+  // 포스트 삭제 확인 함수
+  const confirmDeletePost = (postId: number) => {
+    setDeletingPostId(postId)
+    setShowPostDeleteModal(true)
+  }
 
-    if (!confirm('정말로 이 포스트를 삭제하시겠습니까?')) return
+  // 포스트 삭제 실행 함수
+  const executeDeletePost = async () => {
+    if (!deletingPostId || !session) return
 
     try {
       const headers: any = {
@@ -522,7 +577,7 @@ export default function ProfilePage() {
         headers['Authorization'] = `Bearer ${(session as any).backendToken}`
       }
 
-      const response = await fetch(`/api/proxy/api/v1/posts/${postId}`, {
+      const response = await fetch(`/api/proxy/api/v1/posts/${deletingPostId}`, {
         method: 'DELETE',
         headers: headers
       })
@@ -533,13 +588,22 @@ export default function ProfilePage() {
       }
 
       // 포스트 목록에서 제거
-      setPosts(prevPosts => prevPosts.filter(post => post.id !== postId))
-      alert('포스트가 삭제되었습니다!')
+      setPosts(prevPosts => prevPosts.filter(post => post.id !== deletingPostId))
+      showToast('포스트가 삭제되었습니다!', 'success')
 
     } catch (error: any) {
       console.error('포스트 삭제 오류:', error)
-      alert(`포스트 삭제에 실패했습니다: ${error.message}`)
+      showToast(`포스트 삭제에 실패했습니다: ${error.message}`, 'error')
+    } finally {
+      setShowPostDeleteModal(false)
+      setDeletingPostId(null)
     }
+  }
+
+  // 포스트 삭제 취소 함수
+  const cancelDeletePost = () => {
+    setShowPostDeleteModal(false)
+    setDeletingPostId(null)
   }
 
   // 로그아웃 핸들러
@@ -552,6 +616,91 @@ export default function ProfilePage() {
     } catch (error) {
       console.error('로그아웃 오류:', error)
     }
+  }
+
+  // 여행 카드 클릭 핸들러 (보기 모드)
+  const handleTripClick = (trip: Trip) => {
+    if (!trip.places || trip.places.length === 0) {
+      showToast('이 여행에는 저장된 장소가 없습니다.', 'info')
+      return
+    }
+
+    // DB 구조에 맞게 데이터 변환: table_name + "_" + id 형태로 조합
+    const placeIds = trip.places.map(place => `${place.table_name}_${place.id}`)
+    const dayNumbers = trip.places.map(place => place.dayNumber.toString())
+    const sourceTables = trip.places.map(place => place.table_name)
+    
+    // 잠금 상태 정보 (전체 식별자_dayNumber 형태로 잠금된 장소들의 키)
+    const lockedPlaceKeys = trip.places
+      .filter(place => place.isLocked)
+      .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
+    
+    // 날짜 차이 계산
+    const startDate = new Date(trip.start_date)
+    const endDate = new Date(trip.end_date)
+    const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    
+    // URL 파라미터 생성 (보기 모드)
+    const params = new URLSearchParams({
+      places: placeIds.join(','),
+      dayNumbers: dayNumbers.join(','),
+      sourceTables: sourceTables.join(','),
+      startDate: trip.start_date,
+      endDate: trip.end_date,
+      days: daysDiff.toString(),
+      baseAttraction: 'general',
+      source: 'profile',
+      tripTitle: trip.title,
+      tripDescription: trip.description || '',
+      tripId: trip.id.toString(),
+      ...(lockedPlaceKeys.length > 0 && { lockedPlaces: lockedPlaceKeys.join(',') })
+    })
+    
+    // map 페이지로 이동 (보기 모드 - long press 불가)
+    router.push(`/map?${params.toString()}`)
+  }
+
+  // 여행 편집 버튼 클릭 핸들러 (편집 모드)
+  const handleEditTripClick = (trip: Trip) => {
+    if (!trip.places || trip.places.length === 0) {
+      showToast('이 여행에는 저장된 장소가 없습니다.', 'info')
+      return
+    }
+
+    // DB 구조에 맞게 데이터 변환: table_name + "_" + id 형태로 조합
+    const placeIds = trip.places.map(place => `${place.table_name}_${place.id}`)
+    const dayNumbers = trip.places.map(place => place.dayNumber.toString())
+    const sourceTables = trip.places.map(place => place.table_name)
+    
+    // 잠금 상태 정보 (전체 식별자_dayNumber 형태로 잠금된 장소들의 키)
+    const lockedPlaceKeys = trip.places
+      .filter(place => place.isLocked)
+      .map(place => `${place.table_name}_${place.id}_${place.dayNumber}`)
+    
+    // 날짜 차이 계산
+    const startDate = new Date(trip.start_date)
+    const endDate = new Date(trip.end_date)
+    const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    
+    // URL 파라미터 생성 (편집 모드)
+    const params = new URLSearchParams({
+      places: placeIds.join(','),
+      dayNumbers: dayNumbers.join(','),
+      sourceTables: sourceTables.join(','),
+      startDate: trip.start_date,
+      endDate: trip.end_date,
+      days: daysDiff.toString(),
+      baseAttraction: 'general',
+      source: 'profile',
+      tripTitle: trip.title,
+      tripDescription: trip.description || '',
+      tripId: trip.id.toString(),
+      editMode: 'true', // 편집 모드 플래그 추가
+      ...(lockedPlaceKeys.length > 0 && { lockedPlaces: lockedPlaceKeys.join(',') })
+    })
+    
+    // map 페이지로 이동 (편집 모드 - long press 가능)
+    router.push(`/map?${params.toString()}`)
   }
 
   // 날짜 포맷 함수
@@ -574,22 +723,26 @@ export default function ProfilePage() {
 
 
 
-  // 저장된 장소 삭제 함수
-  const handleDeleteSavedLocation = async (locationId: number) => {
+  // 저장된 장소 삭제 확인 함수
+  const confirmDeleteSavedLocation = (locationId: number) => {
+    setDeletingSavedLocationId(locationId)
+    setShowSavedLocationDeleteModal(true)
+  }
+
+  // 저장된 장소 삭제 실행 함수
+  const executeDeleteSavedLocation = async () => {
+    if (!deletingSavedLocationId) return
+
     try {
       const token = getToken()
       
       if (!token) {
-        alert('로그인이 필요합니다.')
-        return
-      }
-      
-      if (!confirm('저장된 장소를 삭제하시겠습니까?')) {
+        showToast('로그인이 필요합니다.', 'error')
         return
       }
       
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/${locationId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/saved-locations/${deletingSavedLocationId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -598,14 +751,76 @@ export default function ProfilePage() {
       
       if (response.ok) {
         // 삭제 성공 시 목록에서 해당 장소 제거
-        setSavedLocations(prev => prev.filter(location => location.id !== locationId))
+        setSavedLocations(prev => prev.filter(location => location.id !== deletingSavedLocationId))
+        showToast('저장된 장소가 삭제되었습니다.', 'success')
       } else {
-        alert('삭제에 실패했습니다.')
+        showToast('삭제에 실패했습니다.', 'error')
       }
     } catch (error) {
       console.error('저장된 장소 삭제 중 오류:', error)
-      alert('삭제 중 오류가 발생했습니다.')
+      showToast('삭제 중 오류가 발생했습니다.', 'error')
+    } finally {
+      setShowSavedLocationDeleteModal(false)
+      setDeletingSavedLocationId(null)
     }
+  }
+
+  // 저장된 장소 삭제 취소 함수
+  const cancelDeleteSavedLocation = () => {
+    setShowSavedLocationDeleteModal(false)
+    setDeletingSavedLocationId(null)
+  }
+
+  // 여행 삭제 함수
+  const handleDeleteTrip = async (tripId: number) => {
+    try {
+      const token = getToken()
+      
+      if (!token) {
+        showToast('로그인이 필요합니다.', 'error')
+        return
+      }
+      
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const response = await fetch(`${API_BASE_URL}/api/v1/trips/${tripId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        // 삭제 성공 시 목록에서 해당 여행 제거
+        setTrips(prev => prev.filter(trip => trip.id !== tripId))
+        showToast('여행 일정이 삭제되었습니다.', 'success')
+      } else {
+        showToast('삭제에 실패했습니다.', 'error')
+      }
+    } catch (error) {
+      console.error('여행 삭제 중 오류:', error)
+      showToast('삭제 중 오류가 발생했습니다.', 'error')
+    }
+  }
+
+  // 여행 삭제 확인 함수
+  const confirmDeleteTrip = (tripId: number) => {
+    setDeletingTripId(tripId)
+    setShowDeleteModal(true)
+  }
+
+  // 여행 삭제 실행 함수
+  const executeDeleteTrip = async () => {
+    if (deletingTripId) {
+      await handleDeleteTrip(deletingTripId)
+      setShowDeleteModal(false)
+      setDeletingTripId(null)
+    }
+  }
+
+  // 여행 삭제 취소 함수
+  const cancelDeleteTrip = () => {
+    setShowDeleteModal(false)
+    setDeletingTripId(null)
   }
 
 
@@ -634,9 +849,13 @@ export default function ProfilePage() {
         return (
           <div className="space-y-4">
             {trips.map((trip) => (
-              <div key={trip.id} className="bg-gray-800 p-4 rounded-2xl relative">
-                {/* 상태 표시 - 모든 카드에 표시 */}
-                <div className="absolute top-4 right-4">
+              <div 
+                key={trip.id} 
+                className="bg-gray-800 p-4 rounded-2xl relative cursor-pointer hover:bg-gray-750 transition-colors"
+                onClick={() => handleTripClick(trip)}
+              >
+                {/* 상태 표시와 버튼들 - 오른쪽 상단 */}
+                <div className="absolute top-4 right-4 flex items-center space-x-2">
                   <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
                     trip.status === 'active' ? 'bg-red-500' : 
                     trip.status === 'completed' ? 'bg-gray-500' : 
@@ -646,6 +865,20 @@ export default function ProfilePage() {
                     {trip.status === 'completed' && '✓ 완료됨'}
                     {trip.status === 'planned' && '📋 예정됨'}
                   </span>
+                  
+                  {/* 휴지통 버튼 */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation() // 카드 클릭 이벤트 방지
+                      confirmDeleteTrip(trip.id)
+                    }}
+                    className="text-red-400 hover:text-red-300 transition-colors p-1 hover:bg-red-900 rounded"
+                    title="일정 삭제"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                 </div>
                 
                 {/* 여행 제목 */}
@@ -770,7 +1003,7 @@ export default function ProfilePage() {
                         </svg>
                       </button>
                       <button
-                        onClick={() => handleDeletePost(post.id)}
+                        onClick={() => confirmDeletePost(post.id)}
                         className="text-red-400 hover:text-red-300 transition-colors"
                         title="삭제"
                       >
@@ -816,7 +1049,7 @@ export default function ProfilePage() {
                       </p>
                     </div>
                     <button 
-                      onClick={() => handleDeleteSavedLocation(location.id)}
+                      onClick={() => confirmDeleteSavedLocation(location.id)}
                       className="text-red-400 hover:text-red-300 transition-colors p-1"
                       title="저장된 장소 삭제"
                     >
@@ -1246,6 +1479,150 @@ export default function ProfilePage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trip Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">여행 일정 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                여행 일정을 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 일정은 복구할 수 없습니다.</span>
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={cancelDeleteTrip}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={executeDeleteTrip}
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post Delete Confirmation Modal */}
+      {showPostDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">포스트 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                포스트를 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 포스트는 복구할 수 없습니다.</span>
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={cancelDeletePost}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={executeDeletePost}
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saved Location Delete Confirmation Modal */}
+      {showSavedLocationDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="relative bg-[#0B1220] border border-[#1F3C7A]/50 rounded-2xl p-6 mx-4 max-w-sm w-full shadow-2xl">
+            <div className="text-center">
+              <div className="mx-auto w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">저장된 장소 삭제 확인</h3>
+              <p className="text-[#94A9C9] text-sm mb-6 leading-relaxed">
+                저장된 장소를 삭제하시겠습니까?<br/>
+                <span className="text-[#6FA0E6] text-xs mt-2 block">삭제된 장소는 복구할 수 없습니다.</span>
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={cancelDeleteSavedLocation}
+                  className="flex-1 py-2.5 px-4 bg-[#1F3C7A]/30 hover:bg-[#1F3C7A]/50 border border-[#1F3C7A]/50 hover:border-[#1F3C7A]/70 rounded-xl text-[#94A9C9] hover:text-white transition-all duration-200"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={executeDeleteSavedLocation}
+                  className="flex-1 py-2.5 px-4 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 hover:border-red-500/70 rounded-xl text-red-400 hover:text-red-300 transition-all duration-200 font-medium"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast.show && (
+        <div className="fixed top-4 left-4 right-4 z-50 flex justify-center">
+          <div className={`
+            flex items-center px-6 py-3 rounded-lg shadow-lg text-white font-medium max-w-sm
+            transform transition-all duration-300 ease-in-out
+            ${toast.type === 'success' ? 'bg-green-600' : 
+              toast.type === 'error' ? 'bg-red-600' : 
+              'bg-blue-600'}
+            animate-in slide-in-from-top-4 fade-in
+          `}>
+            <div className="mr-3">
+              {toast.type === 'success' && (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {toast.type === 'error' && (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+              {toast.type === 'info' && (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+            </div>
+            <span className="flex-1 text-sm">{toast.message}</span>
+            <button
+              onClick={hideToast}
+              className="ml-3 text-white hover:text-gray-200 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}
