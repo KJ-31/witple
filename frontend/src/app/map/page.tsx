@@ -1871,8 +1871,12 @@ export default function MapPage() {
               {/* 여행 정보 */}
               {startDateParam && endDateParam && daysParam && (
                 <div 
-                  className="bg-[#12345D]/50 rounded-2xl p-4 mb-6 cursor-pointer hover:bg-[#12345D]/70 transition-colors"
-                  onClick={() => {
+                  className={`bg-[#12345D]/50 rounded-2xl p-4 mb-6 transition-colors ${
+                    (!isFromProfile || isEditMode) 
+                      ? 'cursor-pointer hover:bg-[#12345D]/70' 
+                      : 'cursor-default'
+                  }`}
+                  onClick={(!isFromProfile || isEditMode) ? () => {
                     // 한국 시간 기준으로 날짜 생성 (UTC 해석 방지)
                     const createLocalDate = (dateString: string) => {
                       const [year, month, day] = dateString.split('-').map(Number);
@@ -1886,8 +1890,8 @@ export default function MapPage() {
                       currentMonth: createLocalDate(startDateParam),
                       isSelectingRange: false
                     })
-                  }}
-                  title="클릭해서 여행 날짜 수정"
+                  } : undefined}
+                  title={(!isFromProfile || isEditMode) ? "클릭해서 여행 날짜 수정" : ""}
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -1906,11 +1910,14 @@ export default function MapPage() {
                       <p className="text-[#6FA0E6] text-sm mb-1">총 일수</p>
                       <p className="text-white font-semibold">{daysParam}일</p>
                     </div>
-                    <div className="ml-4 text-[#6FA0E6]">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </div>
+                    {/* 편집 아이콘 - 편집 가능할 때만 표시 */}
+                    {(!isFromProfile || isEditMode) && (
+                      <div className="ml-4 text-[#6FA0E6]">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
