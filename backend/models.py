@@ -104,10 +104,7 @@ class SavedLocation(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
-    name = Column(String, nullable=False)  # 장소명
-    address = Column(String, nullable=True)  # 주소
-    latitude = Column(String, nullable=True)  # 위도
-    longitude = Column(String, nullable=True)  # 경도
+    places = Column(Text, nullable=False)  # "table_name:table_id" 형식
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

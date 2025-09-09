@@ -63,6 +63,22 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
     return localStorage.getItem('access_token')
   }
 
+  // URL ID에서 places 형식으로 변환하는 함수
+  const getPlacesFromId = (id: string): string => {
+    if (id && id.includes('_') && !id.includes('undefined')) {
+      // table_name_id 형식인 경우 (예: restaurants_6151)
+      const lastUnderscoreIndex = id.lastIndexOf('_')
+      const tableName = id.substring(0, lastUnderscoreIndex)
+      const attractionId = id.substring(lastUnderscoreIndex + 1)
+      
+      if (tableName && attractionId && tableName !== 'undefined' && attractionId !== 'undefined') {
+        return `${tableName}:${attractionId}`
+      }
+    }
+    // 기본값 또는 오류 시
+    return id
+  }
+
   // API에서 관광지 상세 정보 가져오기
   useEffect(() => {
     const fetchAttractionDetail = async () => {
@@ -128,10 +144,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          name: attractionData.name,
-          address: attractionData.address,
-          latitude: attractionData.latitude?.toString(),
-          longitude: attractionData.longitude?.toString()
+          places: getPlacesFromId(params.id)
         })
       })
       
@@ -172,10 +185,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
-            name: attraction.name,
-            address: attraction.address,
-            latitude: attraction.latitude?.toString(),
-            longitude: attraction.longitude?.toString()
+            places: getPlacesFromId(params.id)
           })
         })
         
@@ -213,10 +223,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
-            name: attraction.name,
-            address: attraction.address,
-            latitude: attraction.latitude?.toString(),
-            longitude: attraction.longitude?.toString()
+            places: getPlacesFromId(params.id)
           })
         })
         

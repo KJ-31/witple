@@ -23,14 +23,12 @@ async def create_saved_location(
 ):
     """새 저장된 장소를 생성합니다."""
     try:
-        # 중복 체크 (같은 사용자의 같은 이름과 좌표)
+        # 중복 체크 (같은 사용자의 같은 places)
         existing_location = (
             db.query(SavedLocation)
             .filter(
                 SavedLocation.user_id == current_user.user_id,
-                SavedLocation.name == location_data.name,
-                SavedLocation.latitude == location_data.latitude,
-                SavedLocation.longitude == location_data.longitude
+                SavedLocation.places == location_data.places
             )
             .first()
         )
@@ -44,17 +42,14 @@ async def create_saved_location(
         # 저장된 장소 생성
         db_location = SavedLocation(
             user_id=current_user.user_id,
-            name=location_data.name,
-            address=location_data.address,
-            latitude=location_data.latitude,
-            longitude=location_data.longitude
+            places=location_data.places
         )
         
         db.add(db_location)
         db.commit()
         db.refresh(db_location)
         
-        logger.info(f"저장된 장소 생성: {db_location.name} for user {current_user.user_id}")
+        logger.info(f"저장된 장소 생성: {db_location.places} for user {current_user.user_id}")
         return db_location
         
     except Exception as e:
@@ -152,15 +147,12 @@ async def update_saved_location(
             )
         
         # 장소 정보 업데이트
-        location.name = location_data.name
-        location.address = location_data.address
-        location.latitude = location_data.latitude
-        location.longitude = location_data.longitude
+        location.places = location_data.places
         
         db.commit()
         db.refresh(location)
         
-        logger.info(f"저장된 장소 수정: {location.name} for user {current_user.user_id}")
+        logger.info(f"저장된 장소 수정: {location.places} for user {current_user.user_id}")
         return location
         
     except Exception as e:
@@ -200,7 +192,7 @@ async def delete_saved_location(
         db.delete(location)
         db.commit()
         
-        logger.info(f"저장된 장소 삭제: {location.name} for user {current_user.user_id}")
+        logger.info(f"저장된 장소 삭제: {location.places} for user {current_user.user_id}")
         return {"message": "저장된 장소가 삭제되었습니다."}
         
     except Exception as e:
@@ -224,9 +216,7 @@ async def check_saved_location(
             db.query(SavedLocation)
             .filter(
                 SavedLocation.user_id == current_user.user_id,
-                SavedLocation.name == location_data.name,
-                SavedLocation.latitude == location_data.latitude,
-                SavedLocation.longitude == location_data.longitude
+                SavedLocation.places == location_data.places
             )
             .first()
         )

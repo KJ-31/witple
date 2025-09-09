@@ -262,37 +262,46 @@ export default function ProfilePage() {
           const enrichedLocations = await Promise.all(
             savedLocationIds.map(async (savedLocation: any) => {
               try {
-                // 장소 이름과 주소로 실제 장소 DB에서 검색
-                const searchQuery = savedLocation.name || savedLocation.address
-                if (!searchQuery) return savedLocation
+                // places 필드에서 table_name:table_id 파싱
+                const places = savedLocation.places
+                if (!places || !places.includes(':')) {
+                  console.error('Invalid places format:', places)
+                  return null
+                }
                 
-                const searchResponse = await fetch(
-                  `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}&limit=1`
+                const [tableName, tableId] = places.split(':')
+                
+                // table_name과 table_id로 실제 장소 정보 가져오기
+                const attractionResponse = await fetch(
+                  `${API_BASE_URL}/api/v1/attractions/${tableName}/${tableId}`
                 )
                 
-                if (searchResponse.ok) {
-                  const searchData = await searchResponse.json()
-                  const matchedPlace = searchData.results?.[0]
+                if (attractionResponse.ok) {
+                  const attractionData = await attractionResponse.json()
                   
-                  if (matchedPlace) {
-                    // 실제 장소 정보와 저장된 장소 정보 결합
-                    return {
-                      ...savedLocation,
-                      image: matchedPlace.imageUrl || matchedPlace.image,
-                      imageUrl: matchedPlace.imageUrl || matchedPlace.image,
-                      description: matchedPlace.description || savedLocation.address,
-                      category: matchedPlace.category,
-                      rating: matchedPlace.rating
-                    }
+                  // 실제 장소 정보와 저장된 장소 정보 결합
+                  return {
+                    id: savedLocation.id,
+                    places: savedLocation.places,
+                    name: attractionData.name || '이름 없음',
+                    address: attractionData.address || attractionData.location || '주소 정보 없음',
+                    image: attractionData.imageUrl || attractionData.image,
+                    imageUrl: attractionData.imageUrl || attractionData.image,
+                    description: attractionData.description || attractionData.address,
+                    category: attractionData.category,
+                    rating: attractionData.rating,
+                    latitude: attractionData.latitude,
+                    longitude: attractionData.longitude,
+                    created_at: savedLocation.created_at
                   }
                 }
               } catch (error) {
-                console.error(`장소 ${savedLocation.name} 정보 가져오기 실패:`, error)
+                console.error(`장소 ${savedLocation.places} 정보 가져오기 실패:`, error)
               }
               
-              return savedLocation
+              return null
             })
-          )
+          ).then(results => results.filter(Boolean)) // null 값 제거
           
           setSavedLocations(enrichedLocations)
         } else {
