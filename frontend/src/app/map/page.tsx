@@ -3109,8 +3109,13 @@ export default function MapPage() {
                         } else {
                           // 기존 장소: 기존 ID에서 table_name과 id 추출
                           const idParts = place.id.includes('_') ? place.id.split('_') : [place.category, place.id]
-                          const table_name = idParts.length > 1 ? idParts[0] : place.category
+                          let table_name = idParts.length > 1 ? idParts[0] : place.category
                           const originalId = idParts.length > 1 ? idParts[idParts.length - 1] : place.id
+                          
+                          // leisure -> leisure_sports 매핑
+                          if (table_name === 'leisure') {
+                            table_name = 'leisure_sports'
+                          }
                           
                           return {
                             table_name: table_name,
