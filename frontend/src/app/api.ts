@@ -14,18 +14,27 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   async (config) => {
     if (typeof window !== 'undefined') {
-      // NextAuth 세션에서 토큰 가져오기
-      const { getSession } = await import('next-auth/react')
-      const session = await getSession()
+      // 1. localStorage에서 토큰 먼저 확인 (우선순위)
+      const localToken = localStorage.getItem('token')
+      if (localToken) {
+        config.headers.Authorization = `Bearer ${localToken}`
+        console.log('Using localStorage token for API request')
+        return config
+      }
       
-      if (session && (session as any).backendToken) {
-        config.headers.Authorization = `Bearer ${(session as any).backendToken}`
-      } else {
-        // fallback: localStorage에서 토큰 찾기
-        const token = localStorage.getItem('token')
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
+      // 2. NextAuth 세션에서 토큰 가져오기 (fallback)
+      try {
+        const { getSession } = await import('next-auth/react')
+        const session = await getSession()
+        
+        if (session && (session as any).backendToken) {
+          config.headers.Authorization = `Bearer ${(session as any).backendToken}`
+          console.log('Using NextAuth session token for API request')
+        } else {
+          console.log('No token found - making request as guest')
         }
+      } catch (error) {
+        console.log('Error getting NextAuth session:', error)
       }
     }
     return config
@@ -38,9 +47,22 @@ apiClient.interceptors.request.use(
 // 응답 인터셉터
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
+      console.log('401 Unauthorized - clearing tokens and redirecting to login')
+      
+      // 모든 토큰 제거
       localStorage.removeItem('token')
+      
+      // NextAuth 세션도 로그아웃
+      try {
+        const { signOut } = await import('next-auth/react')
+        await signOut({ redirect: false })
+      } catch (e) {
+        console.log('Error signing out from NextAuth:', e)
+      }
+      
+      // 로그인 페이지로 리다이렉트
       window.location.href = '/auth/login'
     }
     return Promise.reject(error)

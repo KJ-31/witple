@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,14 +8,23 @@ import logging
 import os
 from database import engine, Base
 from routers import auth, users, posts, attractions, recommendations, profile, saved_locations, trips, chat
+from cache_utils import get_redis_status, cache_invalidate_attractions, cache_invalidate_user_recommendations
 from config import settings
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Redis 클라이언트 초기화
-redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+# Redis 클라이언트 초기화 (연결 실패 시 None으로 설정)
+redis_client = None
+try:
+    redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    redis_client.ping()  # 연결 테스트
+    logger.info("Redis 연결 성공")
+except Exception as e:
+    logger.warning(f"Redis 연결 실패: {e}")
+    logger.info("Redis 없이 애플리케이션을 계속 실행합니다.")
+    redis_client = None
 
 
 @asynccontextmanager
@@ -87,4 +96,35 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "redis": redis_client.ping()}
+    redis_status_info = get_redis_status()
+    
+    return {
+        "status": "healthy", 
+        "redis": redis_status_info
+    }
+
+@app.post("/admin/cache/invalidate/attractions")
+async def invalidate_attractions_cache():
+    """관광지 관련 캐시 무효화 (관리자용)"""
+    try:
+        deleted_count = cache_invalidate_attractions()
+        return {
+            "message": f"관광지 캐시가 무효화되었습니다.",
+            "deleted_keys": deleted_count
+        }
+    except Exception as e:
+        logger.error(f"Error invalidating attractions cache: {e}")
+        raise HTTPException(status_code=500, detail="캐시 무효화 중 오류가 발생했습니다.")
+
+@app.post("/admin/cache/invalidate/user/{user_id}")
+async def invalidate_user_cache(user_id: str):
+    """특정 사용자의 추천 캐시 무효화 (관리자용)"""
+    try:
+        deleted_count = cache_invalidate_user_recommendations(user_id)
+        return {
+            "message": f"사용자 {user_id}의 추천 캐시가 무효화되었습니다.",
+            "deleted_keys": deleted_count
+        }
+    except Exception as e:
+        logger.error(f"Error invalidating user cache: {e}")
+        raise HTTPException(status_code=500, detail="캐시 무효화 중 오류가 발생했습니다.")

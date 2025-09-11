@@ -8,6 +8,7 @@ from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
 from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+from cache_utils import cache_get, cache_set, cache_delete
 import logging
 
 router = APIRouter(tags=["attractions"])
@@ -219,6 +220,13 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
 async def get_regions(db: Session = Depends(get_db)):
     """사용 가능한 지역 목록을 가져옵니다."""
     try:
+        # 캐시에서 먼저 확인
+        cache_key = "attractions:regions"
+        cached_regions = cache_get(cache_key)
+        if cached_regions:
+            logger.info("Returning cached regions data")
+            return cached_regions
+        
         regions = set()
         
         # 모든 테이블에서 지역 정보 수집
@@ -235,10 +243,16 @@ async def get_regions(db: Session = Depends(get_db)):
         # 지역 목록을 우선순위에 따라 정렬
         sorted_regions = sort_regions_by_priority(list(regions))
         
-        return {
+        result = {
             "regions": sorted_regions,
             "total": len(sorted_regions)
         }
+        
+        # 결과를 캐시에 저장 (1시간)
+        cache_set(cache_key, result, expire_seconds=3600)
+        logger.info("Regions data cached successfully")
+        
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -250,6 +264,13 @@ async def get_regions(db: Session = Depends(get_db)):
 async def get_categories():
     """사용 가능한 카테고리 목록을 가져옵니다."""
     try:
+        # 캐시에서 먼저 확인
+        cache_key = "attractions:categories"
+        cached_categories = cache_get(cache_key)
+        if cached_categories:
+            logger.info("Returning cached categories data")
+            return cached_categories
+        
         categories = [
             {"id": "nature", "name": "자연", "description": "자연 경관과 공원"},
             {"id": "restaurants", "name": "맛집", "description": "음식점과 카페"},
@@ -259,10 +280,16 @@ async def get_categories():
             {"id": "leisure_sports", "name": "레저", "description": "스포츠와 레저 활동"}
         ]
         
-        return {
+        result = {
             "categories": categories,
             "total": len(categories)
         }
+        
+        # 결과를 캐시에 저장 (2시간 - 카테고리는 자주 변경되지 않음)
+        cache_set(cache_key, result, expire_seconds=7200)
+        logger.info("Categories data cached successfully")
+        
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -692,6 +719,13 @@ async def search_attractions(
 ):
     """관광지 검색 기능"""
     try:
+        # 캐시 키 생성 (검색어, 필터, 페이지 정보 포함)
+        cache_key = f"search:{q}:{category or 'all'}:{region or 'all'}:{page}:{limit}"
+        cached_results = cache_get(cache_key)
+        if cached_results:
+            logger.info(f"Returning cached search results for query: {q}")
+            return cached_results
+        
         results = []
         
         # 카테고리 필터에 따른 테이블 선택
@@ -764,7 +798,7 @@ async def search_attractions(
                 query = query.filter(table_model.region.ilike(f"%{region}%"))
             total_results += query.count()
         
-        return {
+        result = {
             "results": results,
             "total": len(results),
             "totalAvailable": total_results,
@@ -777,6 +811,12 @@ async def search_attractions(
                 "region": region
             }
         }
+        
+        # 검색 결과를 캐시에 저장 (30분)
+        cache_set(cache_key, result, expire_seconds=1800)
+        logger.info(f"Search results cached for query: {q}")
+        
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -803,6 +843,14 @@ async def get_filtered_attractions(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="지역을 선택해주세요."
             )
+        
+        # 캐시 키 생성 (사용자별로 다른 캐시)
+        user_id = str(current_user.user_id) if current_user and hasattr(current_user, 'user_id') else 'guest'
+        cache_key = f"filtered:{user_id}:{region}:{category or 'all'}:{limit}"
+        cached_results = cache_get(cache_key)
+        if cached_results:
+            logger.info(f"Returning cached filtered results for user: {user_id}, region: {region}")
+            return cached_results
         
         results = []
         
@@ -918,7 +966,7 @@ async def get_filtered_attractions(
                 }
                 results.append(formatted_attraction)
         
-        return {
+        result = {
             "attractions": results,
             "total": len(results),
             "totalAvailable": len(results),
@@ -930,6 +978,12 @@ async def get_filtered_attractions(
                 "category": category
             }
         }
+        
+        # 필터링된 결과를 캐시에 저장 (15분 - 개인화된 추천이므로 짧은 시간)
+        cache_set(cache_key, result, expire_seconds=900)
+        logger.info(f"Filtered results cached for user: {user_id}, region: {region}")
+        
+        return result
         
     except HTTPException:
         raise

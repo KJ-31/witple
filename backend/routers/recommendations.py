@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vectorization import RecommendationEngine
 from auth_utils import get_current_user
 from schemas import PlaceRecommendation, RecommendationRequest
+from cache_utils import cache_get, cache_set, cache_delete, cache_invalidate_user_recommendations
 import logging
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -32,20 +33,38 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=F
 async def get_current_user_optional(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """옵셔널 사용자 인증 - 토큰이 없어도 None을 반환"""
     if not token:
+        logger.debug("No token provided - returning None (guest user)")
         return None
     
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
+            logger.debug("Token payload missing 'sub' field - returning None")
             return None
-    except JWTError:
+        
+        # 토큰 만료 시간 확인
+        exp = payload.get("exp")
+        if exp:
+            import time
+            if time.time() > exp:
+                logger.debug(f"Token expired for email: {email} - returning None")
+                return None
+        
+        logger.debug(f"Token decoded successfully for email: {email}")
+    except JWTError as e:
+        logger.debug(f"JWT decode error: {e} - returning None")
+        return None
+    except Exception as e:
+        logger.debug(f"Unexpected error during token validation: {e} - returning None")
         return None
     
     user = db.query(User).filter(User.email == email).first()
     if user is None:
+        logger.debug(f"User not found for email: {email} - returning None")
         return None
     
+    logger.debug(f"User authenticated successfully: {user.email} (ID: {user.user_id})")
     return user
 
 # 헬퍼 함수들
@@ -243,14 +262,33 @@ async def get_mixed_recommendations(
     - 비로그인: 인기 추천 100%
     """
     try:
+        # 사용자 상태 로깅
+        logger.info(f"Mixed recommendations request - current_user: {current_user is not None}")
+        if current_user:
+            logger.info(f"Current user details: email={getattr(current_user, 'email', 'N/A')}, user_id={getattr(current_user, 'user_id', 'N/A')}")
+        else:
+            logger.info("No current user - treating as guest")
+        
         # 테스트용 사용자 ID가 있으면 사용, 없으면 기존 로직
         if test_user:
             user_id = test_user
+            logger.info(f"Using test user ID: {user_id}")
         elif current_user and hasattr(current_user, 'user_id'):
             # 로그인 상태: 실제 개인화 추천
             user_id = str(current_user.user_id)
+            logger.info(f"Using authenticated user ID: {user_id}")
         else:
             user_id = None
+            logger.info("No user ID - treating as guest user")
+        
+        # 캐시 키 생성
+        cache_key = f"mixed_recommendations:{user_id or 'guest'}:{region or 'all'}:{category or 'all'}:{limit}"
+        logger.info(f"Cache key: {cache_key}")
+        
+        cached_results = cache_get(cache_key)
+        if cached_results:
+            logger.info(f"Returning cached mixed recommendations for user: {user_id or 'guest'}")
+            return cached_results
             
         if user_id:
             
@@ -265,6 +303,10 @@ async def get_mixed_recommendations(
                 for place in personalized_places:
                     place['recommendation_type'] = 'personalized'
                 
+                # 결과를 캐시에 저장 (10분)
+                cache_set(cache_key, personalized_places, expire_seconds=600)
+                logger.info(f"Mixed recommendations cached for user: {user_id}")
+                
                 return personalized_places
                 
             except Exception as e:
@@ -274,6 +316,11 @@ async def get_mixed_recommendations(
                     fallback_places = await recommendation_engine.get_fallback_places(limit=limit)
                     for place in fallback_places:
                         place['recommendation_type'] = 'fallback'
+                    
+                    # 결과를 캐시에 저장 (10분)
+                    cache_set(cache_key, fallback_places, expire_seconds=600)
+                    logger.info(f"Fallback recommendations cached for user: {user_id}")
+                    
                     return fallback_places
                 except:
                     # 모든 것이 실패하면 실제 DB 데이터 반환
@@ -296,6 +343,11 @@ async def get_mixed_recommendations(
                 popular_places = await recommendation_engine.get_fallback_places(limit=limit)
                 for place in popular_places:
                     place['recommendation_type'] = 'popular'
+                
+                # 결과를 캐시에 저장 (10분)
+                cache_set(cache_key, popular_places, expire_seconds=600)
+                logger.info(f"Popular recommendations cached for guest user")
+                
                 return popular_places
             except Exception as e:
                 logger.error(f"Error getting popular places for guest: {str(e)}")
@@ -339,6 +391,9 @@ async def record_recommendation_feedback(
             action_type=action_type,
             action_value=action_value
         )
+        
+        # 사용자의 추천 관련 캐시 무효화
+        cache_invalidate_user_recommendations(str(user_id))
         
         return {"message": "피드백이 기록되었습니다."}
         
