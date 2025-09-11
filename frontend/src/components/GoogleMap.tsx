@@ -16,6 +16,7 @@ interface GoogleMapProps {
   }>
   onMapLoad?: (map: any) => void
   onMarkerClick?: (markerId: string, markerType: string) => void
+  selectedMarkerIdFromParent?: string | null
 }
 
 // 카테고리별 아이콘 매핑
@@ -31,19 +32,39 @@ const getCategoryIcon = (category?: string): string => {
   return iconMap[category || ''] || '📍'
 }
 
+// 마커 아이콘 생성 함수
+const createMarkerIcon = (categoryIcon: string, isSelected: boolean = false) => {
+  const size = isSelected ? 30 : 20 // 선택된 마커는 1.5배 크기
+  const anchor = isSelected ? 15 : 10
+  
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+      <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="20" cy="20" r="18" fill="#3E68FF" stroke="#ffffff" stroke-width="2"/>
+        <text x="20" y="27" font-family="Arial" font-size="16" text-anchor="middle" fill="white">${categoryIcon}</text>
+      </svg>
+    `)}`,
+    scaledSize: new (window as any).google.maps.Size(size, size),
+    anchor: new (window as any).google.maps.Point(anchor, anchor)
+  }
+}
+
 const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   className = '',
   center = { lat: 37.5665, lng: 126.9780 },
   zoom = 13,
   markers = [],
   onMapLoad,
-  onMarkerClick
+  onMarkerClick,
+  selectedMarkerIdFromParent = null
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
   const [isLoaded, setIsLoaded] = useState(false)
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
   const itineraryMarkersRef = useRef<any[]>([])
   const categoryMarkersRef = useRef<any[]>([])
+  const markerInstancesRef = useRef<Map<string, { marker: any, category: string }>>(new Map())
 
   // 마커를 타입별로 분리 (메모이제이션으로 최적화)
   const itineraryMarkers = useMemo(() => {
@@ -152,6 +173,9 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       // 기존 카테고리 마커 제거
       categoryMarkersRef.current.forEach(marker => marker.setMap(null))
       categoryMarkersRef.current = []
+      
+      // 마커 인스턴스 맵 초기화 (선택 상태는 유지)
+      markerInstancesRef.current.clear()
 
       categoryMarkers.forEach((markerData, index) => {
         // 같은 위치의 마커들을 약간씩 오프셋 적용 (겹치지 않도록)
@@ -163,26 +187,27 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         
         // 카테고리별 이모티콘 마커 생성
         const categoryIcon = getCategoryIcon(markerData.category)
+        const isSelected = selectedMarkerId === markerData.id
         
         const marker = new (window as any).google.maps.Marker({
           position: offset,
           map,
           title: markerData.title || '',
-          icon: {
-            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-              <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="20" cy="20" r="18" fill="#3E68FF" stroke="#ffffff" stroke-width="2"/>
-                <text x="20" y="27" font-family="Arial" font-size="16" text-anchor="middle" fill="white">${categoryIcon}</text>
-              </svg>
-            `)}`,
-            scaledSize: new (window as any).google.maps.Size(20, 20),
-            anchor: new (window as any).google.maps.Point(10, 10)
-          }
+          icon: createMarkerIcon(categoryIcon, isSelected)
         })
+
+        // 마커 인스턴스와 카테고리 정보 저장
+        if (markerData.id) {
+          markerInstancesRef.current.set(markerData.id, {
+            marker: marker,
+            category: markerData.category || ''
+          })
+        }
 
         // 마커 클릭 이벤트 추가
         marker.addListener('click', () => {
           if (onMarkerClick && markerData.id) {
+            // 부모 컴포넌트에만 알리고, 마커 크기 변경은 useEffect에서 처리
             onMarkerClick(markerData.id, markerData.type || 'category')
           }
         })
@@ -191,6 +216,31 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       })
     }
   }, [map, categoryMarkers])
+
+  // 부모 컴포넌트에서 선택된 마커 ID 변경 시 처리
+  useEffect(() => {
+    if (selectedMarkerIdFromParent !== selectedMarkerId) {
+      // 이전 선택된 마커를 원래 크기로 되돌리기
+      if (selectedMarkerId) {
+        const prevMarkerInfo = markerInstancesRef.current.get(selectedMarkerId)
+        if (prevMarkerInfo) {
+          const prevIcon = getCategoryIcon(prevMarkerInfo.category)
+          prevMarkerInfo.marker.setIcon(createMarkerIcon(prevIcon, false))
+        }
+      }
+
+      // 새로 선택된 마커를 큰 크기로 변경
+      if (selectedMarkerIdFromParent) {
+        const newMarkerInfo = markerInstancesRef.current.get(selectedMarkerIdFromParent)
+        if (newMarkerInfo) {
+          const newIcon = getCategoryIcon(newMarkerInfo.category)
+          newMarkerInfo.marker.setIcon(createMarkerIcon(newIcon, true))
+        }
+      }
+
+      setSelectedMarkerId(selectedMarkerIdFromParent)
+    }
+  }, [selectedMarkerIdFromParent, selectedMarkerId])
 
   // 지도 영역 조정 (모든 마커가 보이도록)
   useEffect(() => {

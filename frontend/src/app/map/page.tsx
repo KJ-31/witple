@@ -179,6 +179,9 @@ export default function MapPage() {
     type: 'success' | 'error'
   }>({ show: false, message: '', type: 'success' })
 
+  // 선택된 마커 ID 상태 (지도와 동기화)
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
+
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -1870,9 +1873,11 @@ export default function MapPage() {
           zoom={13}
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
+          selectedMarkerIdFromParent={selectedMarkerId}
           onMarkerClick={(markerId, markerType) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
+              setSelectedMarkerId(markerId)
               fetchPlaceDetail(markerId)
               setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
             }
@@ -1919,6 +1924,7 @@ export default function MapPage() {
                   onClick={() => {
                     setSelectedPlaceDetail(null)
                     setBottomSheetHeight(320)
+                    setSelectedMarkerId(null) // 마커 선택 해제
                   }}
                   className="p-2 hover:bg-[#1F3C7A]/30 rounded-lg transition-colors"
                 >
@@ -2600,6 +2606,7 @@ export default function MapPage() {
                       key={place.id}
                       className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors cursor-pointer"
                       onClick={() => {
+                        setSelectedMarkerId(place.id) // 선택된 마커 업데이트
                         fetchPlaceDetail(place.id)
                         setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
                       }}
