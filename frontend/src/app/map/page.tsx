@@ -130,6 +130,8 @@ export default function MapPage() {
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
   const bottomSheetContentRef = useRef<HTMLDivElement>(null)
+  const categoryListScrollRef = useRef<HTMLDivElement>(null)
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number>(0)
   
   // 날짜 수정 모달 상태
   const [dateEditModal, setDateEditModal] = useState({
@@ -2032,6 +2034,13 @@ export default function MapPage() {
                     setSelectedPlaceDetail(null)
                     setBottomSheetHeight(320)
                     setSelectedMarkerId(null) // 마커 선택 해제
+                    
+                    // 이전 스크롤 위치로 복원
+                    setTimeout(() => {
+                      if (categoryListScrollRef.current) {
+                        categoryListScrollRef.current.scrollTop = savedScrollPosition
+                      }
+                    }, 100)
                   }}
                   className="p-2 hover:bg-[#1F3C7A]/30 rounded-lg transition-colors"
                 >
@@ -2748,7 +2757,10 @@ export default function MapPage() {
               </div>
               
               {/* 카테고리 장소 목록 - 스크롤 가능 */}
-              <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div 
+                ref={categoryListScrollRef}
+                className="flex-1 overflow-y-auto px-4 py-4"
+              >
               {categoryLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
@@ -2760,6 +2772,11 @@ export default function MapPage() {
                       key={place.id}
                       className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors cursor-pointer"
                       onClick={() => {
+                        // 현재 스크롤 위치 저장
+                        if (categoryListScrollRef.current) {
+                          setSavedScrollPosition(categoryListScrollRef.current.scrollTop)
+                        }
+                        
                         setSelectedMarkerId(place.id) // 선택된 마커 업데이트
                         fetchPlaceDetail(place.id)
                         setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
