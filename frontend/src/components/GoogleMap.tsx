@@ -137,9 +137,16 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       categoryMarkersRef.current.forEach(marker => marker.setMap(null))
       categoryMarkersRef.current = []
 
-      categoryMarkers.forEach((markerData) => {
+      categoryMarkers.forEach((markerData, index) => {
+        // 같은 위치의 마커들을 약간씩 오프셋 적용 (겹치지 않도록)
+        const offsetAmount = 0.00003 // 약 3미터 정도의 작은 오프셋
+        const offset = {
+          lat: markerData.position.lat + (Math.random() - 0.5) * offsetAmount,
+          lng: markerData.position.lng + (Math.random() - 0.5) * offsetAmount
+        }
+        
         const marker = new (window as any).google.maps.Marker({
-          position: markerData.position,
+          position: offset,
           map,
           title: markerData.title || '',
           icon: {
