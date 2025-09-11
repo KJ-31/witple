@@ -190,10 +190,36 @@ export default function MapPage() {
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
 
-  // 장소를 일정에 추가하는 함수
+  // 장소 선택 상태 확인 함수
+  const isPlaceInItinerary = (placeId: string): boolean => {
+    return selectedItineraryPlaces.some(p => {
+      // 원본 데이터의 ID로 비교 (새로 추가된 장소)
+      if (p.originalData && p.originalData.id === placeId) {
+        return true
+      }
+      // 기존 ID 비교
+      return p.id.includes(placeId)
+    })
+  }
+
+  // 장소를 일정에 추가/제거하는 함수
   const addPlaceToItinerary = (place: any) => {
     if (!place || !place.latitude || !place.longitude) {
       console.error('유효하지 않은 장소 데이터:', place)
+      return
+    }
+    
+    // 이미 일정에 있는 장소인지 확인
+    if (isPlaceInItinerary(place.id)) {
+      // 일정에서 제거
+      setSelectedItineraryPlaces(prev => prev.filter(p => {
+        if (p.originalData && p.originalData.id === place.id) {
+          return false
+        }
+        return !p.id.includes(place.id)
+      }))
+      
+      updateStatus(`${place.name}이 일정에서 제거되었습니다.`, 'success')
       return
     }
     
@@ -2781,10 +2807,16 @@ export default function MapPage() {
                 </div>
               ) : categoryPlaces.length > 0 ? (
                 <div className="space-y-3">
-                  {categoryPlaces.map(place => (
+                  {categoryPlaces.map(place => {
+                    const isSelected = isPlaceInItinerary(place.id)
+                    return (
                     <div
                       key={place.id}
-                      className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors cursor-pointer"
+                      className={`border rounded-xl p-4 transition-colors cursor-pointer ${
+                        isSelected 
+                          ? 'bg-[#3E68FF]/10 border-[#3E68FF] ring-2 ring-[#3E68FF]'
+                          : 'bg-[#1F3C7A]/20 border-[#1F3C7A]/40 hover:bg-[#1F3C7A]/30'
+                      }`}
                       onClick={() => {
                         // 현재 스크롤 위치 저장
                         if (categoryListScrollRef.current) {
@@ -2825,17 +2857,22 @@ export default function MapPage() {
                           </div>
                         </div>
                         <button 
-                          className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white ml-4"
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ml-4 ${
+                            isSelected
+                              ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
+                          }`}
                           onClick={(e) => {
                             e.stopPropagation()
                             addPlaceToItinerary(place)
                           }}
                         >
-                          + 추가{highlightedDay ? ` (${highlightedDay}일차)` : ''}
+                          {isSelected ? '선택됨' : `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
                         </button>
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-8">
