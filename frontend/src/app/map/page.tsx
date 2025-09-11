@@ -1680,8 +1680,15 @@ export default function MapPage() {
             <button
               key={category.key}
               onClick={() => {
-                setSelectedCategory(category.key)
-                setShowItinerary(false)
+                if (selectedCategory === category.key) {
+                  // 같은 카테고리를 다시 클릭하면 비활성화하고 내일정 모드로
+                  setSelectedCategory(null)
+                  setShowItinerary(true)
+                } else {
+                  // 다른 카테고리를 클릭하면 해당 카테고리 활성화하고 장소찾기 모드로
+                  setSelectedCategory(category.key)
+                  setShowItinerary(false)
+                }
               }}
               className={`flex-shrink-0 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200 flex items-center space-x-1 backdrop-blur-sm ${
                 selectedCategory === category.key
