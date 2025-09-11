@@ -12,8 +12,22 @@ interface GoogleMapProps {
     title?: string
     id?: string
     type?: 'itinerary' | 'category'
+    category?: string
   }>
   onMapLoad?: (map: any) => void
+}
+
+// 카테고리별 아이콘 매핑
+const getCategoryIcon = (category?: string): string => {
+  const iconMap: { [key: string]: string } = {
+    'accommodation': '🏨',
+    'humanities': '🏛️', 
+    'leisure_sports': '⚽',
+    'nature': '🌿',
+    'restaurants': '🍽️',
+    'shopping': '🛍️'
+  }
+  return iconMap[category || ''] || '📍'
 }
 
 const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
@@ -145,17 +159,22 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
           lng: markerData.position.lng + (Math.random() - 0.5) * offsetAmount
         }
         
+        // 카테고리별 이모티콘 마커 생성
+        const categoryIcon = getCategoryIcon(markerData.category)
+        
         const marker = new (window as any).google.maps.Marker({
           position: offset,
           map,
           title: markerData.title || '',
           icon: {
-            path: (window as any).google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: '#3E68FF', // 카테고리 마커는 파란색
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 2
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+              <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#3E68FF" stroke="#ffffff" stroke-width="2"/>
+                <text x="20" y="27" font-family="Arial" font-size="16" text-anchor="middle" fill="white">${categoryIcon}</text>
+              </svg>
+            `)}`,
+            scaledSize: new (window as any).google.maps.Size(20, 20),
+            anchor: new (window as any).google.maps.Point(10, 10)
           }
         })
 

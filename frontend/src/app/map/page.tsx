@@ -929,7 +929,8 @@ export default function MapPage() {
           position: { lat: place.latitude!, lng: place.longitude! },
           title: place.name,
           id: place.id,
-          type: 'category' as const // 카테고리 마커 구분
+          type: 'category' as const, // 카테고리 마커 구분
+          category: place.category // 카테고리 정보 추가
         }))
       markers.push(...categoryMarkers)
     }
