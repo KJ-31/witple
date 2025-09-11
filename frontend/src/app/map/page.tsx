@@ -129,6 +129,7 @@ export default function MapPage() {
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
+  const bottomSheetContentRef = useRef<HTMLDivElement>(null)
   
   // 날짜 수정 모달 상태
   const [dateEditModal, setDateEditModal] = useState({
@@ -198,9 +199,8 @@ export default function MapPage() {
       return acc
     }, {})
     
-    // 추가할 일차 결정: 하이라이트된 일차가 있으면 그 일차, 없으면 마지막 일차
-    const existingDays = Object.keys(currentGroupedPlaces).map(Number)
-    const targetDay = highlightedDay || (existingDays.length > 0 ? Math.max(...existingDays) : 1)
+    // 추가할 일차 결정: 하이라이트된 일차가 있으면 그 일차, 없으면 1일차
+    const targetDay = highlightedDay || 1
     
     // 새로운 장소 객체 생성 (SelectedPlace 인터페이스에 맞춤)
     const newPlace: SelectedPlace = {
@@ -1928,9 +1928,53 @@ export default function MapPage() {
               fetchPlaceDetail(markerId)
               setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
               
+              // 바텀시트를 맨 위로 스크롤
+              setTimeout(() => {
+                if (bottomSheetContentRef.current) {
+                  bottomSheetContentRef.current.scrollTop = 0
+                }
+              }, 100)
+              
               // 클릭한 마커를 지도 중앙으로 이동
               if (position && mapInstance) {
                 mapInstance.panTo(position)
+              }
+            } else if (markerType === 'itinerary') {
+              // 일정 마커 클릭 시 - 새로 추가된 장소인지 확인
+              const itineraryPlace = selectedItineraryPlaces.find(p => p.id === markerId)
+              if (itineraryPlace) {
+                // 새로 추가된 장소는 API 호출 없이 기존 데이터 사용
+                if (markerId.startsWith('place_')) {
+                  setSelectedPlaceDetail({
+                    id: itineraryPlace.id,
+                    name: itineraryPlace.name,
+                    description: itineraryPlace.description,
+                    imageUrl: '',
+                    rating: 0,
+                    category: itineraryPlace.category,
+                    address: itineraryPlace.address || '',
+                    region: '',
+                    city: { id: '', name: '', region: '' },
+                    latitude: itineraryPlace.latitude || 0,
+                    longitude: itineraryPlace.longitude || 0
+                  })
+                } else {
+                  fetchPlaceDetail(markerId)
+                }
+                setSelectedMarkerId(markerId)
+                setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                
+                // 바텀시트를 맨 위로 스크롤
+                setTimeout(() => {
+                  if (bottomSheetContentRef.current) {
+                    bottomSheetContentRef.current.scrollTop = 0
+                  }
+                }, 100)
+                
+                // 클릭한 마커를 지도 중앙으로 이동
+                if (position && mapInstance) {
+                  mapInstance.panTo(position)
+                }
               }
             } else if (markerType === 'itinerary') {
               // 일정 마커 클릭 시 바텀 시트에 상세정보 표시
@@ -1970,6 +2014,7 @@ export default function MapPage() {
 
         {/* Content */}
         <div 
+          ref={bottomSheetContentRef}
           className="overflow-y-auto overflow-x-hidden no-scrollbar relative"
           style={{ 
             height: `${bottomSheetHeight - 60}px`,
@@ -2455,10 +2500,34 @@ export default function MapPage() {
                                   }
                                   e.stopPropagation();
                                   e.preventDefault();
-                                  // 바텀 시트에 상세정보 표시
+                                  // 바텀 시트에 상세정보 표시 - 새로 추가된 장소인지 확인
+                                  if (place.id.startsWith('place_')) {
+                                    // 새로 추가된 장소는 API 호출 없이 기존 데이터 사용
+                                    setSelectedPlaceDetail({
+                                      id: place.id,
+                                      name: place.name,
+                                      description: place.description,
+                                      imageUrl: '',
+                                      rating: 0,
+                                      category: place.category,
+                                      address: place.address || '',
+                                      region: '',
+                                      city: { id: '', name: '', region: '' },
+                                      latitude: place.latitude || 0,
+                                      longitude: place.longitude || 0
+                                    })
+                                  } else {
+                                    fetchPlaceDetail(place.id)
+                                  }
                                   setSelectedMarkerId(place.id)
-                                  fetchPlaceDetail(place.id)
                                   setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                                  
+                                  // 바텀시트를 맨 위로 스크롤
+                                  setTimeout(() => {
+                                    if (bottomSheetContentRef.current) {
+                                      bottomSheetContentRef.current.scrollTop = 0
+                                    }
+                                  }, 100)
                                   
                                   // 클릭한 장소를 지도 중앙으로 이동
                                   if (place.latitude && place.longitude && mapInstance) {
@@ -2693,6 +2762,13 @@ export default function MapPage() {
                         setSelectedMarkerId(place.id) // 선택된 마커 업데이트
                         fetchPlaceDetail(place.id)
                         setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                        
+                        // 바텀시트를 맨 위로 스크롤
+                        setTimeout(() => {
+                          if (bottomSheetContentRef.current) {
+                            bottomSheetContentRef.current.scrollTop = 0
+                          }
+                        }, 100)
                         
                         // 클릭한 장소를 지도 중앙으로 이동
                         if (place.latitude && place.longitude && mapInstance) {
