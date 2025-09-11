@@ -36,6 +36,11 @@ export default function Home() {
   const loadRecommendedCities = useCallback(async (pageNum: number) => {
     if (loadingRef.current) return
 
+    // 세션이 로딩 중이면 대기
+    if (status === 'loading') {
+      return
+    }
+
     loadingRef.current = true
     setLoading(true)
     try {
@@ -66,7 +71,7 @@ export default function Home() {
       setLoading(false)
       loadingRef.current = false
     }
-  }, [session])
+  }, [session, status])
 
   // 필터 데이터 로드 함수
   const loadFilterData = useCallback(async () => {
@@ -578,10 +583,12 @@ export default function Home() {
           ))}
 
           {/* 로딩 인디케이터 */}
-          {loading && (
+          {(loading || status === 'loading') && (
             <div className="flex justify-center items-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
-              <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
+              <span className="ml-2 text-[#94A9C9]">
+                {status === 'loading' ? '로그인 상태를 확인하는 중...' : '추천 여행지를 불러오는 중...'}
+              </span>
             </div>
           )}
 
@@ -594,7 +601,7 @@ export default function Home() {
           )}
 
           {/* 데이터가 없을 때 */}
-          {!loading && citySections.length === 0 && (
+          {!loading && status !== 'loading' && citySections.length === 0 && (
             <div className="text-center py-16">
               {session ? (
                 <>

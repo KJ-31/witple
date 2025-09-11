@@ -21,7 +21,7 @@ interface RecommendationItem {
 
 export default function RecommendationsPage() {
   const router = useRouter()
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState(() => {
     // 초기값을 sessionStorage에서 가져오기
@@ -143,6 +143,11 @@ export default function RecommendationsPage() {
   // DB에서 데이터 가져오기
   useEffect(() => {
     const fetchCategoryData = async () => {
+      // 세션이 로딩 중이면 대기
+      if (status === 'loading') {
+        return
+      }
+
       // 저장된 데이터 확인
       const storedData = loadFromStorage()
       if (storedData && storedData.selectedCategory === selectedCategory && storedData.leftColumnItems) {
@@ -189,7 +194,7 @@ export default function RecommendationsPage() {
         let apiUrl = `${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`
         if (session && (session as any).backendToken) {
           // 로그인 상태: 개인화 추천 API 사용
-          apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=15`
+          apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=50`
         }
         
         const response = await fetch(apiUrl, { headers })
@@ -248,11 +253,16 @@ export default function RecommendationsPage() {
 
 
     fetchCategoryData()
-  }, [selectedCategory, session])
+  }, [selectedCategory, session, status, isNavigatedBack])
 
   // 추가 섹션 데이터 가져오기
   useEffect(() => {
     const fetchAdditionalSections = async () => {
+      // 세션이 로딩 중이면 대기
+      if (status === 'loading') {
+        return
+      }
+
       // 저장된 데이터 확인
       const storedData = loadFromStorage()
       if (storedData && storedData.discoveryItems && storedData.newItems && 
@@ -431,7 +441,7 @@ export default function RecommendationsPage() {
     }
 
     fetchAdditionalSections()
-  }, [])
+  }, [status, isNavigatedBack, discoveryItems, newItems, popularItems, hiddenItems, themeItems, seasonalItems])
 
   // 카테고리 한국어 변환 함수
   const getCategoryInKorean = (category: string): string => {
@@ -473,12 +483,15 @@ export default function RecommendationsPage() {
     router.push(`/attraction/${item.id}`)
   }
 
-  if (loading) {
+  // 세션이 로딩 중이거나 데이터가 로딩 중일 때 로딩 화면 표시
+  if (status === 'loading' || loading) {
     return (
       <div className="min-h-screen bg-[#0B1220] text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF] mx-auto mb-4"></div>
-          <p className="text-[#94A9C9]">추천을 불러오는 중...</p>
+          <p className="text-[#94A9C9]">
+            {status === 'loading' ? '로그인 상태를 확인하는 중...' : '추천을 불러오는 중...'}
+          </p>
         </div>
       </div>
     )
