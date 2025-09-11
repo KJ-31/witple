@@ -10,7 +10,7 @@ import sys
 import os
 
 # 데이터베이스 연결 설정
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 
