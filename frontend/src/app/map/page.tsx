@@ -182,6 +182,51 @@ export default function MapPage() {
   // 선택된 마커 ID 상태 (지도와 동기화)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
+
+  // 장소를 일정에 추가하는 함수
+  const addPlaceToItinerary = (place: any) => {
+    if (!place || !place.latitude || !place.longitude) {
+      console.error('유효하지 않은 장소 데이터:', place)
+      return
+    }
+
+    // 현재 일정들을 일차별로 그룹핑
+    const currentGroupedPlaces = selectedItineraryPlaces.reduce<{[key: number]: SelectedPlace[]}>((acc, p) => {
+      const day = p.dayNumber || 1
+      if (!acc[day]) acc[day] = []
+      acc[day].push(p)
+      return acc
+    }, {})
+    
+    // 추가할 일차 결정: 하이라이트된 일차가 있으면 그 일차, 없으면 마지막 일차
+    const existingDays = Object.keys(currentGroupedPlaces).map(Number)
+    const targetDay = highlightedDay || (existingDays.length > 0 ? Math.max(...existingDays) : 1)
+    
+    // 새로운 장소 객체 생성 (SelectedPlace 인터페이스에 맞춤)
+    const newPlace: SelectedPlace = {
+      id: `place_${Date.now()}`, // 임시 ID
+      name: place.name || '',
+      category: place.category || 'attraction',
+      rating: 0, // 기본값
+      description: place.overview || place.description || '',
+      dayNumber: targetDay,
+      address: place.address,
+      latitude: parseFloat(place.latitude),
+      longitude: parseFloat(place.longitude)
+    }
+
+    // 일정에 추가
+    setSelectedItineraryPlaces(prev => [...prev, newPlace])
+    
+    // 선택 상태 초기화 (하이라이트는 유지)
+    // setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
+    setSelectedPlaceDetail(null)
+    setCategoryPlaces([])
+    
+    // 성공 메시지
+    updateStatus(`${place.name}이 ${targetDay}일차에 추가되었습니다!`, 'success')
+  }
+
   
   // 장소별 잠금 상태 관리
   const [lockedPlaces, setLockedPlaces] = useState<{[key: string]: boolean}>({})
@@ -2045,14 +2090,26 @@ export default function MapPage() {
                     </div>
                   )}
 
+                  {/* Day selection helper text */}
+                  {(categoryPlaces.length > 0 || selectedPlaceDetail) && (
+                    <div className="text-center mb-3">
+                      <p className="text-[#94A9C9] text-sm">
+                        {highlightedDay 
+                          ? `${highlightedDay}일차에 추가됩니다` 
+                          : '일차를 클릭해서 추가할 일차를 선택하세요'
+                        }
+                      </p>
+                    </div>
+                  )}
+                  
                   {/* Add to schedule button */}
                   <button 
                     className="w-full py-3 bg-[#3E68FF] hover:bg-[#3E68FF]/80 rounded-xl text-white font-medium transition-colors"
                     onClick={() => {
-                      console.log('장소 추가:', selectedPlaceDetail.name)
+                      addPlaceToItinerary(selectedPlaceDetail)
                     }}
                   >
-                    + 일정에 추가
+                    + 일정에 추가{highlightedDay ? ` (${highlightedDay}일차)` : ''}
                   </button>
                 </>
               )}
@@ -2663,11 +2720,10 @@ export default function MapPage() {
                           className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white ml-4"
                           onClick={(e) => {
                             e.stopPropagation()
-                            // 여기에 추가 로직 구현 (예: 일정에 추가)
-                            console.log('장소 추가:', place.name)
+                            addPlaceToItinerary(place)
                           }}
                         >
-                          + 추가
+                          + 추가{highlightedDay ? ` (${highlightedDay}일차)` : ''}
                         </button>
                       </div>
                     </div>
