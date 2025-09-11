@@ -109,6 +109,9 @@ export default function MapPage() {
   const [categoryLoading, setCategoryLoading] = useState(false)
   // 일정이 있으면 처음부터 일정을 보여줌
   const [showItinerary, setShowItinerary] = useState(!!placesParam)
+  // 상세 정보 모달 상태
+  const [selectedPlaceDetail, setSelectedPlaceDetail] = useState<AttractionData | null>(null)
+  const [placeDetailLoading, setPlaceDetailLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
@@ -490,6 +493,40 @@ export default function MapPage() {
       setCategoryLoading(false)
     }
   }, [selectedItineraryPlaces])
+
+  // 장소 상세 정보 가져오기
+  const fetchPlaceDetail = useCallback(async (placeId: string) => {
+    try {
+      setPlaceDetailLoading(true)
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      
+      // 새로운 ID 형식 처리: table_name_id 형식인 경우
+      let apiUrl: string
+      if (placeId && placeId.includes('_') && !placeId.includes('undefined')) {
+        const lastUnderscoreIndex = placeId.lastIndexOf('_')
+        const tableName = placeId.substring(0, lastUnderscoreIndex)
+        const attractionId = placeId.substring(lastUnderscoreIndex + 1)
+        
+        if (tableName && attractionId && tableName !== 'undefined' && attractionId !== 'undefined') {
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
+        } else {
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${placeId}`
+        }
+      } else {
+        apiUrl = `${API_BASE_URL}/api/v1/attractions/${placeId}`
+      }
+      
+      const response = await fetch(apiUrl)
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      
+      const data = await response.json()
+      setSelectedPlaceDetail(data)
+    } catch (error) {
+      console.error('장소 상세 정보 로드 오류:', error)
+    } finally {
+      setPlaceDetailLoading(false)
+    }
+  }, [])
 
   // 카테고리별 장소 가져오기
   const fetchPlacesByCategory = useCallback(async (category: CategoryKey | null) => {
@@ -1713,7 +1750,8 @@ export default function MapPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-white relative">
+    <>
+      <div className="min-h-screen bg-[#0B1220] text-white relative">
       {/* Header Back */}
       <div className="absolute top-4 left-4 z-50">
         <button
@@ -1871,7 +1909,132 @@ export default function MapPage() {
             maxHeight: `${bottomSheetHeight - 60}px`
           }}
         >
-          {showItinerary && selectedItineraryPlaces.length > 0 ? (
+          {selectedPlaceDetail ? (
+            /* 장소 상세 정보 모드 */
+            <div className="px-4 py-4">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-[#3E68FF]">장소 상세정보</h2>
+                <button
+                  onClick={() => {
+                    setSelectedPlaceDetail(null)
+                    setBottomSheetHeight(320)
+                  }}
+                  className="p-2 hover:bg-[#1F3C7A]/30 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Content */}
+              {placeDetailLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Main image */}
+                  {selectedPlaceDetail.imageUrls && selectedPlaceDetail.imageUrls.length > 0 && (
+                    <div className="relative h-48 bg-gradient-to-b from-blue-600 to-purple-700 rounded-xl mb-4">
+                      <img 
+                        src={selectedPlaceDetail.imageUrls[0]} 
+                        alt={selectedPlaceDetail.name}
+                        className="w-full h-full object-cover rounded-xl"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/30 rounded-xl"></div>
+                    </div>
+                  )}
+
+                  {/* Title */}
+                  <div className="mb-4">
+                    <h1 className="text-2xl font-bold text-white mb-2">{selectedPlaceDetail.name}</h1>
+                    {selectedPlaceDetail.city?.name && (
+                      <p className="text-[#6FA0E6] text-sm">{selectedPlaceDetail.city.name}</p>
+                    )}
+                  </div>
+
+                  {/* Rating and category */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center bg-[#12345D]/50 rounded-full px-3 py-1">
+                      <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      <span className="text-white font-medium">{selectedPlaceDetail.rating}</span>
+                    </div>
+                    
+                    <div className="bg-[#1F3C7A]/30 rounded-full px-3 py-1">
+                      <span className="text-[#6FA0E6] text-sm font-medium">
+                        {getCategoryName(selectedPlaceDetail.category)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                    <p className="text-[#94A9C9] text-sm leading-relaxed">
+                      {selectedPlaceDetail.description}
+                    </p>
+                    {selectedPlaceDetail.detailedInfo && (
+                      <div className="mt-3 pt-3 border-t border-[#1F3C7A]/40">
+                        <p 
+                          className="text-[#94A9C9] text-xs leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: selectedPlaceDetail.detailedInfo.replace(/\\n/g, '<br>') }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Address */}
+                  {selectedPlaceDetail.address && (
+                    <div className="flex items-start space-x-3 bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                      <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-white text-sm font-medium mb-1">주소</p>
+                        <p className="text-[#94A9C9] text-xs">{selectedPlaceDetail.address}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Business Hours */}
+                  {(selectedPlaceDetail.businessHours || selectedPlaceDetail.usageHours) && (
+                    <div className="flex items-start space-x-3 bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                      <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-white text-sm font-medium mb-1">운영시간</p>
+                        <p 
+                          className="text-[#94A9C9] text-xs leading-relaxed"
+                          dangerouslySetInnerHTML={{ 
+                            __html: (selectedPlaceDetail.businessHours || selectedPlaceDetail.usageHours || '').replace(/\\n/g, '<br>') 
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add to schedule button */}
+                  <button 
+                    className="w-full py-3 bg-[#3E68FF] hover:bg-[#3E68FF]/80 rounded-xl text-white font-medium transition-colors"
+                    onClick={() => {
+                      console.log('장소 추가:', selectedPlaceDetail.name)
+                    }}
+                  >
+                    + 일정에 추가
+                  </button>
+                </>
+              )}
+            </div>
+          ) : showItinerary && selectedItineraryPlaces.length > 0 ? (
             /* 일정 보기 모드 */
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
@@ -2430,7 +2593,10 @@ export default function MapPage() {
                     <div
                       key={place.id}
                       className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors cursor-pointer"
-                      onClick={() => router.push(`/attraction/${place.id}`)}
+                      onClick={() => {
+                        fetchPlaceDetail(place.id)
+                        setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
+                      }}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -2972,6 +3138,8 @@ export default function MapPage() {
           </div>
         </div>
       )}
+
     </div>
+    </>
   )
 }
