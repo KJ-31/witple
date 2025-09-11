@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
 import { saveTrip, updateTrip } from '@/app/api'
 
-type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
+type CategoryKey = 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
   id: string
   name: string
@@ -66,7 +66,7 @@ export default function MapPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
+  const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [bottomSheetHeight, setBottomSheetHeight] = useState(320)
   const [isDragging, setIsDragging] = useState(false)
   const [startY, setStartY] = useState(0)
@@ -444,17 +444,16 @@ export default function MapPage() {
   }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam, lockedPlaces])
 
   // 카테고리별 장소 가져오기
-  const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
+  const fetchPlacesByCategory = useCallback(async (category: CategoryKey | null) => {
     try {
       setCategoryLoading(true)
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       let url = `${API_BASE_URL}/api/v1/attractions/search?q=&limit=50`
       
       // category 매개변수 대신 검색어로 카테고리 처리
-      if (category !== 'all') {
+      if (category) {
         // 카테고리별 검색어 매핑
         const categorySearchMap: { [key in CategoryKey]: string } = {
-          'all': '',
           'nature': '자연',
           'restaurants': '맛집',
           'shopping': '쇼핑',
@@ -488,16 +487,10 @@ export default function MapPage() {
     }
   }, [selectedCategory, showItinerary, fetchPlacesByCategory])
 
-  // 초기 로딩 시 전체 장소 가져오기 (일정 보기 모드가 아닐 때만)
-  useEffect(() => {
-    if (!placesParam) {
-      fetchPlacesByCategory('all')
-    }
-  }, [placesParam, fetchPlacesByCategory])
+  // 초기에는 아무 카테고리도 선택되지 않은 상태로 시작
 
   // 카테고리 정의
   const categories = [
-    { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
     { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
     { key: 'humanities' as CategoryKey, name: '인문', icon: '🏛️' },
     { key: 'leisure_sports' as CategoryKey, name: '레저', icon: '⚽' },
@@ -2314,7 +2307,7 @@ export default function MapPage() {
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-xl font-bold text-[#3E68FF]">
-                    {getCategoryName(selectedCategory)} 장소
+                    {selectedCategory ? getCategoryName(selectedCategory) : '모든'} 장소
                   </h2>
                   {selectedItineraryPlaces.length > 0 && (
                     <button
