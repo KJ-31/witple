@@ -2716,9 +2716,9 @@ export default function MapPage() {
             </div>
           ) : (
             /* 카테고리 보기 모드 */
-            <div className="px-4 py-4">
-              {/* 카테고리 헤더 */}
-              <div className="mb-6">
+            <div className="flex flex-col h-full">
+              {/* 카테고리 헤더 - 고정 */}
+              <div className="px-4 py-4 border-b border-[#1F3C7A]/20 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-xl font-bold text-[#3E68FF]">
                     {selectedCategory ? getCategoryName(selectedCategory) : '모든'} 장소
@@ -2747,7 +2747,8 @@ export default function MapPage() {
                 </p>
               </div>
               
-              {/* 카테고리 장소 목록 */}
+              {/* 카테고리 장소 목록 - 스크롤 가능 */}
+              <div className="flex-1 overflow-y-auto px-4 py-4">
               {categoryLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
@@ -2811,6 +2812,7 @@ export default function MapPage() {
                   <p className="text-[#6FA0E6] text-sm">다른 카테고리를 선택해보세요</p>
                 </div>
               )}
+              </div>
             </div>
           )}
           
