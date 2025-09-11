@@ -447,17 +447,19 @@ export default function MapPage() {
   }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam, lockedPlaces])
 
   // 선택한 장소 기준 주변 장소 검색
-  const fetchNearbyPlaces = useCallback(async () => {
+  const fetchNearbyPlaces = useCallback(async (categoryFilter?: string | null) => {
     try {
       setCategoryLoading(true)
+      console.log('fetchNearbyPlaces 호출됨:', { categoryFilter, selectedItineraryPlacesCount: selectedItineraryPlaces.length })
       
       if (selectedItineraryPlaces.length === 0) {
+        console.log('주변 장소 검색: 선택된 일정 장소가 없습니다.')
         setCategoryPlaces([])
         return
       }
       
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=1.0&limit=50`
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500`
       
       // 선택한 장소들의 정보를 준비
       const selectedPlacesData = selectedItineraryPlaces
@@ -469,7 +471,15 @@ export default function MapPage() {
           longitude: place.longitude
         }))
       
+      console.log('주변 장소 검색 요청:', {
+        url,
+        categoryFilter,
+        selectedPlacesCount: selectedPlacesData.length,
+        selectedPlaces: selectedPlacesData.slice(0, 2) // 첫 2개만 로그
+      })
+      
       if (selectedPlacesData.length === 0) {
+        console.log('주변 장소 검색: 좌표가 있는 일정 장소가 없습니다.')
         setCategoryPlaces([])
         return
       }
@@ -482,12 +492,31 @@ export default function MapPage() {
         body: JSON.stringify(selectedPlacesData)
       })
       
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       
       const data = await response.json()
-      setCategoryPlaces(data.attractions || [])
-    } catch (error) {
+      let places = data.attractions || []
+      
+      // 카테고리 필터 적용
+      if (categoryFilter) {
+        places = places.filter((place: AttractionData) => place.category === categoryFilter)
+      }
+      
+      setCategoryPlaces(places)
+    } catch (error: any) {
       console.error('주변 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
@@ -528,55 +557,14 @@ export default function MapPage() {
     }
   }, [])
 
-  // 카테고리별 장소 가져오기
-  const fetchPlacesByCategory = useCallback(async (category: CategoryKey | null) => {
-    try {
-      setCategoryLoading(true)
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      let url = `${API_BASE_URL}/api/v1/attractions/search?q=&limit=50`
-      
-      // category 매개변수 대신 검색어로 카테고리 처리
-      if (category) {
-        // 카테고리별 검색어 매핑
-        const categorySearchMap: { [key in CategoryKey]: string } = {
-          'nature': '자연',
-          'restaurants': '맛집',
-          'shopping': '쇼핑',
-          'accommodation': '숙박',
-          'humanities': '인문',
-          'leisure_sports': '레저'
-        }
-        
-        const searchTerm = categorySearchMap[category] || ''
-        if (searchTerm) {
-          url = `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchTerm)}&limit=50`
-        }
-      }
-      
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
-      
-      const data = await response.json()
-      setCategoryPlaces(data.attractions || [])
-    } catch (error) {
-      setCategoryPlaces([])
-    } finally {
-      setCategoryLoading(false)
-    }
-  }, [])
 
-  // 카테고리 선택 시 장소 가져오기 또는 주변 장소 검색
+  // 카테고리 선택 시 주변 장소 검색 (카테고리 필터 적용)
   useEffect(() => {
     if (!showItinerary) {
-      if (selectedCategory) {
-        // 카테고리가 선택된 경우 카테고리별 검색
-        fetchPlacesByCategory(selectedCategory)
-      } else {
-        // 카테고리가 선택되지 않은 경우 (장소찾기 첫 진입) 주변 장소 검색
-        fetchNearbyPlaces()
-      }
+      // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
+      fetchNearbyPlaces(selectedCategory)
     }
-  }, [selectedCategory, showItinerary, fetchPlacesByCategory, fetchNearbyPlaces])
+  }, [selectedCategory, showItinerary, fetchNearbyPlaces])
 
   // 초기에는 아무 카테고리도 선택되지 않은 상태로 시작
 
@@ -1805,6 +1793,8 @@ export default function MapPage() {
                   // 다른 카테고리를 클릭하면 해당 카테고리 활성화하고 장소찾기 모드로
                   setSelectedCategory(category.key)
                   setShowItinerary(false)
+                  // 해당 카테고리로 1km 반경 검색
+                  fetchNearbyPlaces(category.key)
                 }
               }}
               className={`flex-shrink-0 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200 flex items-center space-x-1 backdrop-blur-sm ${
@@ -2106,7 +2096,11 @@ export default function MapPage() {
                   )}
                   {(!isFromProfile || isEditMode) && (
                     <button
-                      onClick={() => setShowItinerary(false)}
+                      onClick={() => {
+                        setShowItinerary(false)
+                        // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
+                        fetchNearbyPlaces(selectedCategory)
+                      }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
                       장소 찾기

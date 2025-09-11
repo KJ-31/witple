@@ -95,6 +95,19 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
     
     return data
 
+def get_approximate_bounds(lat: float, lng: float, radius_km: float = 1.0) -> dict:
+    """대략적인 검색 범위 계산 (PostGIS 없이 성능 최적화용)"""
+    # 위도 1도 ≈ 111km, 경도 1도 ≈ 88km (한국 기준)
+    lat_offset = radius_km / 111.0
+    lng_offset = radius_km / 88.0
+    
+    return {
+        'min_lat': lat - lat_offset,
+        'max_lat': lat + lat_offset,
+        'min_lng': lng - lng_offset,
+        'max_lng': lng + lng_offset
+    }
+
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """두 지점 간의 거리를 계산 (Haversine formula, 단위: km)"""
     if not all([lat1, lon1, lat2, lon2]):
@@ -137,15 +150,26 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
             center_lat = float(selected_place['latitude'])
             center_lng = float(selected_place['longitude'])
             
+            # 검색 범위 계산 (성능 최적화) - 5km로 확장
+            bounds = get_approximate_bounds(center_lat, center_lng, 5.0)
+            
             # 모든 카테고리 테이블에서 검색
             for table_name, table_model in CATEGORY_TABLES.items():
-                # 해당 테이블의 모든 장소 조회 (위도/경도가 있는 것만)
-                query = db.query(table_model).filter(
-                    table_model.latitude.isnot(None),
-                    table_model.longitude.isnot(None)
-                )
-                
-                attractions = query.all()
+                try:
+                    # 범위 기반 필터링으로 성능 최적화 - LIMIT 제거로 범위 내 모든 데이터 조회
+                    query = db.query(table_model).filter(
+                        table_model.latitude.isnot(None),
+                        table_model.longitude.isnot(None),
+                        table_model.latitude.between(bounds['min_lat'], bounds['max_lat']),
+                        table_model.longitude.between(bounds['min_lng'], bounds['max_lng'])
+                    )
+                    
+                    attractions = query.all()
+                    logger.info(f"Table {table_name}: found {len(attractions)} attractions in bounds")
+                    
+                except Exception as table_error:
+                    logger.error(f"Error querying table {table_name}: {str(table_error)}")
+                    continue
                 
                 for attraction in attractions:
                     # 고유 ID 생성
@@ -165,8 +189,8 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
                         float(attraction.latitude), float(attraction.longitude)
                     )
                     
-                    # 반경 내에 있는 장소만 추가
-                    if distance <= radius_km:
+                    # 5km 반경 내에 있는 장소만 추가
+                    if distance <= 5.0:
                         category = get_category_from_table(table_name)
                         formatted_attraction = format_attraction_data(attraction, category, table_name)
                         formatted_attraction['distance'] = round(distance, 2)  # 거리 정보 추가
@@ -309,7 +333,7 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
 async def get_nearby_places(
     selected_places: List[dict],
     radius_km: float = Query(1.0, ge=0.1, le=10, description="검색 반경 (km)"),
-    limit: int = Query(50, ge=1, le=100, description="최대 결과 수"),
+    limit: int = Query(50, ge=1, le=500, description="최대 결과 수"),
     db: Session = Depends(get_db)
 ):
     """선택한 장소들을 기준으로 주변 관광지를 검색합니다."""
