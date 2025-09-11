@@ -25,6 +25,10 @@ interface SelectedPlace {
   isPinned?: boolean
   latitude?: number
   longitude?: number
+  originalData?: {
+    table_name: string
+    id: string
+  }
 }
 
 interface AttractionData {
@@ -192,6 +196,9 @@ export default function MapPage() {
       console.error('유효하지 않은 장소 데이터:', place)
       return
     }
+    
+    // 디버깅: 원본 데이터 구조 확인
+    console.log('추가할 장소 데이터:', place)
 
     // 현재 일정들을 일차별로 그룹핑
     const currentGroupedPlaces = selectedItineraryPlaces.reduce<{[key: number]: SelectedPlace[]}>((acc, p) => {
@@ -205,25 +212,31 @@ export default function MapPage() {
     const targetDay = highlightedDay || 1
     
     // 새로운 장소 객체 생성 (SelectedPlace 인터페이스에 맞춤)
+    // 원본 데이터에서 table_name과 id 추출
     const newPlace: SelectedPlace = {
-      id: `place_${Date.now()}`, // 임시 ID
+      id: `place_${Date.now()}`, // 임시 디스플레이용 ID
       name: place.name || '',
       category: place.category || 'attraction',
-      rating: 0, // 기본값
+      rating: 0,
       description: place.overview || place.description || '',
       dayNumber: targetDay,
       address: place.address,
       latitude: parseFloat(place.latitude),
-      longitude: parseFloat(place.longitude)
+      longitude: parseFloat(place.longitude),
+      // 원본 DB 정보 저장 (저장 시 사용)
+      originalData: {
+        table_name: place.table_name || selectedCategory || place.category, // API에서 온 table_name 또는 현재 선택된 카테골0리
+        id: place.id.toString() // 원본 DB ID
+      }
     }
 
     // 일정에 추가
     setSelectedItineraryPlaces(prev => [...prev, newPlace])
     
-    // 선택 상태 초기화 (하이라이트는 유지)
-    // setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
+    // 선택 상태 초기화 (하이라이트와 검색 결과는 유지)
+    setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
     setSelectedPlaceDetail(null)
-    setCategoryPlaces([])
+    setCategoryPlaces([]) // 검색 결과는 유지해서 계속 다른 장소들을 추가할 수 있게 함
     
     // 성공 메시지
     updateStatus(`${place.name}이 ${targetDay}일차에 추가되었습니다!`, 'success')
@@ -3040,11 +3053,38 @@ export default function MapPage() {
                     }
                     
                     try {
-                      // places에 잠금 상태 추가
-                      const placesWithLockStatus = selectedItineraryPlaces.map(place => ({
-                        ...place,
-                        isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
-                      }));
+                      // 디버깅: 현재 선택된 일정들 확인
+                      console.log('저장 전 selectedItineraryPlaces:', selectedItineraryPlaces)
+                      
+                      // 저장 형식으로 변환 (table_name, id, dayNumber, order, isLocked)
+                      const placesWithLockStatus = selectedItineraryPlaces.map((place, index) => {
+                        // 새로 추가된 장소인지 확인
+                        if (place.id.startsWith('place_') && place.originalData) {
+                          // 새로 추가된 장소: 원본 DB 정보 사용
+                          return {
+                            table_name: place.originalData.table_name,
+                            id: place.originalData.id,
+                            dayNumber: place.dayNumber,
+                            order: index + 1, // 순서는 배열 인덱스 기반
+                            isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                          }
+                        } else {
+                          // 기존 장소: 기존 ID에서 table_name과 id 추출
+                          const idParts = place.id.includes('_') ? place.id.split('_') : [place.category, place.id]
+                          const table_name = idParts.length > 1 ? idParts[0] : place.category
+                          const originalId = idParts.length > 1 ? idParts[idParts.length - 1] : place.id
+                          
+                          return {
+                            table_name: table_name,
+                            id: originalId,
+                            dayNumber: place.dayNumber,
+                            order: index + 1,
+                            isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                          }
+                        }
+                      });
+                      
+                      console.log('저장할 placesWithLockStatus:', placesWithLockStatus)
 
                       // API로 DB에 저장
                       const tripData = {
