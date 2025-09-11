@@ -33,7 +33,7 @@ export default function Home() {
 
 
   // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
-  const loadRecommendedCities = useCallback(async (pageNum: number) => {
+  const loadRecommendedCities = useCallback(async (pageNum: number, forceSession?: any) => {
     if (loadingRef.current) return
 
     loadingRef.current = true
@@ -41,8 +41,11 @@ export default function Home() {
     try {
       let data: CitySection[], hasMore: boolean
 
+      // 세션 상태를 명시적으로 전달받거나 현재 세션 사용
+      const currentSession = forceSession !== undefined ? forceSession : session
+
       // 로그인 상태에 따라 다른 API 사용
-      if (session) {
+      if (currentSession) {
         const result = await fetchPersonalizedRegionCategories(5) // 5개 지역
         data = result.data
         hasMore = result.hasMore
@@ -235,11 +238,18 @@ export default function Home() {
     }
   }, [session, router])
 
-  // 초기 데이터 로드 및 세션 상태 변경 시 데이터 재로드
+  // 필터 데이터만 초기 로드
   useEffect(() => {
-    loadRecommendedCities(0)
     loadFilterData()
-  }, [loadRecommendedCities, loadFilterData])
+  }, [loadFilterData])
+
+  // 세션 상태가 완전히 확정된 후에만 추천 데이터 로드
+  useEffect(() => {
+    // 세션이 로딩 중이 아닐 때만 데이터 로드
+    if (status !== 'loading') {
+      loadRecommendedCities(0, session)
+    }
+  }, [status, session, loadRecommendedCities])
 
   // 세션 상태가 변경될 때마다 선호도 체크
   useEffect(() => {
@@ -253,10 +263,12 @@ export default function Home() {
     if (selectedRegion || selectedCategory) {
       loadFilteredAttractions(0)
     } else {
-      // 필터가 없을 때는 로그인 상태에 따라 적절한 데이터 로드
-      loadRecommendedCities(0)
+      // 필터가 없을 때는 세션 상태가 확정된 후에만 추천 데이터 로드
+      if (status !== 'loading') {
+        loadRecommendedCities(0, session)
+      }
     }
-  }, [selectedRegion, selectedCategory, loadFilteredAttractions, loadRecommendedCities])
+  }, [selectedRegion, selectedCategory, status, session, loadFilteredAttractions, loadRecommendedCities])
 
   // 필터 패널 외부 클릭 시 닫기
   useEffect(() => {
