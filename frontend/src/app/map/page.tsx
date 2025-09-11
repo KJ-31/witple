@@ -2318,7 +2318,10 @@ export default function MapPage() {
                   </h2>
                   {selectedItineraryPlaces.length > 0 && (
                     <button
-                      onClick={() => setShowItinerary(true)}
+                      onClick={() => {
+                        setShowItinerary(true)
+                        setSelectedCategory(null)
+                      }}
                       className="flex items-center space-x-1 px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full transition-colors text-sm text-[#6FA0E6] hover:text-white"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
