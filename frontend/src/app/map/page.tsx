@@ -234,9 +234,9 @@ export default function MapPage() {
     setSelectedItineraryPlaces(prev => [...prev, newPlace])
     
     // 선택 상태 초기화 (하이라이트와 검색 결과는 유지)
-    setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
+    // setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
     setSelectedPlaceDetail(null)
-    setCategoryPlaces([]) // 검색 결과는 유지해서 계속 다른 장소들을 추가할 수 있게 함
+    // setCategoryPlaces([]) // 검색 결과는 유지해서 계속 다른 장소들을 추가할 수 있게 함
     
     // 성공 메시지
     updateStatus(`${place.name}이 ${targetDay}일차에 추가되었습니다!`, 'success')
@@ -627,7 +627,8 @@ export default function MapPage() {
       // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
       fetchNearbyPlaces(selectedCategory)
     }
-  }, [selectedCategory, showItinerary, fetchNearbyPlaces])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, showItinerary]) // fetchNearbyPlaces 의존성 제거로 장소 추가 시 재실행 방지
 
   // 초기에는 아무 카테고리도 선택되지 않은 상태로 시작
 
