@@ -15,6 +15,7 @@ interface GoogleMapProps {
     category?: string
   }>
   onMapLoad?: (map: any) => void
+  onMarkerClick?: (markerId: string, markerType: string) => void
 }
 
 // 카테고리별 아이콘 매핑
@@ -35,7 +36,8 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   center = { lat: 37.5665, lng: 126.9780 },
   zoom = 13,
   markers = [],
-  onMapLoad
+  onMapLoad,
+  onMarkerClick
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
@@ -178,15 +180,12 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
           }
         })
 
-        if (markerData.title) {
-          const infoWindow = new (window as any).google.maps.InfoWindow({
-            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
-          })
-
-          marker.addListener('click', () => {
-            infoWindow.open(map, marker)
-          })
-        }
+        // 마커 클릭 이벤트 추가
+        marker.addListener('click', () => {
+          if (onMarkerClick && markerData.id) {
+            onMarkerClick(markerData.id, markerData.type || 'category')
+          }
+        })
 
         categoryMarkersRef.current.push(marker)
       })

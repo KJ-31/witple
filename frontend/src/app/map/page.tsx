@@ -1870,6 +1870,13 @@ export default function MapPage() {
           zoom={13}
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
+          onMarkerClick={(markerId, markerType) => {
+            if (markerType === 'category') {
+              // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
+              fetchPlaceDetail(markerId)
+              setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
+            }
+          }}
         />
       </div>
 
