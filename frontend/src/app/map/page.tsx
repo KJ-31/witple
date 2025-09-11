@@ -1874,12 +1874,17 @@ export default function MapPage() {
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
-          onMarkerClick={(markerId, markerType) => {
+          onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
               setSelectedMarkerId(markerId)
               fetchPlaceDetail(markerId)
-              setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
+              setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+              
+              // 클릭한 마커를 지도 중앙으로 이동
+              if (position && mapInstance) {
+                mapInstance.panTo(position)
+              }
             }
           }}
         />
@@ -2608,7 +2613,12 @@ export default function MapPage() {
                       onClick={() => {
                         setSelectedMarkerId(place.id) // 선택된 마커 업데이트
                         fetchPlaceDetail(place.id)
-                        setBottomSheetHeight(viewportHeight ? viewportHeight * 0.7 : 600)
+                        setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                        
+                        // 클릭한 장소를 지도 중앙으로 이동
+                        if (place.latitude && place.longitude && mapInstance) {
+                          mapInstance.panTo({ lat: place.latitude, lng: place.longitude })
+                        }
                       }}
                     >
                       <div className="flex items-start justify-between">

@@ -15,7 +15,7 @@ interface GoogleMapProps {
     category?: string
   }>
   onMapLoad?: (map: any) => void
-  onMarkerClick?: (markerId: string, markerType: string) => void
+  onMarkerClick?: (markerId: string, markerType: string, position?: { lat: number; lng: number }) => void
   selectedMarkerIdFromParent?: string | null
 }
 
@@ -208,7 +208,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         marker.addListener('click', () => {
           if (onMarkerClick && markerData.id) {
             // 부모 컴포넌트에만 알리고, 마커 크기 변경은 useEffect에서 처리
-            onMarkerClick(markerData.id, markerData.type || 'category')
+            onMarkerClick(markerData.id, markerData.type || 'category', markerData.position)
           }
         })
 
