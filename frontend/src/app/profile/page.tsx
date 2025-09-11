@@ -896,6 +896,24 @@ export default function ProfilePage() {
     setDeletingSavedLocationId(null)
   }
 
+  // 저장된 장소 클릭 핸들러
+  const handleSavedLocationClick = (location: any) => {
+    // places 필드에서 table_name:table_id 파싱
+    const [tableName, id] = location.places.split(':')
+    
+    // attraction 페이지에서 지원하는 모든 카테고리
+    const supportedCategories = [
+      'attractions', 'nature', 'restaurants', 'shopping', 
+      'accommodation', 'humanities', 'leisure_sports'
+    ]
+    
+    if (supportedCategories.includes(tableName)) {
+      router.push(`/attraction/${tableName}_${id}`)
+    } else {
+      showToast('해당 장소의 상세 정보를 찾을 수 없습니다.', 'error')
+    }
+  }
+
   // 여행 삭제 함수
   const handleDeleteTrip = async (tripId: number) => {
     try {
@@ -1172,8 +1190,8 @@ export default function ProfilePage() {
               </div>
             ) : (
               savedLocations.map((location) => (
-                <div key={location.id} className="bg-gray-800 rounded-2xl overflow-hidden">
-                  <div className="flex">
+                <div key={location.id} className="bg-gray-800 overflow-hidden">
+                  <div className="flex h-24 cursor-pointer hover:bg-gray-700 transition-colors" onClick={() => handleSavedLocationClick(location)}>
                     {/* 썸네일 이미지 */}
                     <div className="w-24 h-24 flex-shrink-0 bg-gray-700">
                       {(location.image || location.imageUrl) ? (
@@ -1203,15 +1221,15 @@ export default function ProfilePage() {
                     </div>
                     
                     {/* 콘텐츠 영역 */}
-                    <div className="flex-1 p-4 flex items-start justify-between min-w-0">
+                    <div className="flex-1 p-3 flex items-center justify-between min-w-0">
                       <div className="flex-1 min-w-0 pr-2">
-                        <h3 className="text-white font-semibold mb-1 truncate">{location.name}</h3>
-                        <p className="text-gray-300 text-sm mb-2 truncate">
+                        <h3 className="text-white font-semibold mb-0.5 truncate text-sm">{location.name}</h3>
+                        <p className="text-gray-300 text-xs mb-1 truncate">
                           {location.address || '주소 정보 없음'}
                         </p>
                         
                         {/* 카테고리와 평점, 날짜 */}
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
                             {location.category && (
                               <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full">
@@ -1242,7 +1260,10 @@ export default function ProfilePage() {
                       
                       {/* 삭제 버튼 */}
                       <button 
-                        onClick={() => confirmDeleteSavedLocation(location.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          confirmDeleteSavedLocation(location.id)
+                        }}
                         className="text-red-400 hover:text-red-300 transition-colors p-1 flex-shrink-0"
                         title="저장된 장소 삭제"
                       >
