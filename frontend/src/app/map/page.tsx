@@ -1793,7 +1793,9 @@ export default function MapPage() {
                   // 다른 카테고리를 클릭하면 해당 카테고리 활성화하고 장소찾기 모드로
                   setSelectedCategory(category.key)
                   setShowItinerary(false)
-                  // 해당 카테고리로 1km 반경 검색
+                  // 기존 카테고리 장소와 마커를 먼저 초기화
+                  setCategoryPlaces([])
+                  // 해당 카테고리로 5km 반경 검색
                   fetchNearbyPlaces(category.key)
                 }
               }}
@@ -2098,6 +2100,8 @@ export default function MapPage() {
                     <button
                       onClick={() => {
                         setShowItinerary(false)
+                        // 기존 카테고리 장소와 마커를 먼저 초기화
+                        setCategoryPlaces([])
                         // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
                         fetchNearbyPlaces(selectedCategory)
                       }}
