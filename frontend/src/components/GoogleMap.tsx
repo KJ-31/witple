@@ -138,13 +138,16 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       itineraryMarkersRef.current = []
 
       itineraryMarkers.forEach((markerData) => {
+        const isSelected = selectedMarkerId === markerData.id
+        const scale = isSelected ? 12 : 8 // 선택된 마커는 1.5배 크기
+
         const marker = new (window as any).google.maps.Marker({
           position: markerData.position,
           map,
           title: markerData.title || '',
           icon: {
             path: (window as any).google.maps.SymbolPath.CIRCLE,
-            scale: 8,
+            scale: scale,
             fillColor: '#FF6B6B', // 일정 마커는 빨간색
             fillOpacity: 1,
             strokeColor: '#ffffff',
@@ -152,20 +155,26 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
           }
         })
 
-        if (markerData.title) {
-          const infoWindow = new (window as any).google.maps.InfoWindow({
-            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
-          })
-
-          marker.addListener('click', () => {
-            infoWindow.open(map, marker)
+        // 마커 인스턴스와 카테고리 정보 저장 (일정 마커용)
+        if (markerData.id) {
+          markerInstancesRef.current.set(markerData.id, {
+            marker: marker,
+            category: 'itinerary' // 일정 마커 표시
           })
         }
+
+        // 마커 클릭 이벤트 추가
+        marker.addListener('click', () => {
+          if (onMarkerClick && markerData.id) {
+            // 부모 컴포넌트에 일정 마커 클릭 알림
+            onMarkerClick(markerData.id, markerData.type || 'itinerary', markerData.position)
+          }
+        })
 
         itineraryMarkersRef.current.push(marker)
       })
     }
-  }, [map, itineraryMarkers])
+  }, [map, itineraryMarkers, selectedMarkerId])
 
   // 카테고리 마커 관리
   useEffect(() => {
@@ -224,8 +233,21 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       if (selectedMarkerId) {
         const prevMarkerInfo = markerInstancesRef.current.get(selectedMarkerId)
         if (prevMarkerInfo) {
-          const prevIcon = getCategoryIcon(prevMarkerInfo.category)
-          prevMarkerInfo.marker.setIcon(createMarkerIcon(prevIcon, false))
+          if (prevMarkerInfo.category === 'itinerary') {
+            // 일정 마커인 경우 (빨간색 원)
+            prevMarkerInfo.marker.setIcon({
+              path: (window as any).google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: '#FF6B6B',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            })
+          } else {
+            // 카테고리 마커인 경우 (이모티콘)
+            const prevIcon = getCategoryIcon(prevMarkerInfo.category)
+            prevMarkerInfo.marker.setIcon(createMarkerIcon(prevIcon, false))
+          }
         }
       }
 
@@ -233,8 +255,21 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
       if (selectedMarkerIdFromParent) {
         const newMarkerInfo = markerInstancesRef.current.get(selectedMarkerIdFromParent)
         if (newMarkerInfo) {
-          const newIcon = getCategoryIcon(newMarkerInfo.category)
-          newMarkerInfo.marker.setIcon(createMarkerIcon(newIcon, true))
+          if (newMarkerInfo.category === 'itinerary') {
+            // 일정 마커인 경우 (빨간색 원)
+            newMarkerInfo.marker.setIcon({
+              path: (window as any).google.maps.SymbolPath.CIRCLE,
+              scale: 12, // 1.5배 크기
+              fillColor: '#FF6B6B',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2
+            })
+          } else {
+            // 카테고리 마커인 경우 (이모티콘)
+            const newIcon = getCategoryIcon(newMarkerInfo.category)
+            newMarkerInfo.marker.setIcon(createMarkerIcon(newIcon, true))
+          }
         }
       }
 
