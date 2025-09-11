@@ -1411,6 +1411,7 @@ export default function MapPage() {
     }
 
     const newRenderers = [];
+    let bounds = new (window as any).google.maps.LatLngBounds();
 
     for (let i = 0; i < allResults.length; i++) {
       const result = allResults[i];
@@ -1423,7 +1424,7 @@ export default function MapPage() {
           strokeOpacity: 0.8
         },
         suppressMarkers: i > 0,
-        preserveViewport: i > 0
+        preserveViewport: true // 모든 경로에서 뷰포트 유지
       });
 
       renderer.setDirections(result);
@@ -1431,10 +1432,23 @@ export default function MapPage() {
         renderer.setMap(mapInstance);
       }
       newRenderers.push(renderer);
+
+      // 각 경로의 바운딩 박스를 전체 바운딩 박스에 추가
+      const route = result.routes[0];
+      if (route && route.bounds) {
+        bounds.union(route.bounds);
+      }
     }
 
     setDirectionsRenderers(newRenderers);
     await createSequenceMarkers(segments, isOptimized);
+
+    // 전체 경로가 보이도록 지도 뷰 조정
+    if (mapInstance && bounds && !bounds.isEmpty()) {
+      mapInstance.fitBounds(bounds, {
+        padding: 50 // 경로 주변에 여백 추가
+      });
+    }
 
     // 구간 정보를 상태에 저장
     setRouteSegments(segmentDetails);
