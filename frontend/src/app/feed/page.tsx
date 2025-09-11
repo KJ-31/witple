@@ -131,7 +131,7 @@ export default function FeedPage() {
       {/* Floating Create Post Button */}
       <button
         onClick={handleCreatePost}
-        className="fixed bottom-24 right-6 z-50 w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center shadow-lg transition-colors"
+        className="fixed bottom-40 right-6 z-50 w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center shadow-lg transition-colors"
       >
         <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
