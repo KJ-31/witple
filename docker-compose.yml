@@ -1,29 +1,29 @@
 services:
   # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: witple_postgres
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - witple_network
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    container_name: witple_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - witple_network
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: witple_postgres
+  #   environment:
+  #     POSTGRES_DB: ${POSTGRES_DB}
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+  #   networks:
+  #     - witple_network
+  # Redis Cache (AWS ElastiCache 사용 시 주석 처리)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: witple_redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - witple_network
   # Backend (FastAPI)
   backend:
     build:
@@ -34,14 +34,14 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=${REDIS_URL}
       - ENVIRONMENT=development
       - AWS_REGION=${AWS_REGION}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    depends_on:
-      - redis
+    # depends_on:
+    #   - redis
     volumes:
       - ./backend:/app
       - ~/.aws:/root/.aws:ro

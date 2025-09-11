@@ -7,10 +7,10 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # 데이터베이스 설정
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # Redis 설정
-    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_URL: str = os.getenv("REDIS_URL", "")
 
     # JWT 설정
     SECRET_KEY: str = "your-secret-key-here"
