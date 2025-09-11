@@ -28,6 +28,29 @@ export default function CreatePostPage() {
   const [showSearchResults, setShowSearchResults] = useState(false)
   const locationInputRef = useRef<HTMLInputElement>(null)
 
+  // 토스트 메시지 상태
+  const [toast, setToast] = useState<{
+    show: boolean
+    message: string
+    type: 'success' | 'error' | 'info'
+  }>({
+    show: false,
+    message: '',
+    type: 'info'
+  })
+
+  // 토스트 메시지 함수들
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ show: true, message, type })
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'info' })
+    }, 3000) // 3초 후 자동 사라짐
+  }
+
+  const hideToast = () => {
+    setToast({ show: false, message: '', type: 'info' })
+  }
+
   // 외부 클릭시 드롭다운 닫기
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -276,8 +299,10 @@ export default function CreatePostPage() {
       const result = await response.json()
       console.log('포스트 생성 성공:', result)
 
-      alert('포스트가 성공적으로 업로드되었습니다!')
-      router.push('/feed')
+      showToast('포스트가 성공적으로 업로드되었습니다!', 'success')
+      setTimeout(() => {
+        router.push('/feed')
+      }, 1500) // 토스트가 보인 후 피드로 이동
     } catch (error: any) {
       console.error('=== UPLOAD ERROR ===');
       console.error('Error type:', typeof error);
@@ -286,7 +311,7 @@ export default function CreatePostPage() {
       console.error('Error stack:', error.stack);
       console.error('Full error object:', error);
 
-      alert(`업로드 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`)
+      showToast(`업로드 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`, 'error')
       console.error('Upload error:', error)
     } finally {
       setIsUploading(false)
@@ -624,6 +649,52 @@ export default function CreatePostPage() {
             <div className="flex items-center justify-center space-x-2">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-400"></div>
               <span className="text-gray-300">업로드 중...</span>
+            </div>
+          </div>
+        )}
+
+        {/* 토스트 메시지 */}
+        {toast.show && (
+          <div className={`fixed top-20 left-4 right-4 z-50 p-4 rounded-2xl backdrop-blur-sm transition-all duration-300 transform ${
+            toast.show ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0'
+          } ${
+            toast.type === 'success' ? 'bg-green-900/90 text-green-100 border border-green-700/50' :
+            toast.type === 'error' ? 'bg-red-900/90 text-red-100 border border-red-700/50' :
+            'bg-blue-900/90 text-blue-100 border border-blue-700/50'
+          }`}>
+            <div className="flex items-center space-x-3">
+              {toast.type === 'success' && (
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              )}
+              {toast.type === 'error' && (
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              )}
+              {toast.type === 'info' && (
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium">{toast.message}</p>
+              </div>
+              <button
+                onClick={hideToast}
+                className="flex-shrink-0 text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
           </div>
         )}
