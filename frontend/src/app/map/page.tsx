@@ -239,6 +239,17 @@ export default function MapPage() {
     
     // 새로운 장소 객체 생성 (SelectedPlace 인터페이스에 맞춤)
     // 원본 데이터에서 table_name과 id 추출
+    // 원본 ID에서 접두사 제거하여 숫자만 추출
+    const rawOriginalId = (place.id ?? '').toString()
+    let parsedOriginalId = rawOriginalId
+    if (rawOriginalId.includes('_')) {
+      const idParts = rawOriginalId.split('_')
+      if (idParts[0] === 'leisure' && idParts[1] === 'sports' && idParts.length >= 3) {
+        parsedOriginalId = idParts[2]
+      } else {
+        parsedOriginalId = idParts[idParts.length - 1]
+      }
+    }
     const newPlace: SelectedPlace = {
       id: `place_${Date.now()}`, // 임시 디스플레이용 ID
       name: place.name || '',
@@ -252,7 +263,7 @@ export default function MapPage() {
       // 원본 DB 정보 저장 (저장 시 사용)
       originalData: {
         table_name: place.table_name || selectedCategory || place.category, // API에서 온 table_name 또는 현재 선택된 카테골0리
-        id: place.id.toString() // 원본 DB ID
+        id: parsedOriginalId // 원본 DB ID (접두사 제거된 숫자)
       }
     }
 
@@ -3098,10 +3109,21 @@ export default function MapPage() {
                       const placesWithLockStatus = selectedItineraryPlaces.map((place, index) => {
                         // 새로 추가된 장소인지 확인
                         if (place.id.startsWith('place_') && place.originalData) {
+                          // originalData.id가 만약 "{table_name}_123" 형태라면 숫자만 추출
+                          const rawOriginalId = (place.originalData.id ?? '').toString()
+                          const cleanedOriginalId = rawOriginalId.includes('_')
+                            ? ((): string => {
+                                const parts = rawOriginalId.split('_')
+                                if (parts[0] === 'leisure' && parts[1] === 'sports' && parts.length >= 3) {
+                                  return parts[2]
+                                }
+                                return parts[parts.length - 1]
+                              })()
+                            : rawOriginalId
                           // 새로 추가된 장소: 원본 DB 정보 사용
                           return {
                             table_name: place.originalData.table_name,
-                            id: place.originalData.id,
+                            id: cleanedOriginalId,
                             dayNumber: place.dayNumber,
                             order: index + 1, // 순서는 배열 인덱스 기반
                             isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
