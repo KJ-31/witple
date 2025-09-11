@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useState, memo } from 'react'
+import React, { useEffect, useRef, useState, memo, useMemo } from 'react'
 import { Loader } from '@googlemaps/js-api-loader'
 
 interface GoogleMapProps {
@@ -11,6 +11,7 @@ interface GoogleMapProps {
     position: { lat: number; lng: number }
     title?: string
     id?: string
+    type?: 'itinerary' | 'category'
   }>
   onMapLoad?: (map: any) => void
 }
@@ -25,7 +26,19 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
   const [isLoaded, setIsLoaded] = useState(false)
-  const markersRef = useRef<any[]>([])
+  const itineraryMarkersRef = useRef<any[]>([])
+  const categoryMarkersRef = useRef<any[]>([])
+
+  // 마커를 타입별로 분리 (메모이제이션으로 최적화)
+  const itineraryMarkers = useMemo(() => {
+    const filtered = markers.filter(m => m.type === 'itinerary')
+    return filtered
+  }, [JSON.stringify(markers.filter(m => m.type === 'itinerary'))])
+  
+  const categoryMarkers = useMemo(() => {
+    const filtered = markers.filter(m => m.type === 'category')
+    return filtered
+  }, [JSON.stringify(markers.filter(m => m.type === 'category'))])
 
   useEffect(() => {
     const initMap = async () => {
@@ -80,46 +93,86 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
     }
   }, [center, zoom, map, onMapLoad])
 
+  // 일정 마커 관리
   useEffect(() => {
     if (map && (window as any).google) {
-      // 기존 마커 제거
-      markersRef.current.forEach(marker => marker.setMap(null))
-      markersRef.current = []
+      // 기존 일정 마커 제거
+      itineraryMarkersRef.current.forEach(marker => marker.setMap(null))
+      itineraryMarkersRef.current = []
 
-      if (markers.length > 0) {
-        markers.forEach((markerData) => {
-          const marker = new (window as any).google.maps.Marker({
-            position: markerData.position,
-            map,
-            title: markerData.title || '',
-            icon: {
-              path: (window as any).google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: '#3E68FF',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 2
-            }
-          })
-
-          if (markerData.title) {
-            const infoWindow = new (window as any).google.maps.InfoWindow({
-              content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
-            })
-
-            marker.addListener('click', () => {
-              infoWindow.open(map, marker)
-            })
+      itineraryMarkers.forEach((markerData) => {
+        const marker = new (window as any).google.maps.Marker({
+          position: markerData.position,
+          map,
+          title: markerData.title || '',
+          icon: {
+            path: (window as any).google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#FF6B6B', // 일정 마커는 빨간색
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
           }
-
-          markersRef.current.push(marker)
         })
 
-        // 마커들이 있을 때만 bounds 조정
-        const bounds = new (window as any).google.maps.LatLngBounds()
-        markers.forEach(marker => bounds.extend(marker.position))
-        map.fitBounds(bounds)
-      }
+        if (markerData.title) {
+          const infoWindow = new (window as any).google.maps.InfoWindow({
+            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
+          })
+
+          marker.addListener('click', () => {
+            infoWindow.open(map, marker)
+          })
+        }
+
+        itineraryMarkersRef.current.push(marker)
+      })
+    }
+  }, [map, itineraryMarkers])
+
+  // 카테고리 마커 관리
+  useEffect(() => {
+    if (map && (window as any).google) {
+      // 기존 카테고리 마커 제거
+      categoryMarkersRef.current.forEach(marker => marker.setMap(null))
+      categoryMarkersRef.current = []
+
+      categoryMarkers.forEach((markerData) => {
+        const marker = new (window as any).google.maps.Marker({
+          position: markerData.position,
+          map,
+          title: markerData.title || '',
+          icon: {
+            path: (window as any).google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#3E68FF', // 카테고리 마커는 파란색
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        })
+
+        if (markerData.title) {
+          const infoWindow = new (window as any).google.maps.InfoWindow({
+            content: `<div style="color: #000; font-weight: 500;">${markerData.title}</div>`
+          })
+
+          marker.addListener('click', () => {
+            infoWindow.open(map, marker)
+          })
+        }
+
+        categoryMarkersRef.current.push(marker)
+      })
+    }
+  }, [map, categoryMarkers])
+
+  // 지도 영역 조정 (모든 마커가 보이도록)
+  useEffect(() => {
+    if (map && markers.length > 0) {
+      const bounds = new (window as any).google.maps.LatLngBounds()
+      markers.forEach(marker => bounds.extend(marker.position))
+      map.fitBounds(bounds)
     }
   }, [map, markers])
 

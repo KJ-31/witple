@@ -825,27 +825,38 @@ export default function MapPage() {
     setMapInstance(mapInstanceParam)
   }, [])
 
-  // 지도 마커 데이터 생성
+  // 지도 마커 데이터 생성 - 일정 마커는 항상 유지
   const mapMarkers = useMemo(() => {
-    if (showItinerary && selectedItineraryPlaces.length > 0) {
-      return selectedItineraryPlaces
+    const markers = []
+    
+    // 선택된 일정 장소들은 항상 표시 (모든 모드에서)
+    if (selectedItineraryPlaces.length > 0) {
+      const itineraryMarkers = selectedItineraryPlaces
         .filter(place => place.latitude && place.longitude)
         .map(place => ({
           position: { lat: place.latitude!, lng: place.longitude! },
           title: place.name,
-          id: place.id
+          id: place.id,
+          type: 'itinerary' as const // 일정 마커 구분
         }))
-    } else if (!showItinerary && categoryPlaces.length > 0) {
-      return categoryPlaces
-        .filter(place => place.latitude && place.longitude)
-        .map(place => ({
-          position: { lat: place.latitude!, lng: place.longitude! },
-          title: place.name,
-          id: place.id
-        }))
+      markers.push(...itineraryMarkers)
     }
-    return []
-  }, [showItinerary, selectedItineraryPlaces, categoryPlaces])
+    
+    // 장소찾기 모드에서만 카테고리 장소들 추가
+    if (!showItinerary && categoryPlaces.length > 0) {
+      const categoryMarkers = categoryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id,
+          type: 'category' as const // 카테고리 마커 구분
+        }))
+      markers.push(...categoryMarkers)
+    }
+    
+    return markers
+  }, [selectedItineraryPlaces, showItinerary, categoryPlaces])
 
   // 유틸리티 함수
   const handleBack = () => router.back()
