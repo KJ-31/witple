@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { GoogleMap } from '@/components'
 import { saveTrip, updateTrip } from '@/app/api'
 
-type CategoryKey = 'all' | 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
+type CategoryKey = 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 interface SelectedPlace {
   id: string
   name: string
@@ -25,6 +25,10 @@ interface SelectedPlace {
   isPinned?: boolean
   latitude?: number
   longitude?: number
+  originalData?: {
+    table_name: string
+    id: string
+  }
 }
 
 interface AttractionData {
@@ -66,7 +70,7 @@ export default function MapPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
+  const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [bottomSheetHeight, setBottomSheetHeight] = useState(320)
   const [isDragging, setIsDragging] = useState(false)
   const [startY, setStartY] = useState(0)
@@ -109,6 +113,9 @@ export default function MapPage() {
   const [categoryLoading, setCategoryLoading] = useState(false)
   // 일정이 있으면 처음부터 일정을 보여줌
   const [showItinerary, setShowItinerary] = useState(!!placesParam)
+  // 상세 정보 모달 상태
+  const [selectedPlaceDetail, setSelectedPlaceDetail] = useState<AttractionData | null>(null)
+  const [placeDetailLoading, setPlaceDetailLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
@@ -126,6 +133,9 @@ export default function MapPage() {
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
   const dragRef = useRef<HTMLDivElement>(null)
+  const bottomSheetContentRef = useRef<HTMLDivElement>(null)
+  const categoryListScrollRef = useRef<HTMLDivElement>(null)
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number>(0)
   
   // 날짜 수정 모달 상태
   const [dateEditModal, setDateEditModal] = useState({
@@ -175,6 +185,88 @@ export default function MapPage() {
     message: string
     type: 'success' | 'error'
   }>({ show: false, message: '', type: 'success' })
+
+  // 선택된 마커 ID 상태 (지도와 동기화)
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
+
+
+  // 장소 선택 상태 확인 함수
+  const isPlaceInItinerary = (placeId: string): boolean => {
+    return selectedItineraryPlaces.some(p => {
+      // 원본 데이터의 ID로 비교 (새로 추가된 장소)
+      if (p.originalData && p.originalData.id === placeId) {
+        return true
+      }
+      // 기존 ID 비교
+      return p.id.includes(placeId)
+    })
+  }
+
+  // 장소를 일정에 추가/제거하는 함수
+  const addPlaceToItinerary = (place: any) => {
+    if (!place || !place.latitude || !place.longitude) {
+      console.error('유효하지 않은 장소 데이터:', place)
+      return
+    }
+    
+    // 이미 일정에 있는 장소인지 확인
+    if (isPlaceInItinerary(place.id)) {
+      // 일정에서 제거
+      setSelectedItineraryPlaces(prev => prev.filter(p => {
+        if (p.originalData && p.originalData.id === place.id) {
+          return false
+        }
+        return !p.id.includes(place.id)
+      }))
+      
+      updateStatus(`${place.name}이 일정에서 제거되었습니다.`, 'success')
+      return
+    }
+    
+    // 디버깅: 원본 데이터 구조 확인
+    console.log('추가할 장소 데이터:', place)
+
+    // 현재 일정들을 일차별로 그룹핑
+    const currentGroupedPlaces = selectedItineraryPlaces.reduce<{[key: number]: SelectedPlace[]}>((acc, p) => {
+      const day = p.dayNumber || 1
+      if (!acc[day]) acc[day] = []
+      acc[day].push(p)
+      return acc
+    }, {})
+    
+    // 추가할 일차 결정: 하이라이트된 일차가 있으면 그 일차, 없으면 1일차
+    const targetDay = highlightedDay || 1
+    
+    // 새로운 장소 객체 생성 (SelectedPlace 인터페이스에 맞춤)
+    // 원본 데이터에서 table_name과 id 추출
+    const newPlace: SelectedPlace = {
+      id: `place_${Date.now()}`, // 임시 디스플레이용 ID
+      name: place.name || '',
+      category: place.category || 'attraction',
+      rating: 0,
+      description: place.overview || place.description || '',
+      dayNumber: targetDay,
+      address: place.address,
+      latitude: parseFloat(place.latitude),
+      longitude: parseFloat(place.longitude),
+      // 원본 DB 정보 저장 (저장 시 사용)
+      originalData: {
+        table_name: place.table_name || selectedCategory || place.category, // API에서 온 table_name 또는 현재 선택된 카테골0리
+        id: place.id.toString() // 원본 DB ID
+      }
+    }
+
+    // 일정에 추가
+    setSelectedItineraryPlaces(prev => [...prev, newPlace])
+    
+    // 선택 상태 초기화 (하이라이트와 검색 결과는 유지)
+    // setHighlightedDay(null) // 하이라이트는 유지해서 어느 일차에 추가됐는지 보여줌
+    setSelectedPlaceDetail(null)
+    // setCategoryPlaces([]) // 검색 결과는 유지해서 계속 다른 장소들을 추가할 수 있게 함
+    
+    // 성공 메시지
+    updateStatus(`${place.name}이 ${targetDay}일차에 추가되었습니다!`, 'success')
+  }
 
   
   // 장소별 잠금 상태 관리
@@ -443,61 +535,131 @@ export default function MapPage() {
     }
   }, [tripIdParam, isFromProfile, editTitle, editDescription, selectedItineraryPlaces, startDateParam, endDateParam, daysParam, lockedPlaces])
 
-  // 카테고리별 장소 가져오기
-  const fetchPlacesByCategory = useCallback(async (category: CategoryKey) => {
+  // 선택한 장소 기준 주변 장소 검색
+  const fetchNearbyPlaces = useCallback(async (categoryFilter?: string | null) => {
     try {
       setCategoryLoading(true)
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      let url = `${API_BASE_URL}/api/v1/attractions/search?q=&limit=50`
+      console.log('fetchNearbyPlaces 호출됨:', { categoryFilter, selectedItineraryPlacesCount: selectedItineraryPlaces.length })
       
-      // category 매개변수 대신 검색어로 카테고리 처리
-      if (category !== 'all') {
-        // 카테고리별 검색어 매핑
-        const categorySearchMap: { [key in CategoryKey]: string } = {
-          'all': '',
-          'nature': '자연',
-          'restaurants': '맛집',
-          'shopping': '쇼핑',
-          'accommodation': '숙박',
-          'humanities': '인문',
-          'leisure_sports': '레저'
-        }
-        
-        const searchTerm = categorySearchMap[category] || ''
-        if (searchTerm) {
-          url = `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchTerm)}&limit=50`
-        }
+      if (selectedItineraryPlaces.length === 0) {
+        console.log('주변 장소 검색: 선택된 일정 장소가 없습니다.')
+        setCategoryPlaces([])
+        return
       }
       
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500`
+      
+      // 선택한 장소들의 정보를 준비
+      const selectedPlacesData = selectedItineraryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          id: place.id,
+          name: place.name,
+          latitude: place.latitude,
+          longitude: place.longitude
+        }))
+      
+      console.log('주변 장소 검색 요청:', {
+        url,
+        categoryFilter,
+        selectedPlacesCount: selectedPlacesData.length,
+        selectedPlaces: selectedPlacesData.slice(0, 2) // 첫 2개만 로그
+      })
+      
+      if (selectedPlacesData.length === 0) {
+        console.log('주변 장소 검색: 좌표가 있는 일정 장소가 없습니다.')
+        setCategoryPlaces([])
+        return
+      }
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(selectedPlacesData)
+      })
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       
       const data = await response.json()
-      setCategoryPlaces(data.attractions || [])
-    } catch (error) {
+      let places = data.attractions || []
+      
+      // 카테고리 필터 적용
+      if (categoryFilter) {
+        places = places.filter((place: AttractionData) => place.category === categoryFilter)
+      }
+      
+      setCategoryPlaces(places)
+    } catch (error: any) {
+      console.error('주변 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
     }
+  }, [selectedItineraryPlaces])
+
+  // 장소 상세 정보 가져오기
+  const fetchPlaceDetail = useCallback(async (placeId: string) => {
+    try {
+      setPlaceDetailLoading(true)
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      
+      // 새로운 ID 형식 처리: table_name_id 형식인 경우
+      let apiUrl: string
+      if (placeId && placeId.includes('_') && !placeId.includes('undefined')) {
+        const lastUnderscoreIndex = placeId.lastIndexOf('_')
+        const tableName = placeId.substring(0, lastUnderscoreIndex)
+        const attractionId = placeId.substring(lastUnderscoreIndex + 1)
+        
+        if (tableName && attractionId && tableName !== 'undefined' && attractionId !== 'undefined') {
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${tableName}/${attractionId}`
+        } else {
+          apiUrl = `${API_BASE_URL}/api/v1/attractions/${placeId}`
+        }
+      } else {
+        apiUrl = `${API_BASE_URL}/api/v1/attractions/${placeId}`
+      }
+      
+      const response = await fetch(apiUrl)
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+      
+      const data = await response.json()
+      setSelectedPlaceDetail(data)
+    } catch (error) {
+      console.error('장소 상세 정보 로드 오류:', error)
+    } finally {
+      setPlaceDetailLoading(false)
+    }
   }, [])
 
-  // 카테고리 선택 시 장소 가져오기
+
+  // 카테고리 선택 시 주변 장소 검색 (카테고리 필터 적용)
   useEffect(() => {
     if (!showItinerary) {
-      fetchPlacesByCategory(selectedCategory)
+      // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
+      fetchNearbyPlaces(selectedCategory)
     }
-  }, [selectedCategory, showItinerary, fetchPlacesByCategory])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, showItinerary]) // fetchNearbyPlaces 의존성 제거로 장소 추가 시 재실행 방지
 
-  // 초기 로딩 시 전체 장소 가져오기 (일정 보기 모드가 아닐 때만)
-  useEffect(() => {
-    if (!placesParam) {
-      fetchPlacesByCategory('all')
-    }
-  }, [placesParam, fetchPlacesByCategory])
+  // 초기에는 아무 카테고리도 선택되지 않은 상태로 시작
 
   // 카테고리 정의
   const categories = [
-    { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
     { key: 'accommodation' as CategoryKey, name: '숙박', icon: '🏨' },
     { key: 'humanities' as CategoryKey, name: '인문', icon: '🏛️' },
     { key: 'leisure_sports' as CategoryKey, name: '레저', icon: '⚽' },
@@ -832,27 +994,39 @@ export default function MapPage() {
     setMapInstance(mapInstanceParam)
   }, [])
 
-  // 지도 마커 데이터 생성
+  // 지도 마커 데이터 생성 - 일정 마커는 항상 유지
   const mapMarkers = useMemo(() => {
-    if (showItinerary && selectedItineraryPlaces.length > 0) {
-      return selectedItineraryPlaces
+    const markers = []
+    
+    // 선택된 일정 장소들은 항상 표시 (모든 모드에서)
+    if (selectedItineraryPlaces.length > 0) {
+      const itineraryMarkers = selectedItineraryPlaces
         .filter(place => place.latitude && place.longitude)
         .map(place => ({
           position: { lat: place.latitude!, lng: place.longitude! },
           title: place.name,
-          id: place.id
+          id: place.id,
+          type: 'itinerary' as const // 일정 마커 구분
         }))
-    } else if (!showItinerary && categoryPlaces.length > 0) {
-      return categoryPlaces
-        .filter(place => place.latitude && place.longitude)
-        .map(place => ({
-          position: { lat: place.latitude!, lng: place.longitude! },
-          title: place.name,
-          id: place.id
-        }))
+      markers.push(...itineraryMarkers)
     }
-    return []
-  }, [showItinerary, selectedItineraryPlaces, categoryPlaces])
+    
+    // 장소찾기 모드에서만 카테고리 장소들 추가
+    if (!showItinerary && categoryPlaces.length > 0) {
+      const categoryMarkers = categoryPlaces
+        .filter(place => place.latitude && place.longitude)
+        .map(place => ({
+          position: { lat: place.latitude!, lng: place.longitude! },
+          title: place.name,
+          id: place.id,
+          type: 'category' as const, // 카테고리 마커 구분
+          category: place.category // 카테고리 정보 추가
+        }))
+      markers.push(...categoryMarkers)
+    }
+    
+    return markers
+  }, [selectedItineraryPlaces, showItinerary, categoryPlaces])
 
   // 유틸리티 함수
   const handleBack = () => router.back()
@@ -1418,6 +1592,7 @@ export default function MapPage() {
     }
 
     const newRenderers = [];
+    let bounds = new (window as any).google.maps.LatLngBounds();
 
     for (let i = 0; i < allResults.length; i++) {
       const result = allResults[i];
@@ -1430,7 +1605,7 @@ export default function MapPage() {
           strokeOpacity: 0.8
         },
         suppressMarkers: i > 0,
-        preserveViewport: i > 0
+        preserveViewport: true // 모든 경로에서 뷰포트 유지
       });
 
       renderer.setDirections(result);
@@ -1438,10 +1613,23 @@ export default function MapPage() {
         renderer.setMap(mapInstance);
       }
       newRenderers.push(renderer);
+
+      // 각 경로의 바운딩 박스를 전체 바운딩 박스에 추가
+      const route = result.routes[0];
+      if (route && route.bounds) {
+        bounds.union(route.bounds);
+      }
     }
 
     setDirectionsRenderers(newRenderers);
     await createSequenceMarkers(segments, isOptimized);
+
+    // 전체 경로가 보이도록 지도 뷰 조정
+    if (mapInstance && bounds && !bounds.isEmpty()) {
+      mapInstance.fitBounds(bounds, {
+        padding: 50 // 경로 주변에 여백 추가
+      });
+    }
 
     // 구간 정보를 상태에 저장
     setRouteSegments(segmentDetails);
@@ -1641,7 +1829,8 @@ export default function MapPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-white relative">
+    <>
+      <div className="min-h-screen bg-[#0B1220] text-white relative">
       {/* Header Back */}
       <div className="absolute top-4 left-4 z-50">
         <button
@@ -1687,8 +1876,21 @@ export default function MapPage() {
             <button
               key={category.key}
               onClick={() => {
-                setSelectedCategory(category.key)
-                setShowItinerary(false)
+                if (selectedCategory === category.key) {
+                  // 같은 카테고리를 다시 클릭하면 비활성화하고 내일정 모드로
+                  setSelectedCategory(null)
+                  setShowItinerary(true)
+                } else {
+                  // 다른 카테고리를 클릭하면 해당 카테고리 활성화하고 장소찾기 모드로
+                  setSelectedCategory(category.key)
+                  setShowItinerary(false)
+                  // 기존 경로 렌더링 지우기
+                  clearRoute()
+                  // 기존 카테고리 장소와 마커를 먼저 초기화
+                  setCategoryPlaces([])
+                  // 해당 카테고리로 5km 반경 검색
+                  fetchNearbyPlaces(category.key)
+                }
               }}
               className={`flex-shrink-0 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200 flex items-center space-x-1 backdrop-blur-sm ${
                 selectedCategory === category.key
@@ -1760,6 +1962,74 @@ export default function MapPage() {
           zoom={13}
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
+          selectedMarkerIdFromParent={selectedMarkerId}
+          onMarkerClick={(markerId, markerType, position) => {
+            if (markerType === 'category') {
+              // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
+              setSelectedMarkerId(markerId)
+              fetchPlaceDetail(markerId)
+              setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+              
+              // 바텀시트를 맨 위로 스크롤
+              setTimeout(() => {
+                if (bottomSheetContentRef.current) {
+                  bottomSheetContentRef.current.scrollTop = 0
+                }
+              }, 100)
+              
+              // 클릭한 마커를 지도 중앙으로 이동
+              if (position && mapInstance) {
+                mapInstance.panTo(position)
+              }
+            } else if (markerType === 'itinerary') {
+              // 일정 마커 클릭 시 - 새로 추가된 장소인지 확인
+              const itineraryPlace = selectedItineraryPlaces.find(p => p.id === markerId)
+              if (itineraryPlace) {
+                // 새로 추가된 장소는 API 호출 없이 기존 데이터 사용
+                if (markerId.startsWith('place_')) {
+                  setSelectedPlaceDetail({
+                    id: itineraryPlace.id,
+                    name: itineraryPlace.name,
+                    description: itineraryPlace.description,
+                    imageUrl: '',
+                    rating: 0,
+                    category: itineraryPlace.category,
+                    address: itineraryPlace.address || '',
+                    region: '',
+                    city: { id: '', name: '', region: '' },
+                    latitude: itineraryPlace.latitude || 0,
+                    longitude: itineraryPlace.longitude || 0
+                  })
+                } else {
+                  fetchPlaceDetail(markerId)
+                }
+                setSelectedMarkerId(markerId)
+                setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                
+                // 바텀시트를 맨 위로 스크롤
+                setTimeout(() => {
+                  if (bottomSheetContentRef.current) {
+                    bottomSheetContentRef.current.scrollTop = 0
+                  }
+                }, 100)
+                
+                // 클릭한 마커를 지도 중앙으로 이동
+                if (position && mapInstance) {
+                  mapInstance.panTo(position)
+                }
+              }
+            } else if (markerType === 'itinerary') {
+              // 일정 마커 클릭 시 바텀 시트에 상세정보 표시
+              setSelectedMarkerId(markerId)
+              fetchPlaceDetail(markerId)
+              setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+              
+              // 클릭한 마커를 지도 중앙으로 이동
+              if (position && mapInstance) {
+                mapInstance.panTo(position)
+              }
+            }
+          }}
         />
       </div>
 
@@ -1786,13 +2056,159 @@ export default function MapPage() {
 
         {/* Content */}
         <div 
+          ref={bottomSheetContentRef}
           className="overflow-y-auto overflow-x-hidden no-scrollbar relative"
           style={{ 
             height: `${bottomSheetHeight - 60}px`,
             maxHeight: `${bottomSheetHeight - 60}px`
           }}
         >
-          {showItinerary && selectedItineraryPlaces.length > 0 ? (
+          {selectedPlaceDetail ? (
+            /* 장소 상세 정보 모드 */
+            <div className="px-4 py-4">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-[#3E68FF]">장소 상세정보</h2>
+                <button
+                  onClick={() => {
+                    setSelectedPlaceDetail(null)
+                    setBottomSheetHeight(320)
+                    setSelectedMarkerId(null) // 마커 선택 해제
+                    
+                    // 이전 스크롤 위치로 복원
+                    setTimeout(() => {
+                      if (categoryListScrollRef.current) {
+                        categoryListScrollRef.current.scrollTop = savedScrollPosition
+                      }
+                    }, 100)
+                  }}
+                  className="p-2 hover:bg-[#1F3C7A]/30 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Content */}
+              {placeDetailLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Main image */}
+                  {selectedPlaceDetail.imageUrls && selectedPlaceDetail.imageUrls.length > 0 && (
+                    <div className="relative h-48 bg-gradient-to-b from-blue-600 to-purple-700 rounded-xl mb-4">
+                      <img 
+                        src={selectedPlaceDetail.imageUrls[0]} 
+                        alt={selectedPlaceDetail.name}
+                        className="w-full h-full object-cover rounded-xl"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/30 rounded-xl"></div>
+                    </div>
+                  )}
+
+                  {/* Title */}
+                  <div className="mb-4">
+                    <h1 className="text-2xl font-bold text-white mb-2">{selectedPlaceDetail.name}</h1>
+                    {selectedPlaceDetail.city?.name && (
+                      <p className="text-[#6FA0E6] text-sm">{selectedPlaceDetail.city.name}</p>
+                    )}
+                  </div>
+
+                  {/* Rating and category */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center bg-[#12345D]/50 rounded-full px-3 py-1">
+                      <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      <span className="text-white font-medium">{selectedPlaceDetail.rating}</span>
+                    </div>
+                    
+                    <div className="bg-[#1F3C7A]/30 rounded-full px-3 py-1">
+                      <span className="text-[#6FA0E6] text-sm font-medium">
+                        {getCategoryName(selectedPlaceDetail.category)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                    <p className="text-[#94A9C9] text-sm leading-relaxed">
+                      {selectedPlaceDetail.description}
+                    </p>
+                    {selectedPlaceDetail.detailedInfo && (
+                      <div className="mt-3 pt-3 border-t border-[#1F3C7A]/40">
+                        <p 
+                          className="text-[#94A9C9] text-xs leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: selectedPlaceDetail.detailedInfo.replace(/\\n/g, '<br>') }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Address */}
+                  {selectedPlaceDetail.address && (
+                    <div className="flex items-start space-x-3 bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                      <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-white text-sm font-medium mb-1">주소</p>
+                        <p className="text-[#94A9C9] text-xs">{selectedPlaceDetail.address}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Business Hours */}
+                  {(selectedPlaceDetail.businessHours || selectedPlaceDetail.usageHours) && (
+                    <div className="flex items-start space-x-3 bg-[#1F3C7A]/20 rounded-xl p-4 mb-4">
+                      <svg className="w-5 h-5 text-[#6FA0E6] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-white text-sm font-medium mb-1">운영시간</p>
+                        <p 
+                          className="text-[#94A9C9] text-xs leading-relaxed"
+                          dangerouslySetInnerHTML={{ 
+                            __html: (selectedPlaceDetail.businessHours || selectedPlaceDetail.usageHours || '').replace(/\\n/g, '<br>') 
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Day selection helper text */}
+                  {(categoryPlaces.length > 0 || selectedPlaceDetail) && (
+                    <div className="text-center mb-3">
+                      <p className="text-[#94A9C9] text-sm">
+                        {highlightedDay 
+                          ? `${highlightedDay}일차에 추가됩니다` 
+                          : '일차를 클릭해서 추가할 일차를 선택하세요'
+                        }
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Add to schedule button */}
+                  <button 
+                    className="w-full py-3 bg-[#3E68FF] hover:bg-[#3E68FF]/80 rounded-xl text-white font-medium transition-colors"
+                    onClick={() => {
+                      addPlaceToItinerary(selectedPlaceDetail)
+                    }}
+                  >
+                    + 일정에 추가{highlightedDay ? ` (${highlightedDay}일차)` : ''}
+                  </button>
+                </>
+              )}
+            </div>
+          ) : showItinerary && selectedItineraryPlaces.length > 0 ? (
             /* 일정 보기 모드 */
             <div className="px-4 py-4">
               <div className="flex items-center justify-between mb-6">
@@ -1864,7 +2280,15 @@ export default function MapPage() {
                   )}
                   {(!isFromProfile || isEditMode) && (
                     <button
-                      onClick={() => setShowItinerary(false)}
+                      onClick={() => {
+                        setShowItinerary(false)
+                        // 기존 경로 렌더링 지우기
+                        clearRoute()
+                        // 기존 카테고리 장소와 마커를 먼저 초기화
+                        setCategoryPlaces([])
+                        // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
+                        fetchNearbyPlaces(selectedCategory)
+                      }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
                       장소 찾기
@@ -2125,7 +2549,39 @@ export default function MapPage() {
                                   }
                                   e.stopPropagation();
                                   e.preventDefault();
-                                  router.push(`/attraction/${place.id}`);
+                                  // 바텀 시트에 상세정보 표시 - 새로 추가된 장소인지 확인
+                                  if (place.id.startsWith('place_')) {
+                                    // 새로 추가된 장소는 API 호출 없이 기존 데이터 사용
+                                    setSelectedPlaceDetail({
+                                      id: place.id,
+                                      name: place.name,
+                                      description: place.description,
+                                      imageUrl: '',
+                                      rating: 0,
+                                      category: place.category,
+                                      address: place.address || '',
+                                      region: '',
+                                      city: { id: '', name: '', region: '' },
+                                      latitude: place.latitude || 0,
+                                      longitude: place.longitude || 0
+                                    })
+                                  } else {
+                                    fetchPlaceDetail(place.id)
+                                  }
+                                  setSelectedMarkerId(place.id)
+                                  setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                                  
+                                  // 바텀시트를 맨 위로 스크롤
+                                  setTimeout(() => {
+                                    if (bottomSheetContentRef.current) {
+                                      bottomSheetContentRef.current.scrollTop = 0
+                                    }
+                                  }, 100)
+                                  
+                                  // 클릭한 장소를 지도 중앙으로 이동
+                                  if (place.latitude && place.longitude && mapInstance) {
+                                    mapInstance.panTo({ lat: place.latitude, lng: place.longitude })
+                                  }
                                 }}
                                 onMouseDown={(e) => e.stopPropagation()}
                               >
@@ -2309,16 +2765,19 @@ export default function MapPage() {
             </div>
           ) : (
             /* 카테고리 보기 모드 */
-            <div className="px-4 py-4">
-              {/* 카테고리 헤더 */}
-              <div className="mb-6">
+            <div className="flex flex-col h-full">
+              {/* 카테고리 헤더 - 고정 */}
+              <div className="px-4 py-4 border-b border-[#1F3C7A]/20 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-xl font-bold text-[#3E68FF]">
-                    {getCategoryName(selectedCategory)} 장소
+                    {selectedCategory ? getCategoryName(selectedCategory) : '모든'} 장소
                   </h2>
                   {selectedItineraryPlaces.length > 0 && (
                     <button
-                      onClick={() => setShowItinerary(true)}
+                      onClick={() => {
+                        setShowItinerary(true)
+                        setSelectedCategory(null)
+                      }}
                       className="flex items-center space-x-1 px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full transition-colors text-sm text-[#6FA0E6] hover:text-white"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2329,43 +2788,91 @@ export default function MapPage() {
                   )}
                 </div>
                 <p className="text-[#94A9C9] text-sm">
-                  {categoryLoading ? '로딩 중...' : `${categoryPlaces.length}개의 장소를 찾았습니다`}
+                  {categoryLoading ? '로딩 중...' : (
+                    selectedCategory ? 
+                      `${categoryPlaces.length}개의 ${categories.find(c => c.key === selectedCategory)?.name || ''} 장소를 찾았습니다` :
+                      `선택한 장소 주변 1km 내 ${categoryPlaces.length}개의 장소를 찾았습니다`
+                  )}
                 </p>
               </div>
               
-              {/* 카테고리 장소 목록 */}
+              {/* 카테고리 장소 목록 - 스크롤 가능 */}
+              <div 
+                ref={categoryListScrollRef}
+                className="flex-1 overflow-y-auto px-4 py-4"
+              >
               {categoryLoading ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
                 </div>
               ) : categoryPlaces.length > 0 ? (
                 <div className="space-y-3">
-                  {categoryPlaces.map(place => (
+                  {categoryPlaces.map(place => {
+                    const isSelected = isPlaceInItinerary(place.id)
+                    return (
                     <div
                       key={place.id}
-                      className="bg-[#1F3C7A]/20 border border-[#1F3C7A]/40 rounded-xl p-4 hover:bg-[#1F3C7A]/30 transition-colors cursor-pointer"
-                      onClick={() => router.push(`/attraction/${place.id}`)}
+                      className={`border rounded-xl p-4 transition-colors cursor-pointer ${
+                        isSelected 
+                          ? 'bg-[#3E68FF]/10 border-[#3E68FF] ring-2 ring-[#3E68FF]'
+                          : 'bg-[#1F3C7A]/20 border-[#1F3C7A]/40 hover:bg-[#1F3C7A]/30'
+                      }`}
+                      onClick={() => {
+                        // 현재 스크롤 위치 저장
+                        if (categoryListScrollRef.current) {
+                          setSavedScrollPosition(categoryListScrollRef.current.scrollTop)
+                        }
+                        
+                        setSelectedMarkerId(place.id) // 선택된 마커 업데이트
+                        fetchPlaceDetail(place.id)
+                        setBottomSheetHeight(viewportHeight ? viewportHeight * 0.4 : 400)
+                        
+                        // 바텀시트를 맨 위로 스크롤
+                        setTimeout(() => {
+                          if (bottomSheetContentRef.current) {
+                            bottomSheetContentRef.current.scrollTop = 0
+                          }
+                        }, 100)
+                        
+                        // 클릭한 장소를 지도 중앙으로 이동
+                        if (place.latitude && place.longitude && mapInstance) {
+                          mapInstance.panTo({ lat: place.latitude, lng: place.longitude })
+                        }
+                      }}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="mb-3">
                             <h3 className="font-semibold text-white text-lg mb-1">{place.name}</h3>
-                            <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full">
-                              {getCategoryName(place.category)}
-                            </span>
                           </div>
-                          <p className="text-[#94A9C9] text-sm mb-2">📍 {place.city.name}</p>
                           <p className="text-[#94A9C9] text-sm mb-3 line-clamp-2">{place.description}</p>
                           <div className="flex items-center">
+                            <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full mr-2">
+                              {getCategoryName(place.category)}
+                            </span>
                             <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                               <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                             </svg>
                             <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
                           </div>
                         </div>
+                        <button 
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ml-4 ${
+                            isSelected
+                              ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            addPlaceToItinerary(place)
+                          }}
+                        >
+                          {isSelected ? '선택됨' : `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
+                        </button>
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-8">
@@ -2373,6 +2880,7 @@ export default function MapPage() {
                   <p className="text-[#6FA0E6] text-sm">다른 카테고리를 선택해보세요</p>
                 </div>
               )}
+              </div>
             </div>
           )}
           
@@ -2583,11 +3091,43 @@ export default function MapPage() {
                     }
                     
                     try {
-                      // places에 잠금 상태 추가
-                      const placesWithLockStatus = selectedItineraryPlaces.map(place => ({
-                        ...place,
-                        isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
-                      }));
+                      // 디버깅: 현재 선택된 일정들 확인
+                      console.log('저장 전 selectedItineraryPlaces:', selectedItineraryPlaces)
+                      
+                      // 저장 형식으로 변환 (table_name, id, dayNumber, order, isLocked)
+                      const placesWithLockStatus = selectedItineraryPlaces.map((place, index) => {
+                        // 새로 추가된 장소인지 확인
+                        if (place.id.startsWith('place_') && place.originalData) {
+                          // 새로 추가된 장소: 원본 DB 정보 사용
+                          return {
+                            table_name: place.originalData.table_name,
+                            id: place.originalData.id,
+                            dayNumber: place.dayNumber,
+                            order: index + 1, // 순서는 배열 인덱스 기반
+                            isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                          }
+                        } else {
+                          // 기존 장소: 기존 ID에서 table_name과 id 추출
+                          const idParts = place.id.includes('_') ? place.id.split('_') : [place.category, place.id]
+                          let table_name = idParts.length > 1 ? idParts[0] : place.category
+                          const originalId = idParts.length > 1 ? idParts[idParts.length - 1] : place.id
+                          
+                          // leisure -> leisure_sports 매핑
+                          if (table_name === 'leisure') {
+                            table_name = 'leisure_sports'
+                          }
+                          
+                          return {
+                            table_name: table_name,
+                            id: originalId,
+                            dayNumber: place.dayNumber,
+                            order: index + 1,
+                            isLocked: lockedPlaces[`${place.id}_${place.dayNumber}`] || false
+                          }
+                        }
+                      });
+                      
+                      console.log('저장할 placesWithLockStatus:', placesWithLockStatus)
 
                       // API로 DB에 저장
                       const tripData = {
@@ -2877,6 +3417,8 @@ export default function MapPage() {
           </div>
         </div>
       )}
+
     </div>
+    </>
   )
 }
