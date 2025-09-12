@@ -1527,6 +1527,56 @@ export default function MapPage() {
     return shortName || lineName || '알 수 없음';
   };
 
+  // 구간의 주요 교통수단 색상 가져오기
+  const getSegmentTransitColor = (result: any): string => {
+    if (!result || !result.routes || !result.routes[0] || !result.routes[0].legs || !result.routes[0].legs[0]) {
+      return '#3E68FF'; // 기본 파란색
+    }
+
+    const leg = result.routes[0].legs[0];
+    const steps = leg.steps;
+    
+    if (!steps || steps.length === 0) {
+      return '#3E68FF'; // 기본 파란색
+    }
+
+    // 교통수단 스텝들만 필터링
+    const transitSteps = steps.filter((step: any) => step.transit);
+    
+    if (transitSteps.length === 0) {
+      return '#3E68FF'; // 기본 파란색 (도보만 있는 경우)
+    }
+
+    // 가장 긴 거리의 교통수단을 찾기
+    let longestTransitStep = transitSteps[0];
+    let longestDistance = 0;
+
+    transitSteps.forEach((step: any) => {
+      const distance = step.distance?.value || 0;
+      if (distance > longestDistance) {
+        longestDistance = distance;
+        longestTransitStep = step;
+      }
+    });
+
+    // 주요 교통수단의 정보 추출
+    const transitDetail = longestTransitStep.transit;
+    const vehicleType = transitDetail?.line?.vehicle?.type || '';
+    const lineName = transitDetail?.line?.name || '';
+
+    // 지하철인 경우
+    if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+      return getSubwayLineColor(lineName);
+    }
+    
+    // 버스인 경우
+    if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+      return getBusColor(lineName);
+    }
+    
+    // 기본값
+    return '#3E68FF';
+  };
 
   // 커스텀 교통수단 정보창 생성 (초기에는 숨김, 클릭시 표시)
   const createCustomTransitInfoWindows = async (allResults: any[], segmentDetails: any[]) => {
@@ -2105,25 +2155,16 @@ export default function MapPage() {
       let segmentColor = '#888888'; // 기본값: 진한 회색 (비활성화)
       let segmentOpacity = 0.7; // 기본값: 적당한 불투명도
       
-      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시
       if (activeMarkerIndex !== null) {
+        // 특정 구간이 클릭된 경우
         if (activeMarkerIndex === i) {
-          // 현재 구간이 활성화된 구간인 경우 원래 색상 사용
-          const segmentStartIndex = i;
-          const totalPoints = segments.length + 1;
-          const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
-          
-          const hue = 227;
-          const saturation = 100;
-          const startLightness = 80;
-          const endLightness = 62;
-          
-          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
-          segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          // 클릭된 구간: 교통수단 색상 사용
+          segmentColor = getSegmentTransitColor(result);
           segmentOpacity = 0.8;
         }
+        // 다른 구간들은 기본 회색으로 유지
       } else {
-        // 활성화된 마커가 없는 경우 모든 구간을 원래 색상으로 표시
+        // 아무 구간도 클릭되지 않은 경우: 그라데이션 색상 사용
         const segmentStartIndex = i;
         const totalPoints = segments.length + 1;
         const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
