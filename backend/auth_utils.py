@@ -9,6 +9,7 @@ from database import get_db
 from models import User
 from schemas import TokenData
 from config import settings
+from cache_utils import cache
 
 # bcrypt 오류 방지를 위한 안정적인 설정
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
@@ -78,10 +79,37 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         logger.error(f"예상치 못한 에러: {str(e)}")
         raise credentials_exception
     
+    # 캐시 키 생성 (이메일 기반)
+    cache_key = f"user_session:{token_data.email}"
+    
+    # 캐시에서 사용자 정보 조회 시도
+    cached_user = cache.get(cache_key)
+    if cached_user is not None:
+        logger.info(f"Cache hit for user session: {cache_key}")
+        # 캐시된 데이터를 User 객체로 변환
+        user = User(**cached_user)
+        return user
+    
+    logger.info(f"Cache miss for user session: {cache_key}")
+    
+    # DB에서 사용자 조회
     user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
         logger.error(f"사용자 찾을 수 없음: {token_data.email}")
         raise credentials_exception
+    
+    # 사용자 정보를 dict로 변환하여 캐시에 저장 (30분)
+    user_dict = {
+        "user_id": user.user_id,
+        "email": user.email,
+        "name": user.name,
+        "age": user.age,
+        "nationality": user.nationality,
+        "profile_image": user.profile_image,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None
+    }
+    cache.set(cache_key, user_dict, expire=1800)
         
     logger.info(f"사용자 인증 성공: {user.email}")
     return user
