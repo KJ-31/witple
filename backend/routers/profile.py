@@ -21,6 +21,7 @@ from schemas import (
 )
 from config import settings
 from auth_utils import get_current_user
+from cache_utils import cache
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -84,6 +85,17 @@ async def get_current_user_profile(
     current_user: User = Depends(get_current_user)
 ):
     """현재 사용자의 프로필 정보를 가져옵니다."""
+    # 캐시 키 생성
+    cache_key = f"profile:{current_user.user_id}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        logger.info(f"Cache hit for profile: {cache_key}")
+        return UserResponse(**cached_result)
+    
+    logger.info(f"Cache miss for profile: {cache_key}")
+    
     # 사용자의 여행 취향 정보도 함께 가져오기
     user_preference = db.query(UserPreference).filter(
         UserPreference.user_id == current_user.user_id
@@ -97,12 +109,15 @@ async def get_current_user_profile(
         "age": current_user.age,
         "nationality": current_user.nationality,
         "profile_image": current_user.profile_image,
-        "created_at": current_user.created_at,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "persona": user_preference.persona if user_preference else None,
         "priority": user_preference.priority if user_preference else None,
         "accommodation": user_preference.accommodation if user_preference else None,
         "exploration": user_preference.exploration if user_preference else None
     }
+    
+    # 결과를 캐시에 저장 (20분)
+    cache.set(cache_key, user_data, expire=1200)
     
     return UserResponse(**user_data)
 
@@ -124,6 +139,9 @@ async def update_profile_image(
         
         db.commit()
         db.refresh(current_user)
+        
+        # 캐시 무효화
+        cache.delete(f"profile:{current_user.user_id}")
         
         logger.info(f"Profile image updated for user: {current_user.user_id}")
         return current_user
@@ -156,6 +174,9 @@ async def update_profile_info(
         
         db.commit()
         db.refresh(current_user)
+        
+        # 캐시 무효화
+        cache.delete(f"profile:{current_user.user_id}")
         
         logger.info(f"Profile info updated for user: {current_user.user_id}")
         return current_user
@@ -200,6 +221,9 @@ async def update_profile_preferences(
         
         db.commit()
         db.refresh(current_user)
+        
+        # 캐시 무효화
+        cache.delete(f"profile:{current_user.user_id}")
         
         logger.info(f"Profile preferences updated for user: {current_user.user_id}")
         return current_user
