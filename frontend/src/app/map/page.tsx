@@ -1918,20 +1918,20 @@ export default function MapPage() {
                            i === allPoints.length - 1 ? 'END' : 
                            i.toString();
         
-        // 그라데이션 색상 계산 함수 (#3eb2ff에서 #3E68FF로 점점 진해짐)
+        // 그라데이션 색상 계산 함수 (START에서 진하게 시작해서 END로 갈수록 옅어짐)
         const getGradientColor = (index: number, total: number, isOptimized: boolean) => {
           // 모든 핀에 그라데이션 적용 (START, 1, 2, 3, 4, ..., END)
           const ratio = index / Math.max(1, total - 1);
           
-          // #3eb2ff (시작 - 연한 파랑): HSL(227, 100%, 80%)
-          // #3E68FF (끝 - 진한 파랑): HSL(227, 100%, 62%)
+          // #3E68FF (시작 - 진한 파랑): HSL(227, 100%, 62%)
+          // #3eb2ff (끝 - 연한 파랑): HSL(227, 100%, 80%)
           const hue = 227;
           const saturation = 100;
-          const startLightness = 80; // 연한 색상
-          const endLightness = 62;   // 진한 색상
+          const startLightness = 62; // 진한 색상 (START)
+          const endLightness = 80;   // 연한 색상 (END)
           
-          // ratio가 0일때 가장 밝고(80%), ratio가 1일때 가장 어둠(62%)
-          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+          // ratio가 0일때 가장 어둡고(62%), ratio가 1일때 가장 밝음(80%)
+          const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
           
           return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
         };
@@ -2174,10 +2174,10 @@ export default function MapPage() {
           
           const hue = 227;
           const saturation = 100;
-          const startLightness = 80;
-          const endLightness = 62;
+          const startLightness = 62; // 진한 색상 (START)
+          const endLightness = 80;   // 연한 색상 (END)
           
-          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+          const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
           segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
           segmentOpacity = 0.8; // 원래 불투명도
         }
@@ -2189,10 +2189,10 @@ export default function MapPage() {
         
         const hue = 227;
         const saturation = 100;
-        const startLightness = 80;
-        const endLightness = 62;
+        const startLightness = 62; // 진한 색상 (START)
+        const endLightness = 80;   // 연한 색상 (END)
         
-        const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+        const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
         segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
         segmentOpacity = 0.8;
       }
@@ -2344,10 +2344,10 @@ export default function MapPage() {
         
         const hue = 227;
         const saturation = 100;
-        const startLightness = 80;
-        const endLightness = 62;
+        const startLightness = 62; // 진한 색상 (START)
+        const endLightness = 80;   // 연한 색상 (END)
         
-        const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+        const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
         segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
         segmentOpacity = 0.8;
       }
