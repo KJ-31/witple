@@ -9,6 +9,7 @@ from database import get_db
 from models import Trip, User
 from schemas import TripCreate, TripResponse, TripListResponse, TripStatus
 from routers.auth import get_current_user
+from cache_utils import cache
 
 router = APIRouter()
 
@@ -50,6 +51,14 @@ async def get_user_trips(
     current_user: User = Depends(get_current_user)
 ):
     """사용자의 여행 목록 조회"""
+    # 캐시 키 생성 (사용자별, 필터별)
+    cache_key = f"trips:list:{current_user.user_id}:{status_filter.value if status_filter else 'all'}:{offset}:{limit}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
     query = db.query(Trip).filter(Trip.user_id == current_user.user_id)
     
     if status_filter:
@@ -82,7 +91,12 @@ async def get_user_trips(
             "created_at": trip.created_at.isoformat() if trip.created_at else None
         })
     
-    return {"trips": trips_list, "total": total}
+    result = {"trips": trips_list, "total": total}
+    
+    # 결과를 캐시에 저장 (15분)
+    cache.set(cache_key, result, expire=900)
+    
+    return result
 
 
 @router.get("/{trip_id}")
@@ -92,6 +106,14 @@ async def get_trip(
     current_user: User = Depends(get_current_user)
 ):
     """특정 여행 상세 조회"""
+    # 캐시 키 생성
+    cache_key = f"trip:detail:{current_user.user_id}:{trip_id}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
     trip = db.query(Trip).filter(
         Trip.id == trip_id,
         Trip.user_id == current_user.user_id
@@ -113,7 +135,7 @@ async def get_trip(
             place['name'] = place_name
             places.append(place)
     
-    return {
+    result = {
         "id": trip.id,
         "title": trip.title,
         "description": trip.description,
@@ -124,6 +146,11 @@ async def get_trip(
         "status_display": get_status_display(trip.status),
         "created_at": trip.created_at.isoformat() if trip.created_at else None
     }
+    
+    # 결과를 캐시에 저장 (20분)
+    cache.set(cache_key, result, expire=1200)
+    
+    return result
 
 
 @router.post("/")
@@ -201,6 +228,10 @@ async def create_trip(
         db.add(trip)
         db.commit()
         db.refresh(trip)
+        
+        # 캐시 무효화: 해당 사용자의 여행 목록 캐시 삭제
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:20")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:10")
         
         # 성공 응답 반환
         return {
@@ -300,6 +331,11 @@ async def update_trip(
         db.commit()
         db.refresh(trip)
         
+        # 캐시 무효화
+        cache.delete(f"trip:detail:{current_user.user_id}:{trip_id}")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:20")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:10")
+        
         # 성공 응답 반환 (POST와 유사한 형식)
         return {
             "message": "여행이 성공적으로 수정되었습니다.",
@@ -336,6 +372,12 @@ async def delete_trip(
     try:
         db.delete(trip)
         db.commit()
+        
+        # 캐시 무효화
+        cache.delete(f"trip:detail:{current_user.user_id}:{trip_id}")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:20")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:10")
+        
         return {"message": "여행이 삭제되었습니다."}
     
     except Exception as e:
@@ -369,6 +411,11 @@ async def update_trip_status(
         trip.status = status.value
         db.commit()
         db.refresh(trip)
+        
+        # 캐시 무효화
+        cache.delete(f"trip:detail:{current_user.user_id}:{trip_id}")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:20")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:10")
         
         return {"message": f"여행 상태가 {status.value}로 변경되었습니다."}
     

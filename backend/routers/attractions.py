@@ -978,6 +978,18 @@ async def get_filtered_attractions(
                 detail="지역을 선택해주세요."
             )
         
+        # 캐시 키 생성 (사용자별, 파라미터별)
+        user_id = str(current_user.user_id) if current_user and hasattr(current_user, 'user_id') else "anonymous"
+        cache_key = f"filtered_attractions:{user_id}:{region}:{category}:{page}:{limit}"
+        
+        # 캐시에서 조회 시도
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache hit for filtered attractions: {cache_key}")
+            return cached_result
+        
+        logger.info(f"Cache miss for filtered attractions: {cache_key}")
+        
         results = []
         
         # 로그인 상태에 따른 추천 알고리즘 적용
@@ -1092,7 +1104,7 @@ async def get_filtered_attractions(
                 }
                 results.append(formatted_attraction)
         
-        return {
+        result = {
             "attractions": results,
             "total": len(results),
             "totalAvailable": len(results),
@@ -1104,6 +1116,11 @@ async def get_filtered_attractions(
                 "category": category
             }
         }
+        
+        # 결과를 캐시에 저장 (30분)
+        cache.set(cache_key, result, expire=1800)
+        
+        return result
         
     except HTTPException:
         raise
