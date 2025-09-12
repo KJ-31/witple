@@ -133,18 +133,27 @@ async def update_profile_image(
         # 이미지를 S3에 업로드
         image_url = save_profile_image_to_s3(image_data.image_data, current_user.user_id)
         
+        # DB에서 사용자 객체를 다시 조회하여 세션에 연결
+        user = db.query(User).filter(User.user_id == current_user.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다."
+            )
+        
         # 데이터베이스 업데이트
-        current_user.profile_image = image_url
-        current_user.updated_at = datetime.utcnow()
+        user.profile_image = image_url
+        user.updated_at = datetime.utcnow()
         
         db.commit()
-        db.refresh(current_user)
+        db.refresh(user)
         
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
+        cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
         
         logger.info(f"Profile image updated for user: {current_user.user_id}")
-        return current_user
+        return user
         
     except Exception as e:
         db.rollback()
@@ -162,24 +171,33 @@ async def update_profile_info(
 ):
     """기본 프로필 정보를 업데이트합니다."""
     try:
+        # DB에서 사용자 객체를 다시 조회하여 세션에 연결
+        user = db.query(User).filter(User.user_id == current_user.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다."
+            )
+        
         # 업데이트할 필드들
         if profile_data.name is not None:
-            current_user.name = profile_data.name
+            user.name = profile_data.name
         if profile_data.age is not None:
-            current_user.age = profile_data.age
+            user.age = profile_data.age
         if profile_data.nationality is not None:
-            current_user.nationality = profile_data.nationality
+            user.nationality = profile_data.nationality
             
-        current_user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow()
         
         db.commit()
-        db.refresh(current_user)
+        db.refresh(user)
         
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
+        cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
         
         logger.info(f"Profile info updated for user: {current_user.user_id}")
-        return current_user
+        return user
         
     except Exception as e:
         db.rollback()
@@ -197,6 +215,14 @@ async def update_profile_preferences(
 ):
     """사용자 여행 취향 정보를 업데이트합니다."""
     try:
+        # DB에서 사용자 객체를 다시 조회하여 세션에 연결
+        user = db.query(User).filter(User.user_id == current_user.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다."
+            )
+        
         # 기존 preferences 찾거나 새로 생성
         user_preference = db.query(UserPreference).filter(
             UserPreference.user_id == current_user.user_id
@@ -217,16 +243,17 @@ async def update_profile_preferences(
             user_preference.exploration = preferences_data.exploration
             
         user_preference.updated_at = datetime.utcnow()
-        current_user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow()
         
         db.commit()
-        db.refresh(current_user)
+        db.refresh(user)
         
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
+        cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
         
         logger.info(f"Profile preferences updated for user: {current_user.user_id}")
-        return current_user
+        return user
         
     except Exception as e:
         db.rollback()
