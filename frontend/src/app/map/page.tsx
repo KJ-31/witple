@@ -122,6 +122,11 @@ export default function MapPage() {
   const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
   const [transitInfoWindows, setTransitInfoWindows] = useState<any[]>([])
+  const [visibleSegments, setVisibleSegments] = useState<Set<number>>(new Set())
+  const [activeMarkerIndex, setActiveMarkerIndex] = useState<number | null>(null)
+  const transitInfoWindowsRef = useRef<any[]>([])
+  const [currentSegments, setCurrentSegments] = useState<any[]>([])
+  const [isOptimizedRoute, setIsOptimizedRoute] = useState(false)
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [routeSegments, setRouteSegments] = useState<{
     origin: {lat: number, lng: number, name: string},
@@ -346,6 +351,14 @@ export default function MapPage() {
       clearInterval(interval)
     }
   }, [])
+
+  // activeMarkerIndex 변경 시 마커들 다시 생성
+  useEffect(() => {
+    if (currentSegments.length > 0 && mapInstance) {
+      console.log('activeMarkerIndex 변경됨, 마커들 다시 생성:', activeMarkerIndex);
+      createSequenceMarkers(currentSegments, isOptimizedRoute);
+    }
+  }, [activeMarkerIndex])
 
   // 바텀 시트 드래그 핸들러
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1279,12 +1292,19 @@ export default function MapPage() {
     setSequenceMarkers([]);
     
     // 모든 기존 교통수단 정보창 제거
-    transitInfoWindows.forEach(infoWindow => {
-      if (infoWindow) {
-        infoWindow.close();
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item && item.infoWindow) {
+        item.infoWindow.close();
       }
     });
     setTransitInfoWindows([]);
+    transitInfoWindowsRef.current = [];
+    
+    // 가시성 상태 초기화
+    setVisibleSegments(new Set());
+    setActiveMarkerIndex(null);
+    setCurrentSegments([]);
+    setIsOptimizedRoute(false);
     
     // 상태 메시지 제거
     setRouteStatus(null);
@@ -1488,9 +1508,16 @@ export default function MapPage() {
   };
 
 
-  // 커스텀 교통수단 정보창 생성 (줄바꿈 없는 한 줄 표시)
+  // 커스텀 교통수단 정보창 생성 (초기에는 숨김, 클릭시 표시)
   const createCustomTransitInfoWindows = async (allResults: any[], segmentDetails: any[]) => {
-    if (!mapInstance) return;
+    console.log('createCustomTransitInfoWindows 시작');
+    console.log('allResults.length:', allResults.length);
+    console.log('segmentDetails.length:', segmentDetails.length);
+    
+    if (!mapInstance) {
+      console.log('mapInstance가 없음');
+      return;
+    }
     
     const newInfoWindows: any[] = [];
     
@@ -1498,7 +1525,12 @@ export default function MapPage() {
       const result = allResults[i];
       const segment = segmentDetails[i];
       
-      if (!segment || !segment.transitDetails) continue;
+      console.log(`구간 ${i} 처리 중:`, segment);
+      
+      if (!segment || !segment.transitDetails) {
+        console.log(`구간 ${i}: 교통수단 정보 없음`);
+        continue;
+      }
       
       const route = result.routes[0];
       const leg = route.legs[0];
@@ -1587,19 +1619,104 @@ export default function MapPage() {
               zIndex: 1000
             });
             
-            infoWindow.open(mapInstance);
-            newInfoWindows.push(infoWindow);
+            // 초기에는 열지 않음 - 나중에 순차적으로 표시
+            // infoWindow.open(mapInstance);
+            
+            // 세그먼트 인덱스와 함께 저장
+            const infoWindowData = {
+              infoWindow: infoWindow,
+              segmentIndex: i
+            };
+            newInfoWindows.push(infoWindowData);
+            console.log(`구간 ${i}에 정보창 추가됨:`, infoWindowData);
           }
         }
       });
     }
     
+    console.log('생성된 총 정보창 수:', newInfoWindows.length);
+    console.log('newInfoWindows:', newInfoWindows);
     setTransitInfoWindows(newInfoWindows);
+    transitInfoWindowsRef.current = newInfoWindows;
+  };
+  
+  // 특정 구간의 교통수단 정보 표시
+  const showSegmentTransit = (segmentIndex: number) => {
+    console.log('showSegmentTransit 호출됨:', segmentIndex);
+    console.log('transitInfoWindowsRef.current:', transitInfoWindowsRef.current);
+    console.log('transitInfoWindows state:', transitInfoWindows);
+    console.log('mapInstance:', mapInstance);
+    
+    setVisibleSegments(prev => {
+      const newSet = new Set(prev);
+      newSet.add(segmentIndex);
+      return newSet;
+    });
+    
+    // 해당 구간의 정보창들을 표시 (ref 사용)
+    let foundCount = 0;
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item.segmentIndex === segmentIndex) {
+        console.log('해당 구간의 정보창 발견:', item);
+        if (item.infoWindow && mapInstance) {
+          item.infoWindow.open(mapInstance);
+          foundCount++;
+        }
+      }
+    });
+    console.log(`구간 ${segmentIndex}에서 ${foundCount}개의 정보창을 표시했습니다.`);
+  };
+
+  // 특정 구간의 교통수단 정보 숨기기
+  const hideSegmentTransit = (segmentIndex: number) => {
+    console.log('hideSegmentTransit 호출됨:', segmentIndex);
+    
+    setVisibleSegments(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(segmentIndex);
+      return newSet;
+    });
+    
+    // 해당 구간의 정보창들을 숨기기
+    let hiddenCount = 0;
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item.segmentIndex === segmentIndex) {
+        if (item.infoWindow) {
+          item.infoWindow.close();
+          hiddenCount++;
+        }
+      }
+    });
+    console.log(`구간 ${segmentIndex}에서 ${hiddenCount}개의 정보창을 숨겼습니다.`);
+  };
+
+  // 특정 구간의 경로에 지도 포커스
+  const focusOnSegment = (segmentIndex: number, segments: any[]) => {
+    if (!mapInstance || segmentIndex >= segments.length) return;
+    
+    const segment = segments[segmentIndex];
+    if (!segment) return;
+    
+    // 해당 구간의 바운딩 박스 생성
+    const bounds = new (window as any).google.maps.LatLngBounds();
+    bounds.extend({ lat: segment.origin.lat, lng: segment.origin.lng });
+    bounds.extend({ lat: segment.destination.lat, lng: segment.destination.lng });
+    
+    // 지도를 해당 구간에 맞춰서 조정 (여백 추가)
+    mapInstance.fitBounds(bounds, {
+      padding: 100 // 구간 주변에 여백 추가
+    });
+    
+    console.log(`구간 ${segmentIndex}에 지도 포커스:`, segment);
   };
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
+    
+    // segments와 optimized 상태 저장
+    setCurrentSegments(segments);
+    setIsOptimizedRoute(isOptimized);
     
     const newSequenceMarkers = [];
     const allPoints = [segments[0].origin, ...segments.map(s => s.destination)];
@@ -1616,42 +1733,78 @@ export default function MapPage() {
                            i === allPoints.length - 1 ? '#F44336' : 
                            isOptimized ? '#FF9800' : '#2196F3'; // 최적화된 경로는 주황색
         
+        // 마커 크기 계산 (활성화된 마커는 1.5배)
+        const isActive = activeMarkerIndex === i;
+        const markerSize = isActive ? 45 : 30; // 30 * 1.5 = 45
+        const markerHeight = isActive ? 60 : 40; // 40 * 1.5 = 60
+        const fontSize = isActive ? 15 : 10; // 10 * 1.5 = 15
+        const anchorY = isActive ? 60 : 40;
+        
         const marker = new (window as any).google.maps.Marker({
           position: coords,
           map: mapInstance,
           icon: {
             url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40">
-                <path d="M15 0C6.7 0 0 6.7 0 15c0 8.3 15 25 15 25s15-16.7 15-25C30 6.7 23.3 0 15 0z" fill="${markerColor}" stroke="white" stroke-width="2"/>
-                <text x="15" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white">${markerLabel}</text>
+              <svg xmlns="http://www.w3.org/2000/svg" width="${markerSize}" height="${markerHeight}" viewBox="0 0 ${markerSize} ${markerHeight}">
+                <path d="M${markerSize/2} 0C${markerSize * 0.223} 0 0 ${markerSize * 0.223} 0 ${markerSize/2}c0 ${markerSize * 0.277} ${markerSize/2} ${markerHeight - markerSize/2} ${markerSize/2} ${markerHeight - markerSize/2}s${markerSize/2}-${(markerHeight - markerSize/2) * 0.556} ${markerSize/2}-${markerHeight - markerSize/2}C${markerSize} ${markerSize * 0.223} ${markerSize * 0.777} 0 ${markerSize/2} 0z" fill="${markerColor}" stroke="white" stroke-width="2"/>
+                <text x="${markerSize/2}" y="${markerSize * 0.67}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="bold" fill="white">${markerLabel}</text>
               </svg>
             `)}`,
-            scaledSize: new (window as any).google.maps.Size(30, 40),
-            anchor: new (window as any).google.maps.Point(15, 40)
+            scaledSize: new (window as any).google.maps.Size(markerSize, markerHeight),
+            anchor: new (window as any).google.maps.Point(markerSize/2, anchorY)
           },
           title: `${i === 0 ? '출발지' : i === allPoints.length - 1 ? '목적지' : `${i}번째 경유지`}: ${allPoints[i].name}`,
-          zIndex: 1000
-        });
-
-        const infoWindow = new (window as any).google.maps.InfoWindow({
-          content: `
-            <div style="padding: 10px; text-align: center;">
-              <h4 style="margin: 0 0 5px 0; color: ${markerColor};">
-                ${i === 0 ? '🚩 출발지' : i === allPoints.length - 1 ? '🏁 목적지' : `📍 ${i}번째 경유지`}
-              </h4>
-              <p style="margin: 0; font-weight: bold;">${allPoints[i].name}</p>
-              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
-                ${i === 0 ? '여행의 시작점입니다' : 
-                  i === allPoints.length - 1 ? '최종 목적지입니다' : 
-                  `${i === 1 ? '첫 번째' : i === 2 ? '두 번째' : i === 3 ? '세 번째' : `${i}번째`} 방문할 장소입니다`}
-              </p>
-              ${isOptimized && i > 0 && i < allPoints.length - 1 ? '<p style="margin: 5px 0 0 0; font-size: 10px; color: #FF9800; font-weight: bold;">🔄 최적화된 순서</p>' : ''}
-            </div>
-          `
+          zIndex: isActive ? 1001 : 1000
         });
 
         marker.addListener('click', () => {
-          infoWindow.open(mapInstance, marker);
+          console.log(`마커 ${i} 클릭됨, 현재 activeMarkerIndex:`, activeMarkerIndex);
+          
+          // 마커 토글 처리
+          if (activeMarkerIndex === i) {
+            // 이미 활성화된 마커를 다시 클릭 → 비활성화하고 정보 숨기기
+            setActiveMarkerIndex(null);
+            
+            // 해당 구간의 교통수단 정보 숨기기
+            if (i === 0) {
+              hideSegmentTransit(0);
+            } else if (i > 0 && i < allPoints.length - 1 && i < segments.length) {
+              hideSegmentTransit(i);
+            }
+          } else {
+            // 다른 마커를 클릭 → 기존 활성화된 구간의 정보 숨기고 새 마커 활성화
+            
+            // 기존에 활성화된 구간이 있으면 해당 정보 숨기기
+            if (activeMarkerIndex !== null) {
+              if (activeMarkerIndex === 0) {
+                hideSegmentTransit(0);
+              } else if (activeMarkerIndex > 0 && activeMarkerIndex < allPoints.length - 1 && activeMarkerIndex < segments.length) {
+                hideSegmentTransit(activeMarkerIndex);
+              }
+            }
+            
+            // 새 마커 활성화
+            setActiveMarkerIndex(i);
+            
+            // START 마커이거나 숫자 마커를 클릭했을 때 해당 구간의 교통수단 정보 표시
+            if (i === 0) {
+              // START 마커 클릭 - 첫 번째 구간 (0 -> 1) 교통수단 정보 표시 및 지도 포커스
+              console.log('START 마커 클릭 - 구간 0 표시');
+              showSegmentTransit(0);
+              focusOnSegment(0, segments);
+            } else if (i > 0 && i < allPoints.length - 1) {
+              // 숫자 마커 클릭 - 해당 구간의 교통수단 정보 표시
+              if (i < segments.length) {
+                console.log(`숫자 마커 ${i} 클릭 - 구간 ${i} 표시`);
+                showSegmentTransit(i);
+                focusOnSegment(i, segments);
+              } else {
+                console.log(`구간 ${i}는 segments 범위를 벗어남`);
+              }
+            } else {
+              console.log('END 마커 클릭 - 아무것도 하지 않음');
+            }
+          }
         });
 
         newSequenceMarkers.push(marker);
