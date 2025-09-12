@@ -92,8 +92,28 @@ export default function ProfilePage() {
     if ((session as any)?.backendToken) {
       return (session as any).backendToken
     }
+    
+    // 다른 가능한 토큰 키들 확인
+    const possibleTokenKeys = ['accessToken', 'access_token', 'token', 'jwt']
+    for (const key of possibleTokenKeys) {
+      if ((session as any)?.[key]) {
+        return (session as any)[key]
+      }
+    }
+    
     // 세션에 없으면 localStorage에서 확인
-    return localStorage.getItem('access_token')
+    const localToken = localStorage.getItem('access_token')
+    
+    // localStorage의 다른 키들도 확인
+    const localKeys = ['token', 'jwt', 'accessToken']
+    for (const key of localKeys) {
+      const token = localStorage.getItem(key)
+      if (token) {
+        return token
+      }
+    }
+    
+    return localToken
   }
 
   // 기본 정보 폼 상태
@@ -165,18 +185,17 @@ export default function ProfilePage() {
 
   // 사용자 프로필 정보 가져오기
   const fetchUserProfile = useCallback(async () => {
-    if (!session) {
-      return
-    }
-
     setIsLoadingProfile(true)
     try {
+      const token = getToken()
+      
+      if (!token) {
+        return
+      }
+      
       const headers: any = {
         'Content-Type': 'application/json',
-      }
-
-      if ((session as any)?.backendToken) {
-        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+        'Authorization': `Bearer ${token}`
       }
 
       const response = await fetch('/api/proxy/api/v1/profile/me', {
@@ -209,20 +228,25 @@ export default function ProfilePage() {
 
   // 사용자 게시글 가져오기
   const fetchUserPosts = useCallback(async () => {
-    if (!session) return
-
     setPostsLoading(true)
     try {
+      const token = getToken()
+      
+      if (!token) {
+        return
+      }
+      
       const response = await fetch('/api/proxy/api/v1/posts/', {
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       })
 
       if (response.ok) {
         const data = await response.json()
         // 현재 사용자의 게시글만 필터링
-        const userPosts = data.posts.filter((post: Post) => post.user_id === session.user?.id)
+        const userPosts = data.posts.filter((post: Post) => post.user_id === session?.user?.id)
         setPosts(userPosts)
       } else {
         console.error('게시글 가져오기 실패')
@@ -317,7 +341,7 @@ export default function ProfilePage() {
     } finally {
       setSavedLoading(false)
     }
-  }, [])
+  }, [session])
 
   // 여행 목록 로딩 함수
   const loadTrips = useCallback(async () => {
@@ -338,7 +362,8 @@ export default function ProfilePage() {
       
       if (response.ok) {
         const data = await response.json()
-        setTrips(data.trips || [])
+        const trips = data.trips || []
+        setTrips(trips)
       } else {
         console.error('여행 목록 로딩 실패:', response.status)
       }
@@ -347,7 +372,7 @@ export default function ProfilePage() {
     } finally {
       setTripsLoading(false)
     }
-  }, [])
+  }, [session])
 
   // 로그인하지 않은 사용자는 로그인 페이지로 리다이렉트
   useEffect(() => {
@@ -358,13 +383,26 @@ export default function ProfilePage() {
 
   // 세션이 있을 때 프로필 정보와 게시글 가져오기
   useEffect(() => {
-    if (session) {
-      fetchUserProfile() // 프로필 정보에 여행 취향도 포함됨
-      fetchUserPosts()
-      loadSavedLocations()
-      loadTrips()
+    if (status === 'loading') {
+      return
     }
-  }, [session, fetchUserProfile, fetchUserPosts, loadSavedLocations, loadTrips])
+    
+    if (status === 'unauthenticated') {
+      return
+    }
+    
+    if (session && status === 'authenticated') {
+      // 각 함수를 직접 호출하여 최신 session과 status 사용
+      const loadData = async () => {
+        await fetchUserProfile() // 프로필 정보에 여행 취향도 포함됨
+        await fetchUserPosts()
+        await loadSavedLocations()
+        await loadTrips()
+      }
+      
+      loadData()
+    }
+  }, [session, status])
 
   // 세션에서 초기 폼 데이터 설정
   useEffect(() => {
