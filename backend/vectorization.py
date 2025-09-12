@@ -1,289 +1,216 @@
-import os
 import numpy as np
-import pandas as pd
-from sqlalchemy import create_engine, text
 from sentence_transformers import SentenceTransformer
-import pickle
 import logging
-from typing import Dict, List, Tuple, Any
-import asyncio
+from typing import Dict, List, Any
 import asyncpg
 import json
-from dotenv import load_dotenv
-from services.weight_calculator import tag_weight_calculator
+from config import settings
 
-# .env 파일 로드
-load_dotenv()
-
-# Custom implementations to replace sklearn
 def cosine_similarity(X, Y):
     """코사인 유사도 계산"""
     X = np.array(X)
     Y = np.array(Y)
     
-    # X가 1차원인 경우 2차원으로 변환
     if X.ndim == 1:
         X = X.reshape(1, -1)
     if Y.ndim == 1:
         Y = Y.reshape(1, -1)
+    
+    # L2 정규화
+    X_norm = X / np.linalg.norm(X, axis=1, keepdims=True)
+    Y_norm = Y / np.linalg.norm(Y, axis=1, keepdims=True)
     
     # 코사인 유사도 계산
-    dot_product = np.dot(X, Y.T)
-    norm_X = np.linalg.norm(X, axis=1, keepdims=True)
-    norm_Y = np.linalg.norm(Y, axis=1, keepdims=True)
+    similarity = np.dot(X_norm, Y_norm.T)
     
-    return dot_product / (norm_X * norm_Y.T)
+    return similarity
 
-def euclidean_distances(X, Y):
-    """유클리드 거리 계산"""
-    X = np.array(X)
-    Y = np.array(Y)
-    
-    if X.ndim == 1:
-        X = X.reshape(1, -1)
-    if Y.ndim == 1:
-        Y = Y.reshape(1, -1)
-    
-    # 거리 계산
-    return np.sqrt(((X[:, np.newaxis, :] - Y[np.newaxis, :, :]) ** 2).sum(axis=2))
-
-class MinMaxScaler:
-    """MinMax 스케일러"""
-    def __init__(self):
-        self.min_ = None
-        self.scale_ = None
-        
-    def fit(self, X):
-        X = np.array(X)
-        self.min_ = np.min(X, axis=0)
-        self.scale_ = np.max(X, axis=0) - self.min_
-        # 0으로 나누는 것을 방지
-        self.scale_[self.scale_ == 0] = 1
-        return self
-    
-    def transform(self, X):
-        X = np.array(X)
-        return (X - self.min_) / self.scale_
-    
-    def fit_transform(self, X):
-        return self.fit(X).transform(X)
-
-# 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class PlaceVectorizer:
-    def __init__(self):
-        # BERT 모델 초기화 (384차원)
-        self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L12-v2')
-        self.scaler = MinMaxScaler()
-        
-        # 데이터베이스 연결 설정
-        self.db_url = os.getenv("DATABASE_URL")
-        
-        # 테이블 정보 (각 테이블별 실제 컬럼명)
-        self.tables = {
-            'accommodation': ['name', 'overview', 'category', 'region', 'city', 'latitude', 'longitude'],
-            'restaurants': ['name', 'overview', 'category', 'region', 'city', 'latitude', 'longitude'],
-            'nature': ['name', 'overview', 'major_category', 'middle_category', 'minor_category', 'region', 'city', 'latitude', 'longitude'],
-            'shopping': ['name', 'overview', 'major_category', 'middle_category', 'minor_category', 'region', 'city', 'latitude', 'longitude'],
-            'humanities': ['name', 'overview', 'major_category', 'middle_category', 'minor_category', 'region', 'city', 'latitude', 'longitude'],
-            'leisure_sports': ['name', 'overview', 'major_category', 'middle_category', 'minor_category', 'region', 'city', 'latitude', 'longitude']
-        }
-
-    async def fetch_data_from_db(self) -> Dict[str, pd.DataFrame]:
-        """데이터베이스에서 모든 테이블 데이터 가져오기 (이미 완료된 테이블 제외)"""
-        conn = await asyncpg.connect(self.db_url)
-        all_data = {}
-        
-        try:
-            for table_name, columns in self.tables.items():
-                # 이미 벡터화된 테이블인지 확인
-                if await self.is_table_vectorized(table_name):
-                    logger.info(f"Skipping {table_name} - already vectorized")
-                    continue
-                
-                query = f"SELECT id, {', '.join(columns)} FROM {table_name} WHERE name IS NOT NULL AND overview IS NOT NULL AND image_urls IS NOT NULL AND image_urls != 'null'::jsonb AND (jsonb_typeof(image_urls) = 'array' AND jsonb_array_length(image_urls) > 0)"
-                rows = await conn.fetch(query)
-                
-                if rows:
-                    df = pd.DataFrame([dict(row) for row in rows])
-                    all_data[table_name] = df
-                    logger.info(f"Loaded {len(df)} records from {table_name}")
-                else:
-                    logger.warning(f"No data found in {table_name}")
-                    
-        finally:
-            await conn.close()
-            
-        return all_data
-
-    def create_combined_text(self, row: pd.Series, table_name: str) -> str:
-        """텍스트 결합 (이름 + 설명 + 카테고리 + 지역)"""
-        text_parts = []
-        
-        # 이름 추가
-        if pd.notna(row.get('name')):
-            text_parts.append(str(row['name']))
-        
-        # 설명 추가
-        if pd.notna(row.get('overview')):
-            text_parts.append(str(row['overview']))
-        
-        # 카테고리 추가
-        if table_name == 'restaurants' or table_name == 'accommodation':
-            if pd.notna(row.get('category')):
-                text_parts.append(str(row['category']))
-        else:
-            # nature, shopping, humanities, leisure_sports의 경우
-            for cat in ['major_category', 'middle_category', 'minor_category']:
-                if pd.notna(row.get(cat)):
-                    text_parts.append(str(row[cat]))
-        
-        # 지역 정보 추가
-        if pd.notna(row.get('region')):
-            text_parts.append(str(row['region']))
-        if pd.notna(row.get('city')):
-            text_parts.append(str(row['city']))
-        
-        return ' '.join(text_parts)
-
-    async def is_table_vectorized(self, table_name: str) -> bool:
-        """테이블이 이미 벡터화되었는지 확인"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            # place_features 테이블에서 해당 테이블의 벡터 데이터가 있는지 확인
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM place_features WHERE table_name = $1",
-                table_name
-            )
-            return count > 0
-        except:
-            return False
-        finally:
-            await conn.close()
-
-    def vectorize_places(self, data: Dict[str, pd.DataFrame]) -> Dict[str, np.ndarray]:
-        """모든 장소 데이터를 벡터화"""
-        vectors = {}
-        
-        for table_name, df in data.items():
-            logger.info(f"Vectorizing {table_name}...")
-            
-            # 텍스트 결합
-            combined_texts = []
-            for _, row in df.iterrows():
-                combined_text = self.create_combined_text(row, table_name)
-                combined_texts.append(combined_text)
-            
-            # BERT 임베딩 생성
-            embeddings = self.bert_model.encode(combined_texts, show_progress_bar=True)
-            
-            # ID와 함께 저장
-            place_data = []
-            for idx, (_, row) in enumerate(df.iterrows()):
-                place_data.append({
-                    'id': row['id'],
-                    'table_name': table_name,
-                    'name': row.get('name', ''),
-                    'region': row.get('region', ''),
-                    'city': row.get('city', ''),
-                    'latitude': float(row.get('latitude', 0)) if pd.notna(row.get('latitude')) else 0,
-                    'longitude': float(row.get('longitude', 0)) if pd.notna(row.get('longitude')) else 0,
-                    'vector': embeddings[idx][:384]  # 384차원으로 자르기
-                })
-            
-            vectors[table_name] = place_data
-            logger.info(f"Vectorized {len(place_data)} places from {table_name}")
-        
-        return vectors
-
-    async def save_vectors_to_db(self, vectors: Dict[str, List[Dict]]):
-        """벡터 데이터를 데이터베이스에 저장"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            # place_features 테이블이 없으면 생성
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS place_features (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    place_id INTEGER NOT NULL,
-                    table_name VARCHAR(50) NOT NULL,
-                    name VARCHAR(255),
-                    region VARCHAR(100),
-                    city VARCHAR(100),
-                    latitude NUMERIC,
-                    longitude NUMERIC,
-                    vector VECTOR(384) NOT NULL,
-                    created_at TIMESTAMP DEFAULT now(),
-                    UNIQUE(place_id, table_name)
-                )
-            """)
-            
-            # 기존 데이터 삭제
-            await conn.execute("TRUNCATE TABLE place_features")
-            
-            # 새 벡터 데이터 삽입
-            for table_name, places in vectors.items():
-                for place in places:
-                    await conn.execute("""
-                        INSERT INTO place_features 
-                        (place_id, table_name, name, region, city, latitude, longitude, vector)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    """, 
-                    place['id'], 
-                    place['table_name'],
-                    place['name'],
-                    place['region'],
-                    place['city'],
-                    place['latitude'],
-                    place['longitude'],
-                    str(place['vector'].tolist())
-                    )
-            
-            logger.info("Vectors saved to database successfully")
-            
-        finally:
-            await conn.close()
-
-    def save_vectors_to_file(self, vectors: Dict[str, List[Dict]], filepath: str = "place_vectors.pkl"):
-        """벡터 데이터를 파일로 저장 (백업용)"""
-        with open(filepath, 'wb') as f:
-            pickle.dump(vectors, f)
-        logger.info(f"Vectors saved to {filepath}")
-
-    async def run_vectorization(self):
-        """전체 벡터화 프로세스 실행"""
-        logger.info("Starting vectorization process...")
-        
-        # 1. 데이터 가져오기
-        data = await self.fetch_data_from_db()
-        
-        if not data:
-            logger.error("No data found in database")
-            return
-        
-        # 2. 벡터화
-        vectors = self.vectorize_places(data)
-        
-        # 3. 데이터베이스에 저장
-        await self.save_vectors_to_db(vectors)
-        
-        # 4. 파일로 백업
-        self.save_vectors_to_file(vectors)
-        
-        logger.info("Vectorization completed successfully")
-
 class RecommendationEngine:
     def __init__(self):
-        self.db_url = os.getenv("DATABASE_URL")
         self.bert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        self.db_url = settings.DATABASE_URL
+
+    async def get_user_priority_tags(self, user_id: str) -> List[Dict]:
+        """사용자 우선순위 태그 가져오기 - 실제 데이터 구조에 맞게 수정"""
+        conn = await asyncpg.connect(self.db_url)
+        try:
+            # 1. user_preferences에서 priority (단일 최우선 태그) 가져오기
+            priority_data = await conn.fetchval("""
+                SELECT priority FROM user_preferences 
+                WHERE user_id = $1 
+                ORDER BY created_at DESC LIMIT 1
+            """, user_id)
+            
+            # 2. user_preference_tags에서 추가 태그들 가져오기
+            additional_tags = await conn.fetch("""
+                SELECT tag, weight FROM user_preference_tags 
+                WHERE user_id = $1
+                ORDER BY created_at ASC
+            """, user_id)
+            
+            priority_tags = []
+            
+            # 3. Priority 태그가 있으면 최고 우선순위로 설정
+            if priority_data:
+                # Priority를 실제 description이나 관련 키워드로 확장
+                priority_keywords = self._expand_priority_to_keywords(priority_data)
+                for keyword in priority_keywords:
+                    priority_tags.append({
+                        'tag': keyword,
+                        'weight': 10.0  # 최고 우선순위 - 다른 태그보다 압도적으로 높게
+                    })
+            
+            # 4. 추가 태그들을 우선순위에 따라 추가 (priority와 충돌하는 태그 제외)
+            priority_category = self._get_category_from_priority(priority_data) if priority_data else None
+            
+            for idx, tag_row in enumerate(additional_tags):
+                tag = tag_row['tag']
+                original_weight = tag_row['weight']
+                
+                # Priority와 다른 카테고리 태그는 가중치를 크게 낮춤
+                if priority_category and self._is_conflicting_tag(tag, priority_category):
+                    # 충돌하는 태그는 가중치를 대폭 낮춤 (1.0)
+                    weight = 1.0
+                    logger.info(f"Conflicting tag '{tag}' weight reduced to 1.0 (priority: {priority_data})")
+                else:
+                    # 충돌하지 않는 태그는 기존 가중치 + 카테고리 가중치
+                    base_weight = self._calculate_tag_category_weight(tag)
+                    weight = min(base_weight + (original_weight * 0.5), 5.0)  # 최대 5.0 제한
+                
+                priority_tags.append({
+                    'tag': tag,
+                    'weight': weight
+                })
+                
+                # 너무 많은 태그는 성능에 악영향 - 상위 12개만
+                if len(priority_tags) >= 12:
+                    break
+            
+            # 5. 기본 태그가 없으면 빈 리스트 반환
+            if not priority_tags:
+                return []
+                
+            return priority_tags
+                
+        except Exception as e:
+            logger.error(f"Error getting user priority tags: {e}")
+            return []
+        finally:
+            await conn.close()
+    
+    def _calculate_tag_category_weight(self, tag: str) -> float:
+        """태그 카테고리별 가중치 계산"""
+        # 여행 우선순위 관련 태그들 (높은 가중치)
+        high_priority_tags = {
+            '쇼핑', '면세점', '백화점', '쇼핑몰', '특산물', '구매',
+            '숙박', '호텔', '리조트', '펜션', '휴양시설', 
+            '맛집', '음식', '레스토랑', '카페',
+            '체험', '액티비티', '레포츠'
+        }
+        
+        # 장소/지역 관련 태그들 (중간 가중치)
+        medium_priority_tags = {
+            '자연', '바다', '산', '공원',
+            '문화', '역사', '박물관', '명소',
+            '핫플레이스', '유명관광지', '인기명소', '필수코스'
+        }
+        
+        # 서비스/품질 관련 태그들 (낮은 가중치)
+        low_priority_tags = {
+            '럭셔리', '고급', '최고급', '서비스', '편안함', '아늑함',
+            '힐링', '평화', '휴식', '여유', '대중적'
+        }
+        
+        if tag in high_priority_tags:
+            return 4.0
+        elif tag in medium_priority_tags:
+            return 3.0
+        elif tag in low_priority_tags:
+            return 2.0
+        else:
+            return 1.5  # 기본 가중치
+    
+    def _expand_priority_to_keywords(self, priority: str) -> List[str]:
+        """Priority를 관련 키워드로 확장"""
+        priority_mappings = {
+            'accommodation': ['숙박', '호텔', '리조트', '펜션', '숙소', '휴양시설', '편안함', '서비스'],
+            'restaurants': ['맛집', '음식', '레스토랑', '카페', '식당', '요리', '미식', '식사'],
+            'shopping': ['쇼핑', '면세점', '백화점', '쇼핑몰', '특산물', '구매', '상점', '시장'],
+            'experience': ['체험', '액티비티', '레포츠', '모험', '활동', '경험', '즐거움', '재미']
+        }
+        
+        return priority_mappings.get(priority, [priority])
+    
+    def _get_category_from_priority(self, priority: str) -> str:
+        """Priority에서 카테고리 추출"""
+        category_mapping = {
+            'accommodation': 'accommodation',
+            'restaurants': 'restaurants', 
+            'shopping': 'shopping',
+            'experience': 'experience'
+        }
+        return category_mapping.get(priority, priority)
+    
+    def _is_conflicting_tag(self, tag: str, priority_category: str) -> bool:
+        """태그가 priority 카테고리와 충돌하는지 확인"""
+        # 각 카테고리별 태그 정의
+        category_tags = {
+            'restaurants': ['쇼핑', '면세점', '백화점', '쇼핑몰', '시장', '아울렛', '구매', '상점', '특산물'],
+            'shopping': ['맛집', '음식', '레스토랑', '카페', '식당', '요리', '미식', '식사'],
+            'accommodation': ['쇼핑', '면세점', '백화점', '쇼핑몰', '시장', '아울렛', '맛집', '음식', '레스토랑'],
+            'experience': ['쇼핑', '면세점', '백화점', '쇼핑몰', '시장', '아울렛', '맛집', '음식', '레스토랑']
+        }
+        
+        conflicting_tags = category_tags.get(priority_category, [])
+        return tag in conflicting_tags
+
+    async def get_tag_vectors(self, tags: List[str]) -> Dict[str, np.ndarray]:
+        """태그 벡터 가져오기 - BERT로 직접 인코딩"""
+        tag_vectors = {}
+        for tag in tags:
+            # BERT로 직접 인코딩 (preference_tags 테이블 없이)
+            tag_vectors[tag] = self.bert_model.encode([tag])[0].astype(np.float32)
+        
+        return tag_vectors
+
+    async def get_user_vector(self, user_id: str) -> np.ndarray:
+        """사용자 선호도 벡터 생성"""
+        priority_tags = await self.get_user_priority_tags(user_id)
+        
+        if not priority_tags:
+            # 기본 벡터 반환
+            return np.random.normal(0, 0.1, 384).astype(np.float32)
+        
+        # 태그별 벡터 가져오기
+        tag_names = [tag_info['tag'] for tag_info in priority_tags]
+        tag_vectors = await self.get_tag_vectors(tag_names)
+        
+        # 가중치 적용하여 사용자 벡터 생성
+        weighted_vectors = []
+        for tag_info in priority_tags:
+            tag = tag_info['tag']
+            weight = tag_info['weight']
+            
+            if tag in tag_vectors:
+                # 가중치만큼 벡터를 반복 추가
+                repeat_count = int(weight)
+                for _ in range(repeat_count):
+                    weighted_vectors.append(tag_vectors[tag])
+        
+        if weighted_vectors:
+            # 평균 벡터 계산
+            user_vector = np.mean(weighted_vectors, axis=0)
+        else:
+            user_vector = np.random.normal(0, 0.1, 384).astype(np.float32)
+        
+        return user_vector.astype(np.float32)
 
     async def get_user_preferences(self, user_id: str) -> Dict:
-        """사용자 선호도 가져오기 (새로운 가중치 계산 시스템 적용)"""
+        """사용자 선호도 가져오기 (추천 시스템용)"""
         conn = await asyncpg.connect(self.db_url)
-        
         try:
             # 기본 선호도
             basic_prefs = await conn.fetchrow("""
@@ -293,88 +220,34 @@ class RecommendationEngine:
                 ORDER BY created_at DESC LIMIT 1
             """, user_id)
             
-            # 태그 선호도 (기존 가중치와 함께)
+            # 태그 선호도
             tag_prefs = await conn.fetch("""
                 SELECT tag, weight
                 FROM user_preference_tags
                 WHERE user_id = $1
+                ORDER BY created_at ASC
             """, user_id)
             
-            # 태그 데이터를 weight_calculator 형식으로 변환
-            user_tags = []
-            for tag in tag_prefs:
-                user_tags.append({
-                    'tag': tag['tag'],
-                    'frequency': int(tag['weight'])  # 기존 weight를 frequency로 사용
-                })
-            
-            # 새로운 가중치 계산 시스템 적용
-            calculated_tags = tag_weight_calculator.calculate_all_user_weights(user_tags) if user_tags else []
+            # 우선순위 태그 가져오기
+            priority_tags = await self.get_user_priority_tags(user_id)
             
             return {
                 'basic': dict(basic_prefs) if basic_prefs else None,
-                'tags': calculated_tags,  # 계산된 가중치가 포함된 태그
-                'original_tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []  # 원본 태그도 보관
+                'tags': priority_tags,  # 우선순위가 적용된 태그
+                'original_tags': [dict(tag) for tag in tag_prefs] if tag_prefs else []
             }
             
         finally:
             await conn.close()
 
-    async def get_user_action_history(self, user_id: str) -> List[Dict]:
-        """사용자 행동 이력 가져오기"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            actions = await conn.fetch("""
-                SELECT ual.place_category, ual.place_id, ual.action_type, 
-                       ual.action_value, aw.weight
-                FROM user_action_logs ual
-                JOIN action_weights aw ON ual.action_type = aw.action_type
-                WHERE ual.user_id = $1
-                ORDER BY ual.created_at DESC
-            """, user_id)
-            
-            return [dict(action) for action in actions]
-            
-        finally:
-            await conn.close()
-
-    def calculate_similarity_scores(
-        self, 
-        user_vector: np.ndarray, 
-        place_vectors: List[np.ndarray],
-        weights: Dict[str, float] = None
-    ) -> List[float]:
-        """유사도 점수 계산 (코사인 + 유클리드)"""
-        if weights is None:
-            weights = {'cosine': 0.7, 'euclidean': 0.3}
-        
-        # 코사인 유사도 (높을수록 유사)
-        cosine_scores = cosine_similarity([user_vector], place_vectors)[0]
-        
-        # 유클리드 거리 (낮을수록 유사) -> 유사도로 변환
-        euclidean_dists = euclidean_distances([user_vector], place_vectors)[0]
-        max_dist = np.max(euclidean_dists)
-        euclidean_scores = (max_dist - euclidean_dists) / max_dist if max_dist > 0 else np.ones_like(euclidean_dists)
-        
-        # 가중 평균
-        final_scores = (
-            weights['cosine'] * cosine_scores + 
-            weights['euclidean'] * euclidean_scores
-        )
-        
-        return final_scores.tolist()
-
     async def get_fallback_places(self, limit: int = 20) -> List[Dict]:
         """개인화 추천 실패시 인기도 기반 장소 반환"""
         conn = await asyncpg.connect(self.db_url)
-        
         try:
-            # 단순히 place_recommendations에서 랜덤하게 데이터 가져오기
             query = """
                 SELECT place_id, table_name, name, region, city, latitude, longitude, 
                        overview as description, image_urls,
-                       random() as final_weight
+                       random() as similarity_score
                 FROM place_recommendations pr
                 WHERE pr.name IS NOT NULL 
                   AND pr.overview IS NOT NULL 
@@ -398,7 +271,7 @@ class RecommendationEngine:
                     'longitude': float(place['longitude']) if place['longitude'] else 0.0,
                     'description': place['description'] or '설명 없음',
                     'image_urls': place['image_urls'],
-                    'similarity_score': 0.7 + (place.get('popularity_score', 0) * 0.1)  # 인기도 반영
+                    'similarity_score': 0.7 + (place.get('popularity_score', 0) * 0.1)
                 })
             
             return results
@@ -409,66 +282,6 @@ class RecommendationEngine:
         finally:
             await conn.close()
 
-    async def get_popular_places(self, region: str = None, category: str = None, limit: int = 20, exclude_places: List[tuple] = None) -> List[Dict]:
-        """인기 장소 가져오기 (로그인 전 추천) - 통합 테이블 사용"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            # 행동 로그 기반 인기도 계산 (통합 테이블 사용)
-            query = """
-                WITH place_popularity AS (
-                    SELECT 
-                        ual.place_category as table_name,
-                        ual.place_id,
-                        SUM(aw.weight * COALESCE(ual.action_value, 1)) as popularity_score,
-                        COUNT(*) as action_count
-                    FROM user_action_logs ual
-                    JOIN action_weights aw ON ual.action_type = aw.action_type
-                    GROUP BY ual.place_category, ual.place_id
-                )
-                SELECT 
-                    pr.*,
-                    COALESCE(pp.popularity_score, 0) as popularity_score,
-                    COALESCE(pp.action_count, 0) as action_count
-                FROM place_recommendations pr
-                LEFT JOIN place_popularity pp ON pr.table_name = pp.table_name AND pr.place_id::text = pp.place_id::text
-            """
-            
-            conditions = []
-            params = []
-            param_count = 0
-            
-            if region:
-                param_count += 1
-                conditions.append(f"pr.region = ${param_count}")
-                params.append(region)
-            
-            if category:
-                param_count += 1
-                conditions.append(f"pr.table_name = ${param_count}")
-                params.append(category)
-            
-            # 제외할 장소 조건 추가
-            if exclude_places:
-                exclude_conditions = []
-                for place_id, table_name in exclude_places:
-                    param_count += 2
-                    exclude_conditions.append(f"NOT (pr.place_id = ${param_count - 1} AND pr.table_name = ${param_count})")
-                    params.extend([place_id, table_name])
-                conditions.extend(exclude_conditions)
-            
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-            
-            query += f" ORDER BY popularity_score DESC, action_count DESC LIMIT ${param_count + 1}"
-            params.append(limit)
-            
-            places = await conn.fetch(query, *params)
-            return [dict(place) for place in places]
-            
-        finally:
-            await conn.close()
-
     async def get_personalized_recommendations(
         self, 
         user_id: str, 
@@ -476,330 +289,133 @@ class RecommendationEngine:
         category: str = None, 
         limit: int = 20
     ) -> List[Dict]:
-        """개인화 추천 (로그인 후) - 통합 테이블 사용"""
+        """개인화 추천 - 벡터 코사인 유사도 기반"""
         conn = await asyncpg.connect(self.db_url)
-        
         try:
-            # 사용자 선호도 및 행동 이력 가져오기
-            preferences = await self.get_user_preferences(user_id)
-            actions = await self.get_user_action_history(user_id)
+            # 사용자 벡터 생성
+            user_vector = await self.get_user_vector(user_id)
             
-            # 사용자 선호도 벡터 생성
-            user_vector = await self._create_user_vector(preferences, actions)
-            
-            # place_features와 place_recommendations를 조인해서 이미지 URL 포함하여 가져오기
+            # place_recommendations에서 장소 데이터 가져오기
             query = """
-                SELECT pf.place_id, pf.table_name, pf.name, pf.region, pf.city, pf.latitude, pf.longitude, 
-                       pf.vector, pr.overview as description, pr.image_urls
-                FROM place_features pf
-                LEFT JOIN place_recommendations pr ON pf.place_id::text = pr.place_id::text AND pf.table_name = pr.table_name
-                WHERE pf.vector IS NOT NULL
+                SELECT place_id, table_name, name, region, city, 
+                       latitude, longitude, overview as description, 
+                       image_urls, vector
+                FROM place_recommendations
+                WHERE vector IS NOT NULL
             """
-            conditions = []
             params = []
             param_count = 0
             
+            # 필터 조건 추가
             if region:
                 param_count += 1
-                conditions.append(f"region = ${param_count}")
+                query += f" AND region = ${param_count}"
                 params.append(region)
             
             if category:
                 param_count += 1
-                conditions.append(f"pf.table_name = ${param_count}")
+                query += f" AND table_name = ${param_count}"
                 params.append(category)
             
-            if conditions:
-                query += " AND " + " AND ".join(conditions)
-            
-            # 단순화: 선호 태그 기반 필터링만 적용하고 랜덤 샘플링
-            # 사용자 선호 태그가 있으면 우선 필터링
-            user_tags = [tag['tag'] for tag in preferences.get('tags', [])]
-            
-            if user_tags and conditions:
-                # 태그 기반 필터링을 위한 추가 조건 - 간단한 텍스트 매칭
-                tag_conditions = []
-                for i, tag in enumerate(user_tags[:3]):  # 상위 3개 태그만
-                    param_count = len(params) + 1
-                    tag_conditions.append(f"(pr.overview ILIKE ${param_count})")
-                    params.append(f'%{tag}%')
-                    param_count += 1
-                
-                if tag_conditions:
-                    query += f" AND ({' OR '.join(tag_conditions)})"
-            
-            # 성능을 위한 랜덤 샘플링
-            query += " ORDER BY random() LIMIT 1000"
+            query += " ORDER BY random() LIMIT 2000"  # 성능을 위해 2000개로 제한
             
             places = await conn.fetch(query, *params)
             
             if not places:
                 return []
             
-            # 벡터 추출 및 유사도 계산 (JSON 문자열 처리)
+            # 벡터 추출 및 코사인 유사도 계산
             place_vectors = []
             valid_places = []
             
             for place in places:
                 try:
-                    # 벡터가 JSON 문자열로 저장된 경우 파싱
                     if isinstance(place['vector'], str):
                         vector_data = json.loads(place['vector'])
                     else:
                         vector_data = place['vector']
                     
-                    # numpy 배열로 변환
                     vector_array = np.array(vector_data, dtype=np.float32)
-                    
-                    # 벡터 차원 확인 (384차원이어야 함)
-                    if len(vector_array) == 384:
+                    if len(vector_array) == 384:  # 올바른 차원인지 확인
                         place_vectors.append(vector_array)
                         valid_places.append(place)
-                    
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    # 벡터 처리 실패시 해당 장소 제외
+                except:
                     continue
             
             if not place_vectors:
                 return []
             
-            similarity_scores = self.calculate_similarity_scores(user_vector, place_vectors)
+            # 배치로 코사인 유사도 계산
+            place_vectors = np.array(place_vectors)
+            similarities = cosine_similarity(user_vector.reshape(1, -1), place_vectors)
+            similarity_scores = similarities.flatten()
             
-            # 점수와 함께 결과 생성
+            # 결과 생성
             results = []
             for i, place in enumerate(valid_places):
-                place_dict = dict(place)
-                place_dict['similarity_score'] = similarity_scores[i]
-                results.append(place_dict)
+                results.append({
+                    'place_id': place['place_id'],
+                    'table_name': place['table_name'],
+                    'name': place['name'] or '이름 없음',
+                    'region': place['region'] or '지역 미상',
+                    'city': place['city'],
+                    'latitude': float(place['latitude']) if place['latitude'] else 0.0,
+                    'longitude': float(place['longitude']) if place['longitude'] else 0.0,
+                    'description': place['description'] or '설명 없음',
+                    'image_urls': place['image_urls'],
+                    'similarity_score': float(similarity_scores[i])
+                })
             
-            # 유사도 순으로 정렬
+            # 유사도 순으로 정렬 후 상위 반환
             results.sort(key=lambda x: x['similarity_score'], reverse=True)
-            
             return results[:limit]
-            
-        except Exception as e:
-            logger.error(f"Error in personalized recommendations: {str(e)}")
-            logger.error(f"Error traceback: ", exc_info=True)  # 전체 스택 트레이스 출력
-            # 개인화 추천 실패 시 간단한 fallback
-            try:
-                fallback_places = await self.get_fallback_places(limit)
-                return fallback_places
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {str(fallback_error)}")
-                return []
-            
         finally:
             await conn.close()
 
-    async def _create_user_vector(self, preferences: Dict, actions: List[Dict]) -> np.ndarray:
-        """사용자 선호도와 행동을 바탕으로 사용자 벡터 생성"""
-        
-        # 선호도 텍스트 생성
-        preference_texts = []
-        
-        if preferences['basic']:
-            # 선호도 정의에서 설명 가져오기
-            conn = await asyncpg.connect(self.db_url)
-            try:
-                for key, value in preferences['basic'].items():
-                    desc = await conn.fetchval("""
-                        SELECT description FROM preference_definitions 
-                        WHERE category = $1 AND option_key = $2
-                    """, key, value)
-                    if desc:
-                        preference_texts.append(desc)
-            finally:
-                await conn.close()
-        
-        # 태그 선호도 추가 (가중치 반영)
-        for tag_pref in preferences['tags']:
-            tag_name = tag_pref['tag']
-            calculated_weight = tag_pref.get('calculated_weight', 1.0)
-            
-            # 가중치에 따라 텍스트 반복 (높은 가중치일수록 더 많은 영향)
-            repeat_count = max(1, int(calculated_weight * 2))  # 가중치 2배로 증폭하여 반영
-            for _ in range(repeat_count):
-                preference_texts.append(tag_name)
-            
-            logger.info(f"Tag '{tag_name}' added {repeat_count} times (weight: {calculated_weight})")
-        
-        # 행동 이력 기반 텍스트 추가 (좋아요, 북마크한 장소들의 정보)
-        action_places = []
-        high_weight_actions = [action for action in actions if action['weight'] >= 2.0]
-        
-        if high_weight_actions:
-            conn = await asyncpg.connect(self.db_url)
-            try:
-                for action in high_weight_actions[:10]:  # 최근 10개만
-                    try:
-                        place_info = await conn.fetchrow(f"""
-                            SELECT name, overview FROM {action['place_category']} 
-                            WHERE id = $1
-                        """, action['place_id'])
-                        if place_info and place_info['overview']:
-                            action_places.append(f"{place_info['name']} {place_info['overview']}")
-                    except Exception:
-                        # 테이블이 존재하지 않거나 쿼리 오류시 무시
-                        continue
-            finally:
-                await conn.close()
-        
-        # 모든 텍스트 결합
-        all_texts = preference_texts + action_places
-        combined_text = ' '.join(all_texts) if all_texts else "일반적인 여행지"
-        
-        # BERT 벡터화 (384차원으로 자르기 - place_features와 동일하게)
-        user_vector = self.bert_model.encode([combined_text])[0][:384]
-        
-        return user_vector
-
-    async def get_popular_regions(self, limit: int = 10) -> List[Dict]:
-        """인기 지역 목록 조회"""
+    async def get_popular_places(self, region: str = None, category: str = None, limit: int = 20) -> List[Dict]:
+        """인기 장소 추천"""
         conn = await asyncpg.connect(self.db_url)
-        
         try:
-            regions = await conn.fetch("""
-                WITH region_popularity AS (
-                    SELECT 
-                        pf.region,
-                        COUNT(*) as place_count,
-                        AVG(COALESCE(pp.popularity_score, 0)) as avg_popularity
-                    FROM place_features pf
-                    LEFT JOIN (
-                        SELECT 
-                            ual.place_category as table_name,
-                            ual.place_id,
-                            SUM(aw.weight * COALESCE(ual.action_value, 1)) as popularity_score
-                        FROM user_action_logs ual
-                        JOIN action_weights aw ON ual.action_type = aw.action_type
-                        GROUP BY ual.place_category, ual.place_id
-                    ) pp ON pf.table_name = pp.table_name AND pf.place_id::text = pp.place_id::text
-                    WHERE pf.region IS NOT NULL
-                    GROUP BY pf.region
-                )
-                SELECT 
-                    region,
-                    place_count,
-                    avg_popularity,
-                    (place_count * 0.3 + avg_popularity * 0.7) as total_score
-                FROM region_popularity
-                ORDER BY total_score DESC
-                LIMIT $1
-            """, limit)
+            query = """
+                SELECT place_id, table_name, name, region, city,
+                       latitude, longitude, overview as description, image_urls,
+                       0.7 as similarity_score
+                FROM place_recommendations
+                WHERE name IS NOT NULL AND overview IS NOT NULL
+            """
+            params = []
+            param_count = 0
             
-            return [dict(region) for region in regions]
+            if region:
+                param_count += 1
+                query += f" AND region = ${param_count}"
+                params.append(region)
             
+            if category:
+                param_count += 1
+                query += f" AND table_name = ${param_count}"
+                params.append(category)
+            
+            query += " ORDER BY random() LIMIT $" + str(param_count + 1)
+            params.append(limit)
+            
+            places = await conn.fetch(query, *params)
+            
+            results = []
+            for place in places:
+                results.append({
+                    'place_id': place['place_id'],
+                    'table_name': place['table_name'],
+                    'name': place['name'] or '이름 없음',
+                    'region': place['region'] or '지역 미상',
+                    'city': place['city'],
+                    'latitude': float(place['latitude']) if place['latitude'] else 0.0,
+                    'longitude': float(place['longitude']) if place['longitude'] else 0.0,
+                    'description': place['description'] or '설명 없음',
+                    'image_urls': place['image_urls'],
+                    'similarity_score': place['similarity_score']
+                })
+            
+            return results
         finally:
             await conn.close()
-
-    async def get_personalized_regions(self, user_id: str, limit: int = 10) -> List[Dict]:
-        """개인화 지역 추천"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            # 사용자 선호도 가져오기
-            preferences = await self.get_user_preferences(user_id)
-            actions = await self.get_user_action_history(user_id)
-            
-            # 사용자 벡터 생성
-            user_vector = await self._create_user_vector(preferences, actions)
-            
-            # 지역별 대표 벡터 계산
-            regions = await conn.fetch("""
-                SELECT 
-                    region,
-                    COUNT(*) as place_count,
-                    AVG(latitude) as avg_lat,
-                    AVG(longitude) as avg_lng
-                FROM place_features 
-                WHERE region IS NOT NULL
-                GROUP BY region
-                HAVING COUNT(*) >= 3
-            """)
-            
-            region_scores = []
-            for region in regions:
-                # 해당 지역의 장소들 가져오기
-                places = await conn.fetch("""
-                    SELECT vector FROM place_features WHERE region = $1 LIMIT 20
-                """, region['region'])
-                
-                if places:
-                    # 지역 대표 벡터 (평균)
-                    place_vectors = [np.array(place['vector']) for place in places]
-                    region_vector = np.mean(place_vectors, axis=0)
-                    
-                    # 유사도 계산
-                    similarity = self.calculate_similarity_scores(user_vector, [region_vector])[0]
-                    
-                    region_scores.append({
-                        'region': region['region'],
-                        'place_count': region['place_count'],
-                        'avg_lat': float(region['avg_lat']),
-                        'avg_lng': float(region['avg_lng']),
-                        'similarity_score': similarity
-                    })
-            
-            # 유사도 순으로 정렬
-            region_scores.sort(key=lambda x: x['similarity_score'], reverse=True)
-            
-            return region_scores[:limit]
-            
-        finally:
-            await conn.close()
-
-    async def record_user_action(
-        self, 
-        user_id: str, 
-        place_id: int, 
-        place_category: str, 
-        action_type: str, 
-        action_value: float = None
-    ):
-        """사용자 행동 기록"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            await conn.execute("""
-                INSERT INTO user_action_logs 
-                (user_id, place_category, place_id, action_type, action_value)
-                VALUES ($1, $2, $3, $4, $5)
-            """, user_id, place_category, place_id, action_type, action_value)
-            
-        finally:
-            await conn.close()
-
-    async def get_user_recommendation_stats(self, user_id: str) -> Dict:
-        """사용자 추천 통계"""
-        conn = await asyncpg.connect(self.db_url)
-        
-        try:
-            stats = await conn.fetchrow("""
-                SELECT 
-                    COUNT(*) as total_actions,
-                    COUNT(DISTINCT place_category) as categories_explored,
-                    COUNT(DISTINCT CASE WHEN action_type = 'like' THEN place_id END) as liked_places,
-                    COUNT(DISTINCT CASE WHEN action_type = 'bookmark' THEN place_id END) as bookmarked_places,
-                    AVG(CASE WHEN action_type = 'dwell_time' THEN action_value END) as avg_dwell_time
-                FROM user_action_logs 
-                WHERE user_id = $1
-            """, user_id)
-            
-            return dict(stats) if stats else {}
-            
-        finally:
-            await conn.close()
-
-# 실행 함수들
-async def run_vectorization():
-    """벡터화 실행"""
-    vectorizer = PlaceVectorizer()
-    await vectorizer.run_vectorization()
-
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1 and sys.argv[1] == "vectorize":
-        asyncio.run(run_vectorization())
-    else:
-        print("Usage: python vectorization.py vectorize")
