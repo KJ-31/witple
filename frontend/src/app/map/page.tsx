@@ -135,6 +135,7 @@ export default function MapPage() {
     duration: string,
     transitDetails?: any
   }[]>([])
+  const [cachedRouteResults, setCachedRouteResults] = useState<any[]>([])
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
@@ -352,11 +353,28 @@ export default function MapPage() {
     }
   }, [])
 
-  // activeMarkerIndex 변경 시 마커들 다시 생성
+  // activeMarkerIndex 변경 시 경로와 마커들 완전히 다시 렌더링
   useEffect(() => {
     if (currentSegments.length > 0 && mapInstance) {
-      console.log('activeMarkerIndex 변경됨, 마커들 다시 생성:', activeMarkerIndex);
-      createSequenceMarkers(currentSegments, isOptimizedRoute);
+      console.log('activeMarkerIndex 변경됨, 경로와 마커들 완전히 다시 렌더링:', activeMarkerIndex);
+      
+      // 기존 경로들 완전히 제거
+      directionsRenderers.forEach(renderer => {
+        if (renderer) {
+          renderer.setMap(null);
+          renderer.setDirections(null);
+        }
+      });
+      
+      // 기존 마커들 제거
+      sequenceMarkers.forEach(marker => {
+        if (marker) {
+          marker.setMap(null);
+        }
+      });
+      
+      // 경로와 마커들 다시 렌더링
+      renderRouteWithActiveSegment(currentSegments, isOptimizedRoute);
     }
   }, [activeMarkerIndex])
 
@@ -1312,6 +1330,8 @@ export default function MapPage() {
     // 경로 구간 정보 초기화
     setRouteSegments([]);
     
+    // 캐싱된 경로 결과 초기화
+    setCachedRouteResults([]);
 
     console.log('모든 경로, 마커, 정보창이 제거되었습니다');
   };
@@ -1977,31 +1997,54 @@ export default function MapPage() {
     for (let i = 0; i < allResults.length; i++) {
       const result = allResults[i];
       
-      // 각 구간의 시작점 인덱스에 해당하는 색상 계산
-      const segmentStartIndex = i; // 0번째 구간은 START(0), 1번째 구간은 1번 핀
-      const totalPoints = segments.length + 1; // START + 중간점들 + END
-      const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+      // 활성화된 마커에 따른 색상 계산
+      let segmentColor = '#c4c4c4'; // 기본값: 회색 (비활성화)
+      let segmentOpacity = 0.5; // 기본값: 낮은 불투명도
       
-      // #3eb2ff에서 #3E68FF로 점점 진해지는 그라데이션
-      const hue = 227;
-      const saturation = 100;
-      const startLightness = 80; // 연한 색상 (#3eb2ff)
-      const endLightness = 62;   // 진한 색상 (#3E68FF)
-      
-      // ratio가 0일때 가장 밝고(80%), ratio가 1일때 가장 어둠(62%)
-      const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
-      const segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시
+      if (activeMarkerIndex !== null) {
+        // activeMarkerIndex가 0이면 첫 번째 구간(0), 1이면 두 번째 구간(1) 활성화
+        if (activeMarkerIndex === i) {
+          // 현재 구간이 활성화된 구간인 경우 원래 색상 사용
+          const segmentStartIndex = i;
+          const totalPoints = segments.length + 1;
+          const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+          
+          const hue = 227;
+          const saturation = 100;
+          const startLightness = 80;
+          const endLightness = 62;
+          
+          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+          segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          segmentOpacity = 0.8; // 원래 불투명도
+        }
+      } else {
+        // 활성화된 마커가 없는 경우 모든 구간을 원래 색상으로 표시
+        const segmentStartIndex = i;
+        const totalPoints = segments.length + 1;
+        const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+        
+        const hue = 227;
+        const saturation = 100;
+        const startLightness = 80;
+        const endLightness = 62;
+        
+        const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+        segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        segmentOpacity = 0.8;
+      }
       
       const renderer = new (window as any).google.maps.DirectionsRenderer({
         draggable: false,
         polylineOptions: {
-          strokeColor: segmentColor, // 각 구간마다 시작점 핀과 동일한 색상
+          strokeColor: segmentColor,
           strokeWeight: 6,
-          strokeOpacity: 0.8
+          strokeOpacity: segmentOpacity
         },
         suppressMarkers: true,
-        suppressInfoWindows: true, // 기본 정보창 숨기기
-        preserveViewport: true // 모든 경로에서 뷰포트 유지
+        suppressInfoWindows: true,
+        preserveViewport: true
       });
 
       renderer.setDirections(result);
@@ -2030,8 +2073,9 @@ export default function MapPage() {
       });
     }
 
-    // 구간 정보를 상태에 저장
+    // 구간 정보와 경로 결과를 상태에 저장
     setRouteSegments(segmentDetails);
+    setCachedRouteResults(allResults);
 
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
@@ -2041,6 +2085,89 @@ export default function MapPage() {
       `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
       'success'
     );
+  };
+
+  // activeMarkerIndex에 따라 캐싱된 경로 결과로 다시 렌더링하는 함수
+  const renderRouteWithActiveSegment = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+    if (cachedRouteResults.length === 0 || cachedRouteResults.length !== segments.length) {
+      console.log('캐싱된 경로 결과가 없거나 일치하지 않습니다.');
+      return;
+    }
+
+    // 캐싱된 결과로 새로운 렌더러들 생성
+    const newRenderers = [];
+    let bounds = new (window as any).google.maps.LatLngBounds();
+
+    for (let i = 0; i < cachedRouteResults.length; i++) {
+      const result = cachedRouteResults[i];
+      
+      // 활성화된 마커에 따른 색상 계산
+      let segmentColor = '#888888'; // 기본값: 진한 회색 (비활성화)
+      let segmentOpacity = 0.7; // 기본값: 적당한 불투명도
+      
+      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시
+      if (activeMarkerIndex !== null) {
+        if (activeMarkerIndex === i) {
+          // 현재 구간이 활성화된 구간인 경우 원래 색상 사용
+          const segmentStartIndex = i;
+          const totalPoints = segments.length + 1;
+          const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+          
+          const hue = 227;
+          const saturation = 100;
+          const startLightness = 80;
+          const endLightness = 62;
+          
+          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+          segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          segmentOpacity = 0.8;
+        }
+      } else {
+        // 활성화된 마커가 없는 경우 모든 구간을 원래 색상으로 표시
+        const segmentStartIndex = i;
+        const totalPoints = segments.length + 1;
+        const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+        
+        const hue = 227;
+        const saturation = 100;
+        const startLightness = 80;
+        const endLightness = 62;
+        
+        const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+        segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        segmentOpacity = 0.8;
+      }
+      
+      const renderer = new (window as any).google.maps.DirectionsRenderer({
+        draggable: false,
+        polylineOptions: {
+          strokeColor: segmentColor,
+          strokeWeight: 6,
+          strokeOpacity: segmentOpacity
+        },
+        suppressMarkers: true,
+        suppressInfoWindows: true,
+        preserveViewport: true
+      });
+
+      renderer.setDirections(result);
+      if (mapInstance) {
+        renderer.setMap(mapInstance);
+      }
+      newRenderers.push(renderer);
+
+      // 각 경로의 바운딩 박스를 전체 바운딩 박스에 추가
+      const route = result.routes[0];
+      if (route && route.bounds) {
+        bounds.union(route.bounds);
+      }
+    }
+
+    // 상태 업데이트
+    setDirectionsRenderers(newRenderers);
+    
+    // 마커들 다시 생성
+    await createSequenceMarkers(segments, isOptimized);
   };
 
   // UI에서 장소 순서를 최적화된 순서로 변경
