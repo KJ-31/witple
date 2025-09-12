@@ -16,6 +16,7 @@ from models import Post, User, OAuthAccount
 from schemas import PostCreate, PostResponse, PostListResponse
 from config import settings
 from auth_utils import get_current_user
+from cache_utils import cache, cached
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -106,6 +107,10 @@ async def create_post(
         db.commit()
         db.refresh(db_post)
         
+        # 캐시 무효화: 포스트 목록 캐시 삭제
+        cache.delete("posts:list:0:10")  # 기본 페이지
+        cache.delete("posts:list:0:20")  # 다른 페이지도 삭제 가능
+        
         # 사용자 정보와 함께 반환
         post_with_user = db.query(Post).options(joinedload(Post.user)).filter(Post.id == db_post.id).first()
         
@@ -127,6 +132,17 @@ async def get_posts(
 ):
     """포스트 목록을 가져옵니다."""
     try:
+        # 캐시 키 생성
+        cache_key = f"posts:list:{skip}:{limit}"
+        
+        # 캐시에서 조회 시도
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache hit for posts list: {cache_key}")
+            return PostListResponse(**cached_result)
+        
+        logger.info(f"Cache miss for posts list: {cache_key}")
+        
         # 최신 순으로 포스트 조회 (OAuth 계정 정보도 함께 로드)
         posts = (
             db.query(Post)
@@ -153,7 +169,12 @@ async def get_posts(
                 logger.info(f"OAuth 계정: provider={oauth_account.provider}, profile_picture={oauth_account.profile_picture}")
             logger.info(f"========================")
         
-        return PostListResponse(posts=posts, total=total)
+        result = PostListResponse(posts=posts, total=total)
+        
+        # 결과를 캐시에 저장 (5분)
+        cache.set(cache_key, result.dict(), expire=300)
+        
+        return result
         
     except Exception as e:
         raise HTTPException(
@@ -168,6 +189,20 @@ async def get_post(
     db: Session = Depends(get_db)
 ):
     """특정 포스트를 가져옵니다."""
+    # 캐시 키 생성
+    cache_key = f"post:detail:{post_id}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        logger.info(f"Cache hit for post: {cache_key}")
+        # 캐시된 데이터가 dict라면 PostResponse로 변환
+        if isinstance(cached_result, dict):
+            return PostResponse(**cached_result)
+        return cached_result
+    
+    logger.info(f"Cache miss for post: {cache_key}")
+    
     post = (
         db.query(Post)
         .options(joinedload(Post.user))
@@ -180,6 +215,26 @@ async def get_post(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="포스트를 찾을 수 없습니다."
         )
+    
+    # 포스트를 dict로 변환하여 캐시에 저장 (10분)
+    post_dict = {
+        "id": post.id,
+        "user_id": post.user_id,
+        "caption": post.caption,
+        "image_url": post.image_url,
+        "location": post.location,
+        "likes_count": post.likes_count,
+        "comments_count": getattr(post, 'comments_count', 0),  # 기본값 0
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "user": {
+            "user_id": post.user.user_id,
+            "email": post.user.email,
+            "name": post.user.name,
+            "profile_image": post.user.profile_image
+        } if post.user else None
+    }
+    
+    cache.set(cache_key, post_dict, expire=600)
     
     return post
 
@@ -201,6 +256,9 @@ async def like_post(
     post.likes_count += 1
     db.commit()
     
+    # 캐시 무효화
+    cache.delete(f"post:detail:{post_id}")
+    
     return {"message": "좋아요가 추가되었습니다.", "likes_count": post.likes_count}
 
 
@@ -221,6 +279,9 @@ async def unlike_post(
     if post.likes_count > 0:
         post.likes_count -= 1
         db.commit()
+    
+    # 캐시 무효화
+    cache.delete(f"post:detail:{post_id}")
     
     return {"message": "좋아요가 제거되었습니다.", "likes_count": post.likes_count}
 
@@ -264,6 +325,11 @@ async def update_post(
         db.commit()
         db.refresh(post)
         
+        # 캐시 무효화
+        cache.delete(f"post:detail:{post.id}")  # 해당 포스트 상세 캐시 삭제
+        cache.delete("posts:list:0:10")  # 포스트 목록 캐시 삭제
+        cache.delete("posts:list:0:20")
+        
         # 사용자 정보와 함께 반환
         post_with_user = db.query(Post).options(joinedload(Post.user)).filter(Post.id == post.id).first()
         
@@ -306,6 +372,11 @@ async def delete_post(
         # 포스트 삭제
         db.delete(post)
         db.commit()
+        
+        # 캐시 무효화
+        cache.delete(f"post:detail:{post_id}")  # 해당 포스트 상세 캐시 삭제
+        cache.delete("posts:list:0:10")  # 포스트 목록 캐시 삭제
+        cache.delete("posts:list:0:20")
         
         logger.info(f"포스트 삭제 완료: {post_id} by {current_user.user_id}")
         return {"message": "포스트가 삭제되었습니다."}
