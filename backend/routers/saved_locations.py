@@ -8,6 +8,7 @@ from database import get_db
 from models import SavedLocation, User
 from schemas import SavedLocationCreate, SavedLocationResponse, SavedLocationListResponse
 from auth_utils import get_current_user
+from cache_utils import cache
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -49,6 +50,10 @@ async def create_saved_location(
         db.commit()
         db.refresh(db_location)
         
+        # 캐시 무효화: 해당 사용자의 저장된 장소 목록 캐시 삭제
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:20")
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:10")
+        
         logger.info(f"저장된 장소 생성: {db_location.places} for user {current_user.user_id}")
         return db_location
         
@@ -70,6 +75,17 @@ async def get_saved_locations(
 ):
     """현재 사용자의 저장된 장소 목록을 가져옵니다."""
     try:
+        # 캐시 키 생성 (사용자별로 캐시)
+        cache_key = f"saved_locations:list:{current_user.user_id}:{skip}:{limit}"
+        
+        # 캐시에서 조회 시도
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache hit for saved locations: {cache_key}")
+            return SavedLocationListResponse(**cached_result)
+        
+        logger.info(f"Cache miss for saved locations: {cache_key}")
+        
         # 최신 순으로 저장된 장소 조회
         locations = (
             db.query(SavedLocation)
@@ -86,7 +102,12 @@ async def get_saved_locations(
             .count()
         )
         
-        return SavedLocationListResponse(locations=locations, total=total)
+        result = SavedLocationListResponse(locations=locations, total=total)
+        
+        # 결과를 캐시에 저장 (10분)
+        cache.set(cache_key, result.dict(), expire=600)
+        
+        return result
         
     except Exception as e:
         logger.error(f"저장된 장소 조회 중 오류: {str(e)}")
@@ -103,6 +124,17 @@ async def get_saved_location(
     current_user: User = Depends(get_current_user)
 ):
     """특정 저장된 장소를 가져옵니다."""
+    # 캐시 키 생성
+    cache_key = f"saved_location:detail:{current_user.user_id}:{location_id}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        logger.info(f"Cache hit for saved location: {cache_key}")
+        return SavedLocationResponse(**cached_result)
+    
+    logger.info(f"Cache miss for saved location: {cache_key}")
+    
     location = (
         db.query(SavedLocation)
         .filter(
@@ -117,6 +149,16 @@ async def get_saved_location(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="저장된 장소를 찾을 수 없습니다."
         )
+    
+    # 결과를 캐시에 저장 (15분)
+    location_dict = {
+        "id": location.id,
+        "user_id": location.user_id,
+        "places": location.places,
+        "created_at": location.created_at.isoformat() if location.created_at else None,
+        "updated_at": location.updated_at.isoformat() if location.updated_at else None
+    }
+    cache.set(cache_key, location_dict, expire=900)
     
     return location
 
@@ -151,6 +193,11 @@ async def update_saved_location(
         
         db.commit()
         db.refresh(location)
+        
+        # 캐시 무효화
+        cache.delete(f"saved_location:detail:{current_user.user_id}:{location_id}")
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:20")
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:10")
         
         logger.info(f"저장된 장소 수정: {location.places} for user {current_user.user_id}")
         return location
@@ -191,6 +238,11 @@ async def delete_saved_location(
         # 장소 삭제
         db.delete(location)
         db.commit()
+        
+        # 캐시 무효화
+        cache.delete(f"saved_location:detail:{current_user.user_id}:{location_id}")
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:20")
+        cache.delete(f"saved_locations:list:{current_user.user_id}:0:10")
         
         logger.info(f"저장된 장소 삭제: {location.places} for user {current_user.user_id}")
         return {"message": "저장된 장소가 삭제되었습니다."}
