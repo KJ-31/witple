@@ -417,20 +417,50 @@ async def get_personalized_region_categories(
                 region_scores[region].append(score)
                 region_places[region].append(place)
             
-            # 3. 지역별 평균 점수로 정렬하여 상위 지역 선별
+            # 사용자 우선순위 카테고리 가져오기 (강화된 priority 반영)
+            user_preferences = await recommendation_engine.get_user_preferences(user_id)
+            priority_category = None
+            preferred_categories = set()
+            
+            # 1. Priority 카테고리 직접 추출 (가장 높은 우선순위)
+            user_basic_prefs = user_preferences.get('basic') if user_preferences else None
+            if user_basic_prefs and user_basic_prefs.get('priority'):
+                priority_mapping = {
+                    'accommodation': 'accommodation',
+                    'restaurants': 'restaurants', 
+                    'shopping': 'shopping',
+                    'experience': 'leisure_sports'
+                }
+                priority_category = priority_mapping.get(user_basic_prefs['priority'])
+                logger.info(f"User priority: {user_basic_prefs['priority']} -> category: {priority_category}")
+                if priority_category:
+                    preferred_categories.add(priority_category)
+
+            # 3. 지역별 평균 점수로 정렬하여 상위 지역 선별 (우선순위 카테고리 보유 지역 부스팅)
             top_regions = []
             for region, scores in region_scores.items():
                 avg_score = sum(scores) / len(scores)
+                
+                # 우선순위 카테고리가 많은 지역에 점수 부스팅 적용
+                if priority_category:
+                    priority_count = sum(1 for place in region_places[region] 
+                                       if place.get('table_name') == priority_category)
+                    total_count = len(region_places[region])
+                    
+                    # 우선순위 카테고리 비율이 높으면 점수 부스팅 (최대 50% 추가)
+                    if total_count > 0:
+                        priority_ratio = priority_count / total_count
+                        boost_factor = 1.0 + (priority_ratio * 0.5)  # 최대 1.5배까지 부스팅
+                        avg_score *= boost_factor
+                        logger.info(f"Region {region}: priority_ratio={priority_ratio:.2f}, boost={boost_factor:.2f}")
+                
                 top_regions.append((region, avg_score, region_places[region]))
             
             top_regions.sort(key=lambda x: x[1], reverse=True)
             selected_regions = top_regions[:limit]
             
-            # 사용자 선호도 가져오기 (카테고리별 차등 배분용)
-            user_preferences = await recommendation_engine.get_user_preferences(user_id)
-            preferred_categories = set()
+            # 2. 추가 태그들로 보조 카테고리 설정
             if user_preferences and user_preferences.get('tags'):
-                # 태그를 카테고리로 매핑
                 tag_to_category = {
                     '자연': 'nature', '바다': 'nature', '산': 'nature', '공원': 'nature',
                     '맛집': 'restaurants', '음식': 'restaurants', '카페': 'restaurants',
@@ -470,14 +500,16 @@ async def get_personalized_region_categories(
                     'leisure_sports': '레저'
                 }
                 
-                # 카테고리별 차등 배분 및 최소 보장
+                # 카테고리별 차등 배분 (Priority 중심으로 강화)
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:  # 해당 카테고리에 장소가 있는 경우만
-                        # 사용자 선호도에 따른 차등 배분
-                        if category in preferred_categories:
-                            target_count = min(15, len(category_places))  # 선호 카테고리: 최대 15개
+                        # 사용자 Priority에 따른 극적 편향 배분
+                        if category == priority_category:
+                            target_count = min(40, len(category_places))  # Priority: 압도적으로 많이 (40개)
+                        elif category in preferred_categories:
+                            target_count = min(8, len(category_places))   # 보조: 줄임 (8개)
                         else:
-                            target_count = min(10, len(category_places))  # 일반 카테고리: 최대 10개
+                            target_count = min(3, len(category_places))   # 일반: 최소화 (3개)
                         
                         # 각 장소를 Attraction 형태로 변환
                         formatted_attractions = []
@@ -518,15 +550,36 @@ async def get_personalized_region_categories(
                                     'category': category
                                 })
                         
-                        # 카테고리별 최소 개수 체크 - 카테고리 무결성 보장
-                        # 최소 3개 이상일 때만 섹션으로 표시 (품질 보장)
-                        if len(formatted_attractions) >= 3:  # 최소 3개 이상만 표시
-                            category_sections.append({
+                        # 개인화 편향 필터링: Priority 카테고리는 관대하게, 일반 카테고리는 엄격하게
+                        min_threshold = 1 if category == priority_category else (2 if category in preferred_categories else 3)
+                        if len(formatted_attractions) >= min_threshold:
+                            section_data = {
                                 'category': category,
                                 'categoryName': category_names.get(category, category),
                                 'attractions': formatted_attractions,
                                 'total': len(formatted_attractions)
-                            })
+                            }
+                            
+                            # Priority 카테고리에 극적 강조 표시 추가
+                            if category == priority_category:
+                                section_data['isPriority'] = True
+                                section_data['priorityBadge'] = '🔥 개인 맞춤'
+                                section_data['categoryName'] = f"🎯✨ {section_data['categoryName']} ✨"  # 다중 아이콘으로 강조
+                                section_data['priorityLevel'] = 'HIGH'
+                                section_data['personalizedRatio'] = f"{len(formatted_attractions)}개 추천"
+                            elif category in preferred_categories:
+                                section_data['isPriority'] = False
+                                section_data['priorityBadge'] = '선호'
+                                section_data['priorityLevel'] = 'MEDIUM'
+                            
+                            category_sections.append(section_data)
+                
+                # Priority 카테고리를 맨 위로 정렬
+                if priority_category:
+                    category_sections.sort(key=lambda x: (
+                        0 if x.get('isPriority', False) else 1,  # Priority가 먼저
+                        x['categoryName']  # 그 다음은 이름순
+                    ))
                 
                 if category_sections:  # 카테고리가 있는 지역만 추가
                     result_data.append({
@@ -577,13 +630,13 @@ async def get_personalized_region_categories(
                         category_groups[category] = []
                     category_groups[category].append(place)
                 
-                # 카테고리별 섹션 생성
+                # 카테고리별 섹션 생성 (일반 사용자용)
                 category_sections = []
                 for category, category_places in category_groups.items():
                     if len(category_places) > 0:
                         # 각 장소를 Attraction 형태로 변환
                         formatted_attractions = []
-                        for place in category_places[:8]:  # 카테고리당 최대 8개
+                        for place in category_places[:7]:  # 카테고리당 최대 7개 (축소)
                             if place.get('place_id') and place.get('table_name'):
                                 # 이미지 URL 처리
                                 image_url = None

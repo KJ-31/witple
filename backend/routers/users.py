@@ -7,7 +7,10 @@ from database import get_db
 from models import User, UserPreference, UserPreferenceTag
 from schemas import UserResponse, UserPreferencesBasic
 from auth_utils import get_current_user
+from cache_utils import cache
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -99,6 +102,33 @@ async def save_user_preferences(
         db.add(tag_obj)
     
     db.commit()
+    
+    # 저장된 여행 취향 정보 로그 출력
+    logger.info(f"여행 취향 업데이트 성공: {{user_id: '{current_user.user_id}', email: '{current_user.email}', name: '{current_user.name}', persona: '{db_prefs.persona}', priority: '{db_prefs.priority}', accommodation: '{db_prefs.accommodation}', exploration: '{db_prefs.exploration}', saved_tags: {len(unique_tags)}, updated_at: '{db_prefs.updated_at}'}}")
+    
+    # 캐시 무효화 - 사용자 취향 변경 시 추천 캐시 삭제
+    user_id = str(current_user.user_id)
+    
+    # 개인화 추천 캐시 삭제 (다양한 파라미터 조합)
+    cache_patterns = [
+        f"personalized:{user_id}:*",
+        f"recommendations:{user_id}",
+        f"user:{user_id}"
+    ]
+    
+    # Redis SCAN을 사용하여 패턴 매칭 키들 삭제
+    try:
+        import redis
+        redis_client = cache.redis
+        
+        for pattern in cache_patterns:
+            for key in redis_client.scan_iter(match=pattern):
+                redis_client.delete(key)
+                logger.info(f"Deleted cache key: {key}")
+                
+        logger.info(f"Cache invalidated for user preferences update: {user_id}")
+    except Exception as cache_error:
+        logger.warning(f"Cache invalidation failed: {cache_error}")
     
     # Return the saved preferences
     return UserPreferencesBasic(

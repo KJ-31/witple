@@ -21,6 +21,7 @@ from schemas import (
 )
 from config import settings
 from auth_utils import get_current_user
+from cache_utils import cache
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -200,6 +201,33 @@ async def update_profile_preferences(
         
         db.commit()
         db.refresh(current_user)
+        
+        # 변경된 여행 취향 정보 로그 출력
+        logger.info(f"여행 취향 업데이트 성공: {{user_id: '{current_user.user_id}', email: '{current_user.email}', name: '{current_user.name}', persona: '{user_preference.persona}', priority: '{user_preference.priority}', accommodation: '{user_preference.accommodation}', exploration: '{user_preference.exploration}', updated_at: '{user_preference.updated_at}'}}")
+        
+        # 캐시 무효화 - 사용자 취향 변경 시 추천 캐시 삭제
+        user_id = str(current_user.user_id)
+        
+        # 개인화 추천 캐시 삭제 (다양한 파라미터 조합)
+        cache_patterns = [
+            f"personalized:{user_id}:*",
+            f"recommendations:{user_id}",
+            f"user:{user_id}"
+        ]
+        
+        # Redis SCAN을 사용하여 패턴 매칭 키들 삭제
+        try:
+            import redis
+            redis_client = cache.redis
+            
+            for pattern in cache_patterns:
+                for key in redis_client.scan_iter(match=pattern):
+                    redis_client.delete(key)
+                    logger.info(f"Deleted cache key: {key}")
+                    
+            logger.info(f"Cache invalidated for user preferences update: {user_id}")
+        except Exception as cache_error:
+            logger.warning(f"Cache invalidation failed: {cache_error}")
         
         logger.info(f"Profile preferences updated for user: {current_user.user_id}")
         return current_user
