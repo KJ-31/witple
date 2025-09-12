@@ -362,7 +362,10 @@ export default function MapPage() {
       directionsRenderers.forEach(renderer => {
         if (renderer) {
           renderer.setMap(null);
-          renderer.setDirections(null);
+          // DirectionsRenderer인 경우에만 setDirections 호출
+          if (renderer.setDirections && typeof renderer.setDirections === 'function') {
+            renderer.setDirections(null);
+          }
         }
       });
       
@@ -1296,7 +1299,9 @@ export default function MapPage() {
     directionsRenderers.forEach(renderer => {
       if (renderer) {
         renderer.setMap(null);
-        renderer.setDirections(null);
+        if (renderer.setDirections && typeof renderer.setDirections === 'function') {
+          renderer.setDirections(null);
+        }
       }
     });
     setDirectionsRenderers([]);
@@ -2137,6 +2142,67 @@ export default function MapPage() {
     );
   };
 
+  // 교통수단별로 개별 폴리라인 생성하는 함수
+  const createTransitSpecificPolylines = async (result: any, mapInstance: any, renderers: any[]) => {
+    if (!result || !result.routes || !result.routes[0] || !result.routes[0].legs || !result.routes[0].legs[0]) {
+      return;
+    }
+
+    const leg = result.routes[0].legs[0];
+    const steps = leg.steps;
+    
+    if (!steps || steps.length === 0) {
+      return;
+    }
+
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex];
+      
+      // 각 스텝의 경로를 폴리라인으로 생성
+      let stepColor = '#888888'; // 기본 회색 (도보)
+      
+      if (step.transit) {
+        // 교통수단이 있는 경우 해당 노선 색상 사용
+        const transitDetail = step.transit;
+        const vehicleType = transitDetail?.line?.vehicle?.type || '';
+        const lineName = transitDetail?.line?.name || '';
+
+        if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+          stepColor = getSubwayLineColor(lineName);
+        } else if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+          stepColor = getBusColor(lineName);
+        }
+      }
+      
+      // 폴리라인 생성
+      let stepPath = null;
+      
+      if (step.polyline && step.polyline.points) {
+        // encoded polyline을 디코드
+        stepPath = (window as any).google.maps.geometry.encoding.decodePath(step.polyline.points);
+      } else if (step.lat_lngs) {
+        stepPath = step.lat_lngs;
+      } else if (step.start_location && step.end_location) {
+        // 시작점과 끝점만 있는 경우 직선으로 연결
+        stepPath = [step.start_location, step.end_location];
+      }
+      
+      if (stepPath && stepPath.length > 0) {
+        const polyline = new (window as any).google.maps.Polyline({
+          path: stepPath,
+          strokeColor: stepColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          map: mapInstance
+        });
+        
+        // 렌더러 배열에 추가 (정리를 위해)
+        renderers.push(polyline);
+        console.log(`스텝 ${stepIndex}: ${step.travel_mode || '알 수 없음'} - ${stepColor} 폴리라인 생성`);
+      }
+    }
+  };
+
   // activeMarkerIndex에 따라 캐싱된 경로 결과로 다시 렌더링하는 함수
   const renderRouteWithActiveSegment = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     if (cachedRouteResults.length === 0 || cachedRouteResults.length !== segments.length) {
@@ -2153,7 +2219,7 @@ export default function MapPage() {
       
       // 활성화된 마커에 따른 색상 계산
       let segmentColor = '#888888'; // 기본값: 진한 회색 (비활성화)
-      let segmentOpacity = 0.7; // 기본값: 적당한 불투명도
+      let segmentOpacity = 0.4; // 기본값: 투명하게
       
       if (activeMarkerIndex !== null) {
         // 특정 구간이 클릭된 경우
@@ -2191,11 +2257,17 @@ export default function MapPage() {
         preserveViewport: true
       });
 
-      renderer.setDirections(result);
-      if (mapInstance) {
-        renderer.setMap(mapInstance);
+      if (activeMarkerIndex !== null && activeMarkerIndex === i) {
+        // 활성화된 구간: 교통수단별로 개별 폴리라인 생성
+        await createTransitSpecificPolylines(result, mapInstance, newRenderers);
+      } else {
+        // 비활성화된 구간 또는 전체 표시: 기존 방식 사용
+        renderer.setDirections(result);
+        if (mapInstance) {
+          renderer.setMap(mapInstance);
+        }
+        newRenderers.push(renderer);
       }
-      newRenderers.push(renderer);
 
       // 각 경로의 바운딩 박스를 전체 바운딩 박스에 추가
       const route = result.routes[0];
