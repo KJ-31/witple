@@ -1785,6 +1785,63 @@ export default function MapPage() {
     console.log(`구간 ${segmentIndex}에 지도 포커스:`, segment);
   };
 
+  // 전체 경로로 지도 포커스
+  const focusOnFullRoute = () => {
+    if (!mapInstance) return;
+    try {
+      // 캐싱된 결과 기준으로 전체 bounds 계산
+      if (cachedRouteResults && cachedRouteResults.length > 0) {
+        const bounds = new (window as any).google.maps.LatLngBounds();
+        cachedRouteResults.forEach((res: any) => {
+          const route = res?.routes?.[0];
+          if (route?.bounds) bounds.union(route.bounds);
+        });
+        if (!bounds.isEmpty()) {
+          mapInstance.fitBounds(bounds, { padding: 50 });
+          return;
+        }
+      }
+      // 캐시가 없으면 현재 세그먼트 기준으로 계산
+      if (currentSegments && currentSegments.length > 0) {
+        const bounds = new (window as any).google.maps.LatLngBounds();
+        currentSegments.forEach((seg: any) => {
+          bounds.extend({ lat: seg.origin.lat, lng: seg.origin.lng });
+          bounds.extend({ lat: seg.destination.lat, lng: seg.destination.lng });
+        });
+        if (!bounds.isEmpty()) {
+          mapInstance.fitBounds(bounds, { padding: 50 });
+        }
+      }
+    } catch (e) {
+      // noop
+    }
+  };
+
+  // 활성 구간 초기화하고 전체 경로 뷰로 복귀
+  const resetToFullRoute = () => {
+    if (activeMarkerIndex === null) return;
+    // 활성 구간 정보창 숨기기
+    if (activeMarkerIndex === 0) {
+      hideSegmentTransit(0);
+    } else if (currentSegments && activeMarkerIndex > 0 && activeMarkerIndex < currentSegments.length) {
+      hideSegmentTransit(activeMarkerIndex);
+    }
+    // 전체 뷰로 전환
+    setActiveMarkerIndex(null);
+    focusOnFullRoute();
+  };
+
+  // 맵 빈 영역 클릭 시 전체 경로로 복귀
+  useEffect(() => {
+    if (!mapInstance) return;
+    const listener = mapInstance.addListener('click', () => {
+      resetToFullRoute();
+    });
+    return () => {
+      if (listener && listener.remove) listener.remove();
+    };
+  }, [mapInstance, activeMarkerIndex, currentSegments, cachedRouteResults]);
+
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
@@ -1824,12 +1881,12 @@ export default function MapPage() {
         
         const markerColor = getGradientColor(i, allPoints.length, isOptimized);
         
-        // 마커 크기 계산 (활성화된 마커는 1.5배)
+        // 마커 크기 고정 (활성화되어도 크기 변경 없음)
         const isActive = activeMarkerIndex === i;
-        const markerSize = isActive ? 45 : 30; // 30 * 1.5 = 45
-        const markerHeight = isActive ? 60 : 40; // 40 * 1.5 = 60
-        const fontSize = isActive ? 15 : 10; // 10 * 1.5 = 15
-        const anchorY = isActive ? 60 : 40;
+        const markerSize = 30;
+        const markerHeight = 40;
+        const fontSize = 10;
+        const anchorY = 40;
         
         const marker = new (window as any).google.maps.Marker({
           position: coords,
@@ -1851,49 +1908,36 @@ export default function MapPage() {
         marker.addListener('click', () => {
           console.log(`마커 ${i} 클릭됨, 현재 activeMarkerIndex:`, activeMarkerIndex);
           
-          // 마커 토글 처리
-          if (activeMarkerIndex === i) {
-            // 이미 활성화된 마커를 다시 클릭 → 비활성화하고 정보 숨기기
-            setActiveMarkerIndex(null);
-            
-            // 해당 구간의 교통수단 정보 숨기기
-            if (i === 0) {
+          // END 마커는 비활성 처리 (클릭해도 상태 변경 없음)
+          if (i === allPoints.length - 1) {
+            console.log('END 마커 클릭 - 비활성 처리로 아무 동작 없음');
+            return;
+          }
+
+          // 기존 활성 구간 정보 숨기기
+          if (activeMarkerIndex !== null) {
+            if (activeMarkerIndex === 0) {
               hideSegmentTransit(0);
-            } else if (i > 0 && i < allPoints.length - 1 && i < segments.length) {
-              hideSegmentTransit(i);
+            } else if (activeMarkerIndex > 0 && activeMarkerIndex < allPoints.length - 1 && activeMarkerIndex < segments.length) {
+              hideSegmentTransit(activeMarkerIndex);
             }
-          } else {
-            // 다른 마커를 클릭 → 기존 활성화된 구간의 정보 숨기고 새 마커 활성화
-            
-            // 기존에 활성화된 구간이 있으면 해당 정보 숨기기
-            if (activeMarkerIndex !== null) {
-              if (activeMarkerIndex === 0) {
-                hideSegmentTransit(0);
-              } else if (activeMarkerIndex > 0 && activeMarkerIndex < allPoints.length - 1 && activeMarkerIndex < segments.length) {
-                hideSegmentTransit(activeMarkerIndex);
-              }
-            }
-            
-            // 새 마커 활성화
-            setActiveMarkerIndex(i);
-            
-            // START 마커이거나 숫자 마커를 클릭했을 때 해당 구간의 교통수단 정보 표시
-            if (i === 0) {
-              // START 마커 클릭 - 첫 번째 구간 (0 -> 1) 교통수단 정보 표시 및 지도 포커스
-              console.log('START 마커 클릭 - 구간 0 표시');
-              showSegmentTransit(0);
-              focusOnSegment(0, segments);
-            } else if (i > 0 && i < allPoints.length - 1) {
-              // 숫자 마커 클릭 - 해당 구간의 교통수단 정보 표시
-              if (i < segments.length) {
-                console.log(`숫자 마커 ${i} 클릭 - 구간 ${i} 표시`);
-                showSegmentTransit(i);
-                focusOnSegment(i, segments);
-              } else {
-                console.log(`구간 ${i}는 segments 범위를 벗어남`);
-              }
+          }
+
+          // 항상 새 마커 활성화
+          setActiveMarkerIndex(i);
+
+          // START 마커 또는 숫자 마커의 구간 정보 표시
+          if (i === 0) {
+            console.log('START 마커 클릭 - 구간 0 표시');
+            showSegmentTransit(0);
+            focusOnSegment(0, segments);
+          } else if (i > 0 && i < allPoints.length - 1) {
+            if (i < segments.length) {
+              console.log(`숫자 마커 ${i} 클릭 - 구간 ${i} 표시`);
+              showSegmentTransit(i);
+              focusOnSegment(i, segments);
             } else {
-              console.log('END 마커 클릭 - 아무것도 하지 않음');
+              console.log(`구간 ${i}는 segments 범위를 벗어남`);
             }
           }
         });
@@ -1917,6 +1961,8 @@ export default function MapPage() {
     }
 
     try {
+      // 활성화된 마커 상태 초기화 (전체 동선 렌더링용)
+      setActiveMarkerIndex(null);
       // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
       // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
@@ -1954,7 +2000,7 @@ export default function MapPage() {
       }
 
       console.log(`${dayNumber}일차 기본 동선:`, segments);
-      await renderRoute(segments, false); // 기본 동선
+      await renderRoute(segments, false, true); // 기본 동선 - 활성 구간 무시하고 전체 렌더
 
     } catch (error) {
       console.error(`${dayNumber}일차 Basic route error:`, error);
@@ -1963,7 +2009,11 @@ export default function MapPage() {
   };
 
   // 경로 렌더링 (기본 동선 또는 최적화 경로)
-  const renderRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+  const renderRoute = async (
+    segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], 
+    isOptimized: boolean = false,
+    ignoreActive: boolean = false
+  ) => {
     if (!(window as any).google?.maps?.DirectionsService) {
       console.error('Google Maps DirectionsService not available');
       return;
@@ -2056,8 +2106,8 @@ export default function MapPage() {
       let segmentColor = '#c4c4c4'; // 기본값: 회색 (비활성화)
       let segmentOpacity = 0.5; // 기본값: 낮은 불투명도
       
-      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시
-      if (activeMarkerIndex !== null) {
+      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시 (ignoreActive가 아닐 때만)
+      if (!ignoreActive && activeMarkerIndex !== null) {
         // activeMarkerIndex가 0이면 첫 번째 구간(0), 1이면 두 번째 구간(1) 활성화
         if (activeMarkerIndex === i) {
           // 현재 구간이 활성화된 구간인 경우 원래 색상 사용
@@ -2350,6 +2400,8 @@ export default function MapPage() {
     }
 
     try {
+      // 활성화된 마커 상태 초기화 (전체 동선 렌더링용)
+      setActiveMarkerIndex(null);
       // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
       // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
@@ -2427,7 +2479,7 @@ export default function MapPage() {
         });
       }
 
-      await renderRoute(segments, true);
+      await renderRoute(segments, true, true);
 
     } catch (error) {
       console.error(`${dayNumber}일차 Route optimization error:`, error);
