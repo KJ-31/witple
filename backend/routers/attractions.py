@@ -1,18 +1,36 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, or_, and_
+from sqlalchemy import desc, func, or_, and_, case
+import math
 
 from database import get_db
 from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
 from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+from cache_utils import cache, cache_attraction_data, get_cached_attraction_data, increment_view_count, get_view_count
 import logging
 
 router = APIRouter(tags=["attractions"])
 
 logger = logging.getLogger(__name__)
+
+@router.get("/stats/views/{attraction_id}")
+async def get_attraction_view_count(attraction_id: str):
+    """관광지 조회수 조회 (Redis에서)"""
+    try:
+        view_count = get_view_count(attraction_id)
+        return {
+            "attraction_id": attraction_id,
+            "view_count": view_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting view count: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="조회수 조회 중 오류가 발생했습니다."
+        )
 
 # 카테고리별 테이블 매핑
 CATEGORY_TABLES = {
@@ -93,6 +111,119 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
         data["closedDays"] = getattr(attraction, 'closed_days', None)
     
     return data
+
+def get_approximate_bounds(lat: float, lng: float, radius_km: float = 1.0) -> dict:
+    """대략적인 검색 범위 계산 (PostGIS 없이 성능 최적화용)"""
+    # 위도 1도 ≈ 111km, 경도 1도 ≈ 88km (한국 기준)
+    lat_offset = radius_km / 111.0
+    lng_offset = radius_km / 88.0
+    
+    return {
+        'min_lat': lat - lat_offset,
+        'max_lat': lat + lat_offset,
+        'min_lng': lng - lng_offset,
+        'max_lng': lng + lng_offset
+    }
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """두 지점 간의 거리를 계산 (Haversine formula, 단위: km)"""
+    if not all([lat1, lon1, lat2, lon2]):
+        return float('inf')
+    
+    # 지구의 반지름 (km)
+    R = 6371.0
+    
+    # 라디안으로 변환
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    # 차이 계산
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    # Haversine 공식
+    a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    distance = R * c
+    
+    return distance
+
+async def get_nearby_attractions(db: Session, selected_places: List[dict], radius_km: float = 1.0, limit: int = 50):
+    """선택한 장소들 기준으로 주변 관광지 검색"""
+    try:
+        if not selected_places:
+            return []
+        
+        nearby_attractions = []
+        processed_ids = set()  # 중복 방지
+        
+        # 선택한 각 장소를 중심으로 검색
+        for selected_place in selected_places:
+            if not selected_place.get('latitude') or not selected_place.get('longitude'):
+                continue
+                
+            center_lat = float(selected_place['latitude'])
+            center_lng = float(selected_place['longitude'])
+            
+            # 검색 범위 계산 (성능 최적화) - 5km로 확장
+            bounds = get_approximate_bounds(center_lat, center_lng, 5.0)
+            
+            # 모든 카테고리 테이블에서 검색
+            for table_name, table_model in CATEGORY_TABLES.items():
+                try:
+                    # 범위 기반 필터링으로 성능 최적화 - LIMIT 제거로 범위 내 모든 데이터 조회
+                    query = db.query(table_model).filter(
+                        table_model.latitude.isnot(None),
+                        table_model.longitude.isnot(None),
+                        table_model.latitude.between(bounds['min_lat'], bounds['max_lat']),
+                        table_model.longitude.between(bounds['min_lng'], bounds['max_lng'])
+                    )
+                    
+                    attractions = query.all()
+                    logger.info(f"Table {table_name}: found {len(attractions)} attractions in bounds")
+                    
+                except Exception as table_error:
+                    logger.error(f"Error querying table {table_name}: {str(table_error)}")
+                    continue
+                
+                for attraction in attractions:
+                    # 고유 ID 생성
+                    unique_id = f"{table_name}_{attraction.id}"
+                    
+                    # 이미 처리된 장소는 스킵
+                    if unique_id in processed_ids:
+                        continue
+                    
+                    # 선택한 장소와 같은 장소는 제외
+                    if unique_id == selected_place.get('id'):
+                        continue
+                    
+                    # 거리 계산
+                    distance = calculate_distance(
+                        center_lat, center_lng,
+                        float(attraction.latitude), float(attraction.longitude)
+                    )
+                    
+                    # 5km 반경 내에 있는 장소만 추가
+                    if distance <= 5.0:
+                        category = get_category_from_table(table_name)
+                        formatted_attraction = format_attraction_data(attraction, category, table_name)
+                        formatted_attraction['distance'] = round(distance, 2)  # 거리 정보 추가
+                        formatted_attraction['nearbyTo'] = selected_place.get('name', '선택한 장소')  # 어느 장소 근처인지
+                        
+                        nearby_attractions.append(formatted_attraction)
+                        processed_ids.add(unique_id)
+        
+        # 거리 순으로 정렬
+        nearby_attractions.sort(key=lambda x: x['distance'])
+        
+        return nearby_attractions[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error in get_nearby_attractions: {str(e)}")
+        return []
 
 async def get_db_fallback_places(db: Session, region: str, category: str = None, limit: int = 20, exclude_ids: set = None):
     """추천 엔진 실패시 DB에서 직접 가져오는 fallback"""
@@ -213,6 +344,49 @@ async def get_cities_with_attractions(db: Session, offset: int = 0, limit: int =
             })
     
     return cities_data, len(sorted_cities)
+
+
+@router.post("/nearby")
+async def get_nearby_places(
+    selected_places: List[dict],
+    radius_km: float = Query(1.0, ge=0.1, le=10, description="검색 반경 (km)"),
+    limit: int = Query(50, ge=1, le=500, description="최대 결과 수"),
+    db: Session = Depends(get_db)
+):
+    """선택한 장소들을 기준으로 주변 관광지를 검색합니다."""
+    try:
+        logger.info(f"Nearby places request: {len(selected_places)} selected places, radius: {radius_km}km")
+        
+        if not selected_places:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="선택한 장소가 없습니다."
+            )
+        
+        # 주변 관광지 검색
+        nearby_attractions = await get_nearby_attractions(
+            db=db,
+            selected_places=selected_places,
+            radius_km=radius_km,
+            limit=limit
+        )
+        
+        return {
+            "attractions": nearby_attractions,
+            "total": len(nearby_attractions),
+            "searchRadius": radius_km,
+            "selectedPlacesCount": len(selected_places),
+            "message": f"{len(selected_places)}개 장소 기준 {radius_km}km 반경에서 {len(nearby_attractions)}개 장소를 찾았습니다."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in nearby places search: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"주변 장소 검색 중 오류 발생: {str(e)}"
+        )
 
 
 @router.get("/regions")
@@ -943,8 +1117,17 @@ async def get_filtered_attractions(
 
 @router.get("/{attraction_id}")
 async def get_attraction_details(attraction_id: str, db: Session = Depends(get_db)):
-    """특정 관광지의 상세 정보를 가져옵니다."""
+    """특정 관광지의 상세 정보를 가져옵니다. (Redis 캐싱 적용)"""
     try:
+        # 캐시에서 조회 시도
+        cached_result = get_cached_attraction_data(attraction_id)
+        if cached_result is not None:
+            logger.info(f"Cache hit for attraction: {attraction_id}")
+            # 조회수 증가
+            increment_view_count(attraction_id)
+            return cached_result
+        
+        logger.info(f"Cache miss for attraction: {attraction_id}")
         # 새로운 ID 형식 처리: table_name_id 형식
         if "_" in attraction_id:
             # 테이블명이 여러 단어로 구성된 경우를 고려하여 마지막 _ 기준으로 분리
@@ -998,6 +1181,12 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
                 "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
             })
             
+            # 조회수 증가
+            increment_view_count(attraction_id)
+            
+            # 결과를 캐시에 저장 (2시간)
+            cache_attraction_data(attraction_id, formatted_attraction, expire=7200)
+            
             return formatted_attraction
         
         else:
@@ -1033,7 +1222,15 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
             
             # 매칭된 결과가 있으면 첫 번째 결과 반환
             if matching_attractions:
-                return matching_attractions[0][1]
+                result = matching_attractions[0][1]
+                
+                # 조회수 증가
+                increment_view_count(attraction_id)
+                
+                # 결과를 캐시에 저장 (2시간)
+                cache_attraction_data(attraction_id, result, expire=7200)
+                
+                return result
             
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
