@@ -1729,9 +1729,25 @@ export default function MapPage() {
                            i === allPoints.length - 1 ? 'END' : 
                            i.toString();
         
-        const markerColor = i === 0 ? '#4CAF50' : 
-                           i === allPoints.length - 1 ? '#F44336' : 
-                           isOptimized ? '#FF9800' : '#2196F3'; // 최적화된 경로는 주황색
+        // 그라데이션 색상 계산 함수 (#3eb2ff에서 #3E68FF로 점점 진해짐)
+        const getGradientColor = (index: number, total: number, isOptimized: boolean) => {
+          // 모든 핀에 그라데이션 적용 (START, 1, 2, 3, 4, ..., END)
+          const ratio = index / Math.max(1, total - 1);
+          
+          // #3eb2ff (시작 - 연한 파랑): HSL(227, 100%, 80%)
+          // #3E68FF (끝 - 진한 파랑): HSL(227, 100%, 62%)
+          const hue = 227;
+          const saturation = 100;
+          const startLightness = 80; // 연한 색상
+          const endLightness = 62;   // 진한 색상
+          
+          // ratio가 0일때 가장 밝고(80%), ratio가 1일때 가장 어둠(62%)
+          const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+          
+          return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        };
+        
+        const markerColor = getGradientColor(i, allPoints.length, isOptimized);
         
         // 마커 크기 계산 (활성화된 마커는 1.5배)
         const isActive = activeMarkerIndex === i;
@@ -1961,14 +1977,29 @@ export default function MapPage() {
     for (let i = 0; i < allResults.length; i++) {
       const result = allResults[i];
       
+      // 각 구간의 시작점 인덱스에 해당하는 색상 계산
+      const segmentStartIndex = i; // 0번째 구간은 START(0), 1번째 구간은 1번 핀
+      const totalPoints = segments.length + 1; // START + 중간점들 + END
+      const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+      
+      // #3eb2ff에서 #3E68FF로 점점 진해지는 그라데이션
+      const hue = 227;
+      const saturation = 100;
+      const startLightness = 80; // 연한 색상 (#3eb2ff)
+      const endLightness = 62;   // 진한 색상 (#3E68FF)
+      
+      // ratio가 0일때 가장 밝고(80%), ratio가 1일때 가장 어둠(62%)
+      const lightness = Math.round(startLightness - ratio * (startLightness - endLightness));
+      const segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      
       const renderer = new (window as any).google.maps.DirectionsRenderer({
         draggable: false,
         polylineOptions: {
-          strokeColor: isOptimized ? '#FF9800' : '#34A853', // 최적화는 주황색, 기본은 초록색
+          strokeColor: segmentColor, // 각 구간마다 시작점 핀과 동일한 색상
           strokeWeight: 6,
           strokeOpacity: 0.8
         },
-        suppressMarkers: i > 0,
+        suppressMarkers: true,
         suppressInfoWindows: true, // 기본 정보창 숨기기
         preserveViewport: true // 모든 경로에서 뷰포트 유지
       });
