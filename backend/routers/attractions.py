@@ -9,11 +9,28 @@ from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
 from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+from cache_utils import cache, cache_attraction_data, get_cached_attraction_data, increment_view_count, get_view_count
 import logging
 
 router = APIRouter(tags=["attractions"])
 
 logger = logging.getLogger(__name__)
+
+@router.get("/stats/views/{attraction_id}")
+async def get_attraction_view_count(attraction_id: str):
+    """관광지 조회수 조회 (Redis에서)"""
+    try:
+        view_count = get_view_count(attraction_id)
+        return {
+            "attraction_id": attraction_id,
+            "view_count": view_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting view count: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="조회수 조회 중 오류가 발생했습니다."
+        )
 
 # 카테고리별 테이블 매핑
 CATEGORY_TABLES = {
@@ -1100,8 +1117,17 @@ async def get_filtered_attractions(
 
 @router.get("/{attraction_id}")
 async def get_attraction_details(attraction_id: str, db: Session = Depends(get_db)):
-    """특정 관광지의 상세 정보를 가져옵니다."""
+    """특정 관광지의 상세 정보를 가져옵니다. (Redis 캐싱 적용)"""
     try:
+        # 캐시에서 조회 시도
+        cached_result = get_cached_attraction_data(attraction_id)
+        if cached_result is not None:
+            logger.info(f"Cache hit for attraction: {attraction_id}")
+            # 조회수 증가
+            increment_view_count(attraction_id)
+            return cached_result
+        
+        logger.info(f"Cache miss for attraction: {attraction_id}")
         # 새로운 ID 형식 처리: table_name_id 형식
         if "_" in attraction_id:
             # 테이블명이 여러 단어로 구성된 경우를 고려하여 마지막 _ 기준으로 분리
@@ -1155,6 +1181,12 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
                 "updatedAt": attraction.updated_at.isoformat() if attraction.updated_at else None
             })
             
+            # 조회수 증가
+            increment_view_count(attraction_id)
+            
+            # 결과를 캐시에 저장 (2시간)
+            cache_attraction_data(attraction_id, formatted_attraction, expire=7200)
+            
             return formatted_attraction
         
         else:
@@ -1190,7 +1222,15 @@ async def get_attraction_details(attraction_id: str, db: Session = Depends(get_d
             
             # 매칭된 결과가 있으면 첫 번째 결과 반환
             if matching_attractions:
-                return matching_attractions[0][1]
+                result = matching_attractions[0][1]
+                
+                # 조회수 증가
+                increment_view_count(attraction_id)
+                
+                # 결과를 캐시에 저장 (2시간)
+                cache_attraction_data(attraction_id, result, expire=7200)
+                
+                return result
             
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

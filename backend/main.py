@@ -88,3 +88,38 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "redis": redis_client.ping()}
+
+
+@app.get("/redis/test")
+async def test_redis():
+    """Redis 연결 및 기본 기능 테스트"""
+    try:
+        # 기본 Redis 작업 테스트
+        test_key = "test:redis:connection"
+        test_value = {"message": "Redis 연결 성공!", "timestamp": "2024-01-01T00:00:00Z"}
+        
+        # 데이터 저장
+        redis_client.set(test_key, str(test_value), ex=60)  # 60초 후 만료
+        
+        # 데이터 조회
+        retrieved_value = redis_client.get(test_key)
+        
+        # 카운터 증가 테스트
+        counter_key = "test:counter"
+        redis_client.incr(counter_key)
+        counter_value = redis_client.get(counter_key)
+        
+        return {
+            "status": "success",
+            "redis_connection": redis_client.ping(),
+            "test_data": {
+                "stored": test_value,
+                "retrieved": retrieved_value,
+                "counter": int(counter_value) if counter_value else 0
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Redis 테스트 실패: {str(e)}"
+        }

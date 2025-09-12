@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vectorization import RecommendationEngine
 from auth_utils import get_current_user
 from schemas import PlaceRecommendation, RecommendationRequest
+from cache_utils import cache, cached, cache_recommendations, get_cached_recommendations
 import logging
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -147,13 +148,28 @@ async def get_popular_places(
     """
     인기 장소 추천 (로그인 불필요)
     - 클릭수, 체류시간, 좋아요 등 행동 데이터 기반
+    - Redis 캐싱 적용 (1시간)
     """
     try:
+        # 캐시 키 생성
+        cache_key = f"popular:{region}:{category}:{limit}"
+        
+        # 캐시에서 조회 시도
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache hit for popular places: {cache_key}")
+            return cached_result
+        
+        # 캐시에 없으면 추천 엔진에서 조회
+        logger.info(f"Cache miss for popular places: {cache_key}")
         popular_places = await recommendation_engine.get_popular_places(
             region=region,
             category=category,
             limit=limit
         )
+        
+        # 결과를 캐시에 저장 (1시간)
+        cache.set(cache_key, popular_places, expire=3600)
         
         return popular_places
         
@@ -171,18 +187,33 @@ async def get_personalized_recommendations(
     """
     개인화 추천 (로그인 필요)
     - 사용자 선호도와 행동 이력 기반 BERT 벡터 유사도 계산
+    - Redis 캐싱 적용 (30분)
     """
     try:
         user_id = str(current_user.user_id)
         if not user_id:
             raise HTTPException(status_code=401, detail="사용자 인증이 필요합니다.")
         
+        # 캐시 키 생성
+        cache_key = f"personalized:{user_id}:{region}:{category}:{limit}"
+        
+        # 캐시에서 조회 시도
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Cache hit for personalized recommendations: {cache_key}")
+            return cached_result
+        
+        # 캐시에 없으면 추천 엔진에서 조회
+        logger.info(f"Cache miss for personalized recommendations: {cache_key}")
         personalized_places = await recommendation_engine.get_personalized_recommendations(
             user_id=user_id,
             region=region,
             category=category,
             limit=limit
         )
+        
+        # 결과를 캐시에 저장 (30분)
+        cache.set(cache_key, personalized_places, expire=1800)
         
         return personalized_places
         
