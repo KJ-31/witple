@@ -197,15 +197,67 @@ export default function MapPage() {
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
 
+  // 장소 ID 파싱 함수
+  const parsePlaceId = (placeId: string): {tableName: string, numericId: string} => {
+    let tableName = ''
+    let numericId = ''
+    
+    if (placeId.includes('_')) {
+      const parts = placeId.split('_')
+      if (parts[0] === 'leisure' && parts[1] === 'sports' && parts.length >= 3) {
+        tableName = 'leisure_sports'
+        numericId = parts[2]
+      } else {
+        tableName = parts[0]
+        numericId = parts[parts.length - 1]
+      }
+    } else {
+      tableName = 'general'
+      numericId = placeId
+    }
+    
+    return { tableName, numericId }
+  }
+
   // 장소 선택 상태 확인 함수
   const isPlaceInItinerary = (placeId: string): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
     return selectedItineraryPlaces.some(p => {
-      // 원본 데이터의 ID로 비교 (새로 추가된 장소)
-      if (p.originalData && p.originalData.id === placeId) {
-        return true
+      // 새로 추가된 장소의 경우 - originalData로 비교
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && p.originalData.id === numericId
       }
-      // 기존 ID 비교
+      // 기존 ID 비교 (하위 호환성)
       return p.id.includes(placeId)
+    })
+  }
+
+  // 특정 Day에 장소가 선택되었는지 확인
+  const isPlaceSelectedOnDay = (placeId: string, dayNumber: number): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
+    return selectedItineraryPlaces.some(p => {
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && 
+               p.originalData.id === numericId && 
+               p.dayNumber === dayNumber
+      }
+      return p.id.includes(placeId) && p.dayNumber === dayNumber
+    })
+  }
+
+  // 다른 Day에 이미 선택된 장소인지 확인
+  const isPlaceSelectedOnOtherDay = (placeId: string, currentDay: number): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
+    return selectedItineraryPlaces.some(p => {
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && 
+               p.originalData.id === numericId && 
+               p.dayNumber !== currentDay
+      }
+      return p.id.includes(placeId) && p.dayNumber !== currentDay
     })
   }
 
@@ -219,10 +271,15 @@ export default function MapPage() {
     // 이미 일정에 있는 장소인지 확인
     if (isPlaceInItinerary(place.id)) {
       // 일정에서 제거
+      const { tableName, numericId } = parsePlaceId(place.id)
+      
       setSelectedItineraryPlaces(prev => prev.filter(p => {
-        if (p.originalData && p.originalData.id === place.id) {
-          return false
+        // 새로 추가된 장소의 경우
+        if (p.originalData) {
+          // table_name과 id가 모두 일치하는 경우 제거 (false 반환)
+          return !(p.originalData.table_name === tableName && p.originalData.id === numericId)
         }
+        // 기존 장소의 경우
         return !p.id.includes(place.id)
       }))
       
@@ -3562,13 +3619,19 @@ export default function MapPage() {
               ) : categoryPlaces.length > 0 ? (
                 <div className="space-y-3">
                   {categoryPlaces.map(place => {
-                    const isSelected = isPlaceInItinerary(place.id)
+                    const currentDay = highlightedDay || 1
+                    const isSelectedOnCurrentDay = isPlaceSelectedOnDay(place.id, currentDay)
+                    const isSelectedOnOtherDay = isPlaceSelectedOnOtherDay(place.id, currentDay)
+                    const isSelected = isSelectedOnCurrentDay || isSelectedOnOtherDay
+                    
                     return (
                     <div
                       key={place.id}
                       className={`border rounded-xl p-4 transition-colors cursor-pointer ${
-                        isSelected 
+                        isSelectedOnCurrentDay 
                           ? 'bg-[#3E68FF]/10 border-[#3E68FF] ring-2 ring-[#3E68FF]'
+                          : isSelectedOnOtherDay
+                          ? 'bg-[#6FA0E6]/10 border-[#6FA0E6] ring-2 ring-[#6FA0E6]'
                           : 'bg-[#1F3C7A]/20 border-[#1F3C7A]/40 hover:bg-[#1F3C7A]/30'
                       }`}
                       onClick={() => {
@@ -3612,8 +3675,10 @@ export default function MapPage() {
                         </div>
                         <button 
                           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ml-4 ${
-                            isSelected
+                            isSelectedOnCurrentDay
                               ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : isSelectedOnOtherDay
+                              ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
                               : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
                           }`}
                           onClick={(e) => {
@@ -3621,7 +3686,9 @@ export default function MapPage() {
                             addPlaceToItinerary(place)
                           }}
                         >
-                          {isSelected ? '선택됨' : `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
+                          {isSelectedOnCurrentDay ? '선택됨' :
+                           isSelectedOnOtherDay ? '다른날' : 
+                           `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
                         </button>
                       </div>
                     </div>
