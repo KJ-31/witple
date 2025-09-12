@@ -1375,7 +1375,64 @@ export default function MapPage() {
     return '#9e9e9e'; // 기본 회색
   };
 
-  // 교통수단 이름 정리 (버스 번호만 추출)
+  // 교통수단 이모티콘만 반환
+  const getTransitIcon = (transitDetails: any) => {
+    const vehicleType = transitDetails.vehicle_type || '';
+    const lineName = transitDetails.line || '';
+    
+    // 지하철인 경우
+    if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+      return '🚇';
+    }
+    
+    // 버스인 경우
+    if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+      return '🚌';
+    }
+    
+    return '🚌'; // 기본값
+  };
+
+  // 교통수단 번호만 반환
+  const getTransitNumber = (transitDetails: any) => {
+    const lineName = transitDetails.line || '';
+    const shortName = transitDetails.short_name || '';
+    
+    // short_name이 있고 숫자로만 이루어져 있으면 버스 번호일 가능성이 높음
+    if (shortName && /^\d+$/.test(shortName)) {
+      return shortName;
+    }
+    
+    // line name에서 번호 추출
+    const busNumber = lineName.match(/\d+/);
+    if (busNumber) {
+      return busNumber[0];
+    }
+    
+    // 지하철인 경우 호선 정보 추출
+    const lineMatch = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+    if (lineMatch) {
+      return lineMatch[1];
+    }
+    
+    return shortName || '알 수 없음';
+  };
+
+  // 정류장/역 정보 반환
+  const getStopInfo = (transitDetails: any) => {
+    const departureStop = transitDetails.departure_stop || '';
+    const arrivalStop = transitDetails.arrival_stop || '';
+    
+    // 출발지와 도착지가 있으면 출발지 표시
+    if (departureStop) {
+      // 괄호와 불필요한 정보 제거
+      return departureStop.replace(/\([^)]*\)/g, '').trim();
+    }
+    
+    return '';
+  };
+
+  // 교통수단 이름 정리 (기존 호환성을 위해 유지)
   const getCleanTransitName = (transitDetails: any) => {
     // step.transitDetails 객체에서 정보 추출
     const lineName = transitDetails.line || '';
@@ -1454,7 +1511,9 @@ export default function MapPage() {
         
         // 교통수단 정보 추출
         const transitDetail = step.transitDetails;
-        const cleanName = getCleanTransitName(transitDetail);
+        const transitIcon = getTransitIcon(transitDetail);
+        const transitNumber = getTransitNumber(transitDetail);
+        const stopInfo = getStopInfo(transitDetail);
         const vehicleType = transitDetail.vehicle_type || '';
         const lineName = transitDetail.line || '';
         
@@ -1476,24 +1535,46 @@ export default function MapPage() {
               lng: targetStep.start_location.lng()
             };
             
-            // 커스텀 정보창 HTML (깔끔한 스타일)
+            // 커스텀 정보창 HTML (동그라미 이모티콘 + 흰색 바탕 정보)
             const content = `
               <div style="
                 display: inline-flex;
                 align-items: center;
-                background: ${backgroundColor};
-                color: white;
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: 600;
+                gap: 4px;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 white-space: nowrap;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-                border: none;
-                min-height: 18px;
               ">
-                ${cleanName}
+                <!-- 색상 동그라미에 이모티콘 -->
+                <div style="
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  width: 20px;
+                  height: 20px;
+                  background: ${backgroundColor};
+                  border-radius: 50%;
+                  font-size: 10px;
+                  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                ">
+                  ${transitIcon}
+                </div>
+                
+                <!-- 흰색 바탕에 번호와 역/정류장 정보 -->
+                <div style="
+                  display: inline-flex;
+                  align-items: center;
+                  background: white;
+                  color: #333;
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  font-size: 10px;
+                  font-weight: 600;
+                  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+                  max-width: 100px;
+                ">
+                  <span style="color: ${backgroundColor}; font-weight: 700;">${transitNumber}</span>
+                  ${stopInfo ? `<span style="margin-left: 3px; color: #666; font-size: 9px; overflow: hidden; text-overflow: ellipsis;">${stopInfo}</span>` : ''}
+                </div>
               </div>
             `;
             
@@ -1502,7 +1583,7 @@ export default function MapPage() {
               position: position,
               disableAutoPan: true,
               pixelOffset: new (window as any).google.maps.Size(0, -5),
-              maxWidth: 120,
+              maxWidth: 150,
               zIndex: 1000
             });
             
