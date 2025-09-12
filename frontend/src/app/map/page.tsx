@@ -121,6 +121,7 @@ export default function MapPage() {
   const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
   const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
+  const [transitInfoWindows, setTransitInfoWindows] = useState<any[]>([])
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [routeSegments, setRouteSegments] = useState<{
     origin: {lat: number, lng: number, name: string},
@@ -311,14 +312,39 @@ export default function MapPage() {
     };
   }, [longPressData?.isDragging]);
 
-  // 화면 높이 측정
+  // 화면 높이 측정 및 Google Maps 정보창 제거
   useEffect(() => {
     const updateViewportHeight = () => {
       setViewportHeight(window.innerHeight)
     }
     updateViewportHeight()
     window.addEventListener('resize', updateViewportHeight)
-    return () => window.removeEventListener('resize', updateViewportHeight)
+    
+    // Google Maps 정보창을 주기적으로 제거하는 interval
+    const removeGoogleMapsInfoWindows = () => {
+      // 교통수단 정보창 제거
+      const transitInfos = document.querySelectorAll('div[style*="box-shadow: rgba(0, 0, 0, 0.6)"][style*="border-radius: 3px 3px 3px 0px"]')
+      transitInfos.forEach(el => {
+        if (el instanceof HTMLElement) {
+          el.style.display = 'none'
+        }
+      })
+      
+      // 모든 Google Maps 정보창 제거
+      const allInfoWindows = document.querySelectorAll('div[style*="font-family: Roboto, Arial, sans-serif"][style*="white-space: nowrap"]')
+      allInfoWindows.forEach(el => {
+        if (el instanceof HTMLElement) {
+          el.style.display = 'none'
+        }
+      })
+    }
+    
+    const interval = setInterval(removeGoogleMapsInfoWindows, 500)
+    
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight)
+      clearInterval(interval)
+    }
   }, [])
 
   // 바텀 시트 드래그 핸들러
@@ -1252,6 +1278,14 @@ export default function MapPage() {
     });
     setSequenceMarkers([]);
     
+    // 모든 기존 교통수단 정보창 제거
+    transitInfoWindows.forEach(infoWindow => {
+      if (infoWindow) {
+        infoWindow.close();
+      }
+    });
+    setTransitInfoWindows([]);
+    
     // 상태 메시지 제거
     setRouteStatus(null);
     
@@ -1259,7 +1293,7 @@ export default function MapPage() {
     setRouteSegments([]);
     
 
-    console.log('모든 경로와 마커가 제거되었습니다');
+    console.log('모든 경로, 마커, 정보창이 제거되었습니다');
   };
 
   // 특정 일차와 구간에 해당하는 경로 정보 가져오기
@@ -1396,6 +1430,91 @@ export default function MapPage() {
     return shortName || lineName || '알 수 없음';
   };
 
+
+  // 커스텀 교통수단 정보창 생성 (줄바꿈 없는 한 줄 표시)
+  const createCustomTransitInfoWindows = async (allResults: any[], segmentDetails: any[]) => {
+    if (!mapInstance) return;
+    
+    const newInfoWindows: any[] = [];
+    
+    for (let i = 0; i < allResults.length; i++) {
+      const result = allResults[i];
+      const segment = segmentDetails[i];
+      
+      if (!segment || !segment.transitDetails) continue;
+      
+      const route = result.routes[0];
+      const leg = route.legs[0];
+      
+      // 교통수단 스텝들만 필터링
+      const transitSteps = segment.transitDetails.filter((step: any) => step.transitDetails);
+      
+      transitSteps.forEach((step: any, stepIndex: number) => {
+        if (!step.transitDetails) return;
+        
+        // 교통수단 정보 추출
+        const transitDetail = step.transitDetails;
+        const cleanName = getCleanTransitName(transitDetail);
+        const vehicleType = transitDetail.vehicle_type || '';
+        const lineName = transitDetail.line || '';
+        
+        // 지하철/버스 색깔 가져오기
+        let backgroundColor = '#34A853';
+        if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+          backgroundColor = getSubwayLineColor(lineName);
+        } else if (vehicleType === 'BUS' || lineName.includes('버스')) {
+          backgroundColor = getBusColor(lineName);
+        }
+        
+        // 경로의 중간 지점 계산
+        const steps = leg.steps;
+        if (steps && steps.length > stepIndex) {
+          const targetStep = steps.find((s: any) => s.transit && s.transit.line?.name === lineName);
+          if (targetStep && targetStep.start_location) {
+            const position = {
+              lat: targetStep.start_location.lat(),
+              lng: targetStep.start_location.lng()
+            };
+            
+            // 커스텀 정보창 HTML (깔끔한 스타일)
+            const content = `
+              <div style="
+                display: inline-flex;
+                align-items: center;
+                background: ${backgroundColor};
+                color: white;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                white-space: nowrap;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                border: none;
+                min-height: 18px;
+              ">
+                ${cleanName}
+              </div>
+            `;
+            
+            const infoWindow = new (window as any).google.maps.InfoWindow({
+              content: content,
+              position: position,
+              disableAutoPan: true,
+              pixelOffset: new (window as any).google.maps.Size(0, -5),
+              maxWidth: 120,
+              zIndex: 1000
+            });
+            
+            infoWindow.open(mapInstance);
+            newInfoWindows.push(infoWindow);
+          }
+        }
+      });
+    }
+    
+    setTransitInfoWindows(newInfoWindows);
+  };
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
@@ -1616,6 +1735,7 @@ export default function MapPage() {
           strokeOpacity: 0.8
         },
         suppressMarkers: i > 0,
+        suppressInfoWindows: true, // 기본 정보창 숨기기
         preserveViewport: true // 모든 경로에서 뷰포트 유지
       });
 
@@ -1634,6 +1754,9 @@ export default function MapPage() {
 
     setDirectionsRenderers(newRenderers);
     await createSequenceMarkers(segments, isOptimized);
+    
+    // 커스텀 교통수단 정보창 생성
+    await createCustomTransitInfoWindows(allResults, segmentDetails);
 
     // 전체 경로가 보이도록 지도 뷰 조정
     if (mapInstance && bounds && !bounds.isEmpty()) {
@@ -1841,6 +1964,69 @@ export default function MapPage() {
 
   return (
     <>
+      {/* Google Maps 기본 교통수단 정보창 숨기기 */}
+      <style jsx global>{`
+        /* Google Maps 모든 정보창 숨기기 */
+        .gm-transit-info-window,
+        .gm-transit-details,
+        .gm-transit-line,
+        div[style*="box-shadow"][style*="border: 1px solid"][style*="padding: 2px"][style*="font-size: 13px"] {
+          display: none !important;
+        }
+        
+        /* 더 구체적인 선택자로 교통수단 정보창 숨기기 */
+        div[style*="position: absolute"][style*="bottom: 0px"][style*="background: rgb(240, 240, 240)"] {
+          display: none !important;
+        }
+        
+        /* 교통수단 아이콘이 포함된 정보창 숨기기 */
+        div[style*="box-shadow: rgba(0, 0, 0, 0.6)"][style*="border-radius: 3px 3px 3px 0px"] {
+          display: none !important;
+        }
+        
+        /* 버스/지하철 아이콘이 있는 정보창 숨기기 */
+        div[style*="font-family: Roboto, Arial, sans-serif"][style*="white-space: nowrap"] {
+          display: none !important;
+        }
+        
+        /* Google Maps directions 관련 정보창 모두 숨기기 */
+        .adp-transit,
+        .adp-directions,
+        .adp-summary,
+        div[jsaction*="transit"] {
+          display: none !important;
+        }
+        
+        /* 경로선 위의 모든 정보창 숨기기 */
+        div[style*="line-height: 12px"][style*="border: 1px solid"] {
+          display: none !important;
+        }
+        
+        /* 커스텀 InfoWindow 스타일링 - 기본 말풍선 모양 제거 */
+        .gm-style-iw {
+          background: transparent !important;
+          box-shadow: none !important;
+          border: none !important;
+          padding: 0 !important;
+        }
+        
+        .gm-style-iw-d {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        
+        /* InfoWindow 닫기 버튼 숨기기 */
+        .gm-ui-hover-effect {
+          display: none !important;
+        }
+        
+        /* InfoWindow 꼬리 부분 숨기기 */
+        .gm-style-iw-tc::after {
+          display: none !important;
+        }
+      `}</style>
+      
       <div className="min-h-screen bg-[#0B1220] text-white relative">
       {/* Header Back */}
       <div className="absolute top-4 left-4 z-50">
