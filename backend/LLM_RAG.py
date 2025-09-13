@@ -85,9 +85,7 @@ vectorstore = PGVector(
     pre_delete_collection=False,  # 기존 데이터 보존
 )
 
-# =============================================================================
-# 지역 및 키워드 인식 시스템
-# =============================================================================
+# # 지역 및 키워드 인식 시스템
 
 # 지역 및 키워드 데이터 (실제 DB 분석 결과 기반)
 REGIONS = [
@@ -340,7 +338,7 @@ class HybridOptimizedRetriever(BaseRetriever):
             return []
 
 # 하이브리드 최적화 Retriever 생성 (높은 정확도를 위한 엄격한 임계값)
-retriever = HybridOptimizedRetriever(vectorstore, k=20000, score_threshold=0.6, max_sql_results=8000)
+retriever = HybridOptimizedRetriever(vectorstore, k=32000, score_threshold=0.6, max_sql_results=5000)
 
 # =============================================================================
 # 프롬프트 템플릿 정의
@@ -373,9 +371,7 @@ rag_prompt = ChatPromptTemplate.from_template("""
 답변:
 """)
 
-# =============================================================================
-# RAG 체인 구성
-# =============================================================================
+# # RAG 체인 구성
 
 def format_docs(docs):
     """검색된 문서들을 텍스트로 포맷팅 (유사도 점수 포함)"""
@@ -410,9 +406,7 @@ rag_chain = (
     | StrOutputParser()
 )
 
-# =============================================================================
-# 주요 기능 함수들
-# =============================================================================
+# # 주요 기능 함수들
 
 def search_places(query):
     """여행지 검색 함수 (하이브리드 최적화)"""
@@ -514,9 +508,7 @@ def interactive_mode():
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
 
-# =============================================================================
-# LangGraph 여행 대화 시스템
-# =============================================================================
+# # LangGraph 여행 대화 시스템
 
 # LangGraph 의존성 임포트 (선택적)
 try:
@@ -643,49 +635,48 @@ def rag_processing_node(state: TravelState) -> TravelState:
                     target_keywords.extend(keywords)
                     break
         
-        # 지역 필터링된 문서들 (순수성 유지)
-        region_docs = []
-        
+        # 지역 필터링 개선 (더 포괄적으로)
         if query_regions:
-            print(f"🎯 지역 필터링: {query_regions} (키워드: {target_keywords[:5]}...)")
+            print(f"🎯 지역 필터링: {query_regions}")
+            region_docs = []
+            
             for doc in docs:
-                doc_content = doc.page_content.lower()
                 doc_region = doc.metadata.get('region', '').lower()
                 doc_city = doc.metadata.get('city', '').lower()
                 
-                # 해당 지역 키워드가 포함되어 있는지 확인 (더 엄격하게)
-                is_target_region = False
-                for keyword in target_keywords:
-                    if keyword.lower() in doc_content or keyword.lower() in doc_region or keyword.lower() in doc_city:
-                        is_target_region = True
+                # 포괄적인 지역 매칭
+                is_relevant = False
+                for region in query_regions:
+                    region_lower = region.lower()
+                    
+                    # 1. 정확한 지역명 매칭
+                    if region_lower in doc_region:
+                        is_relevant = True
+                        break
+                    
+                    # 2. 특정 지역 요청 시 해당 광역시/도 전체 포함
+                    elif '강릉' in region_lower and '강원' in doc_region:
+                        is_relevant = True  # 강릉 요청 시 강원도 전체 포함
+                        break
+                    elif '부산' in region_lower and ('부산' in doc_region or '부산' in doc_city):
+                        is_relevant = True  # 부산 요청 시 부산 전체 포함
+                        break  
+                    elif '서울' in region_lower and ('서울' in doc_region or '서울' in doc_city):
+                        is_relevant = True  # 서울 요청 시 서울 전체 포함
+                        break
+                    elif '제주' in region_lower and '제주' in doc_region:
+                        is_relevant = True  # 제주 요청 시 제주도 전체 포함
                         break
                 
-                # 강릉 요청 시 강릉 관련 장소 우선, 하지만 완전 차단은 하지 않음
-                if is_target_region and query_regions and '강릉' in query_regions:
-                    # 강릉시가 명시된 장소를 최우선으로 하되, 다른 지역도 제한적으로 포함
-                    if '강릉' in doc_city or '강릉시' in doc_city:
-                        # 강릉 장소는 최우선으로 추가
-                        region_docs.insert(0, doc)  # 앞쪽에 추가
-                        continue
-                    elif any(city in doc_city for city in ['평창', '횡성', '원주']):
-                        # 다른 강원도 도시는 제한적으로만 포함 (나중에 길이 제한으로 자연 필터링)
-                        pass
-                
-                if is_target_region:
+                if is_relevant:
                     region_docs.append(doc)
             
-            # 해당 지역 문서만 사용 (다른 지역 문서는 절대 섞지 않음)
-            docs = region_docs[:30]
-            print(f"📍 지역 관련 문서: {len(region_docs)}개, 최종 사용: {len(docs)}개")
-            
-            # 지역 문서가 충분하지 않으면 전체 문서 사용
-            if len(region_docs) < 10:
-                print(f"⚠️ {', '.join(query_regions)} 지역 정보 부족: {len(region_docs)}개 문서만 발견")
-                print("🔄 전체 문서에서 재검색...")
-                # 원본 검색 결과 사용하되 지역 필터는 유지
-                original_docs = retriever._get_relevant_documents(user_query)
-                docs = original_docs[:50]
-                print(f"📍 재검색 결과: {len(docs)}개 문서 사용")
+            if region_docs:
+                docs = region_docs[:50]  # 더 많은 결과 허용
+                print(f"📍 지역 필터링 결과: {len(docs)}개 문서 선별")
+            else:
+                print(f"⚠️ 지역 필터링 결과 없음, 전체 결과 사용")
+                docs = docs[:50]
         
         # 구조화된 장소 데이터 추출
         structured_places = extract_structured_places(docs)
@@ -859,6 +850,62 @@ def general_chat_node(state: TravelState) -> TravelState:
             "conversation_context": "죄송합니다. 일시적인 오류가 발생했습니다."
         }
 
+def normalize_place_name(place_name: str) -> str:
+    """장소명 정규화 (매칭 정확도 향상)"""
+    if not place_name:
+        return ""
+
+    # 접두어 제거
+    name = place_name.strip()
+    if name.startswith("이름: "):
+        name = name[3:].strip()
+    if name.startswith("**"):
+        name = name[2:].strip()
+    if name.endswith("**"):
+        name = name[:-2].strip()
+
+    # 공백 정리
+    name = ' '.join(name.split())
+
+    return name.lower()
+
+def find_place_in_itinerary(place_name: str, itinerary: list) -> int:
+    """일정에서 장소가 속한 일차 찾기 (개선된 매칭)"""
+    normalized_place = normalize_place_name(place_name)
+
+    for day_info in itinerary:
+        day_num = day_info.get("day", 1)
+
+        for schedule in day_info.get("schedule", []):
+            schedule_place = normalize_place_name(schedule.get("place_name", ""))
+
+            # 정확한 매칭
+            if normalized_place == schedule_place:
+                return day_num
+
+            # 포함 관계 매칭 (더 긴 이름이 짧은 이름을 포함)
+            if len(normalized_place) >= 2 and len(schedule_place) >= 2:
+                if (normalized_place in schedule_place and len(normalized_place) >= len(schedule_place) * 0.5) or \
+                   (schedule_place in normalized_place and len(schedule_place) >= len(normalized_place) * 0.5):
+                    return day_num
+
+    return 0  # 매칭되지 않음
+
+def extract_places_by_day(itinerary: list) -> dict:
+    """일차별로 장소 목록 추출"""
+    places_by_day = {}
+
+    for day_info in itinerary:
+        day_num = day_info.get("day", 1)
+        places_by_day[day_num] = []
+
+        for schedule in day_info.get("schedule", []):
+            place_name = normalize_place_name(schedule.get("place_name", ""))
+            if place_name and place_name not in places_by_day[day_num]:
+                places_by_day[day_num].append(place_name)
+
+    return places_by_day
+
 def confirmation_processing_node(state: TravelState) -> TravelState:
     """일정 확정 처리 노드 (2단계 플로우)"""
     print(f"🎯 확정 처리 요청")
@@ -919,107 +966,108 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
             if len(confirmed_plan["places"]) > 3:
                 places_summary += f" 외 {len(confirmed_plan['places']) - 3}곳"
     
-    # 지도 표시를 위한 장소 파라미터 구성
+    # 지도 표시를 위한 장소 파라미터 구성 (메타데이터 활용)
     places_list = []
     day_numbers_list = []
     source_tables_list = []
-    
+
     if "places" in confirmed_plan and confirmed_plan["places"]:
         total_days = len(confirmed_plan.get("itinerary", []))
         if total_days == 0:
             total_days = 1
-        
-        # 장소를 일차별로 균등 분배
-        places_to_process = confirmed_plan["places"][:10]  # 최대 10개 장소
-        
+
+        # 장소를 일차별로 정확하게 배치 (개선된 매칭)
+        places_to_process = confirmed_plan["places"]  # 모든 장소 포함
+
+        # 일차별 장소 목록 추출 (정확한 매칭을 위해)
+        itinerary = confirmed_plan.get("itinerary", [])
+        places_by_day = extract_places_by_day(itinerary)
+
+        print(f"🗓️ 일차별 장소 분석: {places_by_day}")
+
         for idx, place in enumerate(places_to_process):
+            # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
+            table_name = place.get("table_name", "nature")
+            place_id = place.get("place_id", "1")
+
             # 장소 ID 생성 (table_name_place_id 형태)
-            table_name = place.get("table_name", place.get("category", "general"))
-            place_id = place.get("place_id", place.get("id", "1"))
             place_identifier = f"{table_name}_{place_id}"
-            
+
             places_list.append(place_identifier)
             source_tables_list.append(table_name)
-            
-            # 일정에서 해당 장소가 몇일차에 있는지 확인
-            day_num = 1  # 기본값
-            place_name = place.get("name", "").replace("이름: ", "").strip()
-            
-            if "itinerary" in confirmed_plan:
-                found = False
-                for day_info in confirmed_plan["itinerary"]:
-                    for schedule in day_info.get("schedule", []):
-                        schedule_place = schedule.get("place_name", "").replace("이름: ", "").strip()
-                        # 장소명이 포함되어 있으면 매칭
-                        if place_name in schedule_place or schedule_place in place_name:
-                            day_num = day_info.get("day", 1)
-                            found = True
+
+            # 개선된 일차 매칭
+            place_name = place.get("name", "")
+            day_num = find_place_in_itinerary(place_name, itinerary)
+
+            # 매칭되지 않은 경우 처리
+            if day_num == 0:
+                print(f"⚠️ '{place_name}' 매칭 실패, 대안 방법 시도")
+
+                # 카테고리별로 적절한 일차에 배치
+                category = place.get("category", "")
+
+                if "식당" in category or "맛집" in category or "음식" in category:
+                    # 식사 장소는 기존 식사 시간대가 있는 일차에 배치
+                    for day_info in itinerary:
+                        for schedule in day_info.get("schedule", []):
+                            if any(keyword in schedule.get("description", "") for keyword in ["점심", "저녁", "식사"]):
+                                day_num = day_info.get("day", 1)
+                                break
+                        if day_num > 0:
                             break
-                    if found:
-                        break
-                
-                # 매칭되지 않으면 순서대로 균등 배치
-                if not found:
-                    day_num = (idx % total_days) + 1
-            
+
+                # 여전히 매칭되지 않으면 가장 적은 장소가 있는 일차에 배치
+                if day_num == 0:
+                    if places_by_day:
+                        min_places_day = min(places_by_day.keys(), key=lambda x: len(places_by_day[x]))
+                        day_num = min_places_day
+                    else:
+                        # 최후의 수단: 순서대로 균등 분배
+                        day_num = (idx % max(total_days, 1)) + 1
+
+                print(f"📍 '{place_name}' -> {day_num}일차 배치")
+
             day_numbers_list.append(str(day_num))
-        
-        # 완전 균등 분배를 위한 재배정
-        if total_days > 1 and len(day_numbers_list) >= total_days:
-            # 각 일차에 몇 개씩 배치할지 계산
-            base_count = len(day_numbers_list) // total_days
-            extra_count = len(day_numbers_list) % total_days
-            
-            # 새로운 균등 분배
-            new_day_numbers = []
-            place_idx = 0
-            
-            for day in range(1, total_days + 1):
-                # 기본 개수 + (extra가 있으면 1개 더)
-                count_for_this_day = base_count + (1 if day <= extra_count else 0)
-                
-                for _ in range(count_for_this_day):
-                    if place_idx < len(day_numbers_list):
-                        new_day_numbers.append(str(day))
-                        place_idx += 1
-            
-            # 남은 장소들은 순서대로 배치
-            while place_idx < len(day_numbers_list):
-                day = ((place_idx - len(new_day_numbers)) % total_days) + 1
-                new_day_numbers.append(str(day))
-                place_idx += 1
-            
-            day_numbers_list = new_day_numbers
-    
+
+        print(f"🗺️ 지도 표시용 장소 구성 완료:")
+        print(f"   장소 목록: {places_list[:5]}{'...' if len(places_list) > 5 else ''}")
+        print(f"   일차 배정: {day_numbers_list[:5]}{'...' if len(day_numbers_list) > 5 else ''}")
+        print(f"   테이블 목록: {source_tables_list[:5]}{'...' if len(source_tables_list) > 5 else ''}")
+
     # 날짜 계산 (duration에서 박수 추출)
     import re
     from datetime import datetime, timedelta
-    
+
     duration_str = confirmed_plan.get('duration', '2박 3일')
     days_match = re.search(r'(\d+)일', duration_str)
     days = int(days_match.group(1)) if days_match else 2
-    
+
     # 시작일을 오늘로 설정
     start_date = datetime.now().strftime('%Y-%m-%d')
     end_date = (datetime.now() + timedelta(days=days-1)).strftime('%Y-%m-%d')
-    
+
     # URL 파라미터 생성
     import urllib.parse
     places_param = ','.join(places_list)
     day_numbers_param = ','.join(day_numbers_list)
     source_tables_param = ','.join(source_tables_list)
-    
+
     map_url = f"/map?places={urllib.parse.quote(places_param)}&dayNumbers={urllib.parse.quote(day_numbers_param)}&sourceTables={urllib.parse.quote(source_tables_param)}&startDate={start_date}&endDate={end_date}&days={days}&baseAttraction=general"
+
+    print(f"🔗 생성된 지도 URL: {map_url[:100]}{'...' if len(map_url) > 100 else ''}")
     
     # 지도 표시용 장소 정보도 유지 (프론트엔드에서 추가 활용 가능)
     map_places = []
     if "places" in confirmed_plan and confirmed_plan["places"]:
-        for place in confirmed_plan["places"][:10]:
+        for place in confirmed_plan["places"]:
             place_info = {
                 "name": place.get("name", ""),
                 "category": place.get("category", ""),
                 "table_name": place.get("table_name", ""),
-                "place_id": place.get("place_id", place.get("id", ""))
+                "place_id": place.get("place_id", place.get("id", "")),
+                "city": place.get("city", ""),
+                "region": place.get("region", "")
             }
             # 위치 정보가 있으면 추가
             if place.get("latitude") and place.get("longitude"):
@@ -1192,6 +1240,46 @@ def integrate_response_node(state: TravelState) -> TravelState:
         "conversation_context": integrated_response
     }
 
+def find_place_in_recommendations(place_name: str) -> dict:
+    """place_recommendations 테이블에서 장소명으로 실제 데이터 검색 (벡터 업데이트 후 불필요)"""
+    # 벡터 업데이트 후에는 메타데이터에 place_id, table_name이 포함되므로
+    # 이 함수는 호환성을 위해서만 유지
+    try:
+        from sqlalchemy import create_engine, text
+
+        # DB 연결
+        engine = create_engine(CONNECTION_STRING)
+
+        with engine.connect() as conn:
+            # 유사한 이름으로 검색 (대소문자 구분 없이) - psycopg3 스타일
+            search_query = """
+            SELECT place_id, table_name, name, region, city, category
+            FROM place_recommendations
+            WHERE name ILIKE :search_term
+            LIMIT 1
+            """
+
+            result = conn.execute(text(search_query), {'search_term': f"%{place_name}%"})
+            row = result.fetchone()
+
+            if row:
+                return {
+                    'name': row.name,
+                    'place_id': str(row.place_id) if row.place_id else "1",
+                    'table_name': row.table_name or 'nature',
+                    'region': row.region or '강원특별자치도',
+                    'city': row.city or '미지정',
+                    'category': row.category or '관광',
+                    'description': f'장소: {row.name}',
+                    'similarity_score': 0.9
+                }
+
+        return None
+
+    except Exception as e:
+        print(f"place_recommendations 검색 오류: {e}")
+        return None
+
 def find_real_place_id(place_name: str, table_name: str, region: str = "") -> str:
     """장소명으로 실제 DB에서 place_id 조회"""
     try:
@@ -1246,100 +1334,75 @@ def find_real_place_id(place_name: str, table_name: str, region: str = "") -> st
         return "1"  # 오류 시 기본값
 
 def extract_structured_places(docs: List[Document]) -> List[dict]:
-    """RAG 검색 결과에서 구조화된 장소 정보 추출"""
+    """RAG 검색 결과에서 구조화된 장소 정보 추출 (업데이트된 메타데이터 활용)"""
     structured_places = []
-    
+
     for doc in docs[:20]:  # 상위 20개만 처리
         try:
-            place_info = {
-                "name": "",
-                "category": "",
-                "region": "",
-                "city": "",
-                "description": doc.page_content[:200],  # 첫 200자
-                "similarity_score": doc.metadata.get('similarity_score', 0)
-            }
-            
-            # 메타데이터에서 정보 추출
+            # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
             metadata = doc.metadata or {}
-            place_info["category"] = metadata.get("category", "")
-            place_info["region"] = metadata.get("region", "")
-            place_info["city"] = metadata.get("city", "")
-            
-            # 데이터베이스 테이블 정보 추출
-            # 카테고리를 테이블 이름으로 매핑
-            category_to_table = {
-                "한식": "restaurants",
-                "중식": "restaurants", 
-                "양식": "restaurants",
-                "일식": "restaurants",
-                "카페": "restaurants",
-                "식당": "restaurants",
-                "맛집": "restaurants",
-                "자연": "attractions",
-                "관광": "attractions",
-                "문화": "humanities",
-                "쇼핑": "shopping",
-                "레포츠": "leisure_sports",
-                "스포츠": "leisure_sports",
-                "숙박": "accommodation",
-                "펜션": "accommodation",
-                "호텔": "accommodation"
+
+            place_info = {
+                "name": metadata.get("name", ""),
+                "category": metadata.get("category", ""),
+                "region": metadata.get("region", ""),
+                "city": metadata.get("city", ""),
+                "table_name": metadata.get("table_name", "nature"),
+                "place_id": metadata.get("place_id", "1"),
+                "description": doc.page_content[:200],  # 첫 200자
+                "similarity_score": metadata.get('similarity_score', 0)
             }
-            
-            # 문서 내용에서 장소명 추출 (간단한 패턴 매칭)
-            content = doc.page_content
-            
-            # 첫 번째 줄이나 처음 몇 단어가 보통 장소명
-            first_line = content.split('\n')[0] if content else ""
-            if first_line and len(first_line) < 50:
-                # "이름: " 접두어 제거
-                name = first_line.strip()
-                if name.startswith("이름: "):
-                    name = name[3:].strip()
-                place_info["name"] = name
-            else:
-                # 패턴으로 장소명 추출
-                import re
-                name_patterns = [
-                    r'([가-힣]{2,20}(?:공원|박물관|맛집|카페|시장|궁|절|타워|센터|몰|해수욕장|산|섬))',
-                    r'([가-힣]{2,20}(?:식당|레스토랑))',
-                ]
-                
-                for pattern in name_patterns:
-                    match = re.search(pattern, content)
-                    if match:
-                        place_info["name"] = match.group(1)
-                        break
-                
-                if not place_info["name"]:
-                    # 첫 몇 단어를 이름으로 사용
-                    words = content.split()[:3]
-                    place_info["name"] = " ".join(words) if words else "장소명 미상"
-            
-            # 카테고리 및 테이블 정보 추출
-            category = place_info.get("category", "")
-            table_name = metadata.get("table_name", category_to_table.get(category, "attractions"))
-            place_info["table_name"] = table_name
-            
-            # 실제 DB에서 장소명으로 place_id 조회 (장소명 추출 후에 호출)
-            try:
-                real_place_id = find_real_place_id(place_info["name"], table_name, metadata.get("region", ""))
-                place_info["place_id"] = real_place_id
-            except Exception as e:
-                print(f"❌ ID 조회 실패: {place_info['name']} ({table_name}) - {e}")
-                place_info["place_id"] = "1"
-            
+
+            # 메타데이터에 name이 없으면 문서 내용에서 추출 (호환성 보장)
+            if not place_info["name"]:
+                content = doc.page_content
+                first_line = content.split('\n')[0] if content else ""
+                if first_line and len(first_line) < 50:
+                    # "이름: " 접두어 제거
+                    name = first_line.strip()
+                    if name.startswith("이름: "):
+                        name = name[3:].strip()
+                    place_info["name"] = name
+                else:
+                    # 패턴으로 장소명 추출
+                    import re
+                    name_patterns = [
+                        r'([가-힣]{2,20}(?:공원|박물관|맛집|카페|시장|궁|절|타워|센터|몰|해수욕장|산|섬))',
+                        r'([가-힣]{2,20}(?:식당|레스토랑))',
+                    ]
+
+                    for pattern in name_patterns:
+                        match = re.search(pattern, content)
+                        if match:
+                            place_info["name"] = match.group(1)
+                            break
+
+                    if not place_info["name"]:
+                        words = content.split()[:3]
+                        place_info["name"] = " ".join(words) if words else "장소명 미상"
+
+            # table_name이 없으면 카테고리로 매핑 (호환성 보장)
+            if not place_info["table_name"] or place_info["table_name"] == "nature":
+                category_to_table = {
+                    "한식": "restaurants", "중식": "restaurants", "양식": "restaurants",
+                    "일식": "restaurants", "카페": "restaurants", "식당": "restaurants",
+                    "맛집": "restaurants", "자연": "nature", "관광": "nature",
+                    "문화": "humanities", "쇼핑": "shopping",
+                    "레포츠": "leisure_sports", "스포츠": "leisure_sports",
+                    "숙박": "accommodation", "펜션": "accommodation", "호텔": "accommodation"
+                }
+                place_info["table_name"] = category_to_table.get(place_info["category"], "nature")
+
             # 위치 정보 추출
             place_info["latitude"] = metadata.get("latitude")
             place_info["longitude"] = metadata.get("longitude")
-            
+
             structured_places.append(place_info)
-            
+
         except Exception as e:
             print(f"장소 정보 추출 오류: {e}")
             continue
-    
+
     return structured_places
 
 def extract_places_from_response(response: str, structured_places: List[dict]) -> List[dict]:
@@ -1353,8 +1416,10 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
     # 매칭된 장소들 저장
     matched_places = []
     
-    # 일정 관련 키워드 필터링
-    ignore_keywords = ['일차', '여행', '일정', '팁', '정보', '확정']
+    # 일정 관련 키워드 필터링 (더 정밀하게)
+    ignore_keywords = ['일차', '여행', '일정', '팁', '정보', '확정', '[', ']']
+    # 지역명만 포함하는 경우는 제외 (예: "부산", "서울")
+    region_only_keywords = ['부산', '서울', '제주', '강릉', '대구', '광주', '전주', '경주']
     
     for mentioned_place in mentioned_places:
         mentioned_place = mentioned_place.strip()
@@ -1363,12 +1428,23 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
         if any(keyword in mentioned_place for keyword in ignore_keywords):
             continue
             
+        # 지역명만 단독으로 나오는 경우 제외 (예: "부산", "서울")
+        if mentioned_place.strip() in region_only_keywords:
+            continue
+        
+        # 너무 짧거나 긴 장소명 제외
+        if len(mentioned_place) < 2 or len(mentioned_place) > 30:
+            continue
+            
         # structured_places에서 가장 유사한 장소 찾기
         best_match = None
         best_score = 0
         
         for place in structured_places:
             place_name = place.get("name", "").strip()
+
+            # LLM이 생성한 장소는 모두 포함 (지역 필터링 제거)
+            # LLM이 이미 적절한 판단을 했다고 신뢰
             
             # 정확히 일치하는 경우
             if mentioned_place == place_name:
@@ -1384,59 +1460,103 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
                     best_score = score
                     best_match = place
         
-        # 정확 매칭이거나 매칭 점수가 0.5 이상인 경우만 추가
-        if best_match and (best_score == 1.0 or best_score >= 0.5):
+        # 매칭 점수가 0.2 이상이면 추가 (더 관대하게)
+        if best_match and best_score >= 0.2:
             if best_match not in matched_places:
                 matched_places.append(best_match)
+        elif not best_match and len(mentioned_place) >= 3:
+            # 실제 place_recommendations 테이블에서 해당 장소 검색
+            actual_place = find_place_in_recommendations(mentioned_place)
+            if actual_place:
+                matched_places.append(actual_place)
+            else:
+                # 정말 찾을 수 없는 경우만 가상 장소 생성
+                virtual_place = {
+                    'name': mentioned_place,
+                    'category': '관광',
+                    'region': '강원특별자치도',
+                    'city': '강릉시' if '강릉' in mentioned_place else '미지정',
+                    'table_name': 'nature',
+                    'place_id': "1",  # 찾을 수 없는 경우 기본 ID
+                    'description': f'LLM 추천 장소: {mentioned_place}',
+                    'similarity_score': 0.8
+                }
+                matched_places.append(virtual_place)
     
     return matched_places
 
 def parse_enhanced_travel_plan(response: str, user_query: str, structured_places: List[dict]) -> dict:
     """향상된 여행 일정 파싱 (실제 장소 데이터 포함)"""
-    
+
     # 기본 정보 추출
     regions, cities, categories = extract_location_and_category(user_query)
     duration = extract_duration(user_query)
-    
-    # 응답에서 시간 패턴과 장소 추출
+
     import re
-    
-    # 시간 패턴 (09:00-12:00, 14:00 등)
-    time_patterns = re.findall(r'\d{2}:\d{2}(?:-\d{2}:\d{2})?', response)
-    
-    # 일차별 구조 파싱
-    day_pattern = r'\[(\d+)일차\]'
-    days = re.findall(day_pattern, response)
-    
-    # 구조화된 일정 생성
+
+    # 일차별 구조 파싱 (더 유연한 패턴)
+    day_patterns = [
+        r'\*\*\[(\d+)일차\]\*\*',  # **[1일차]**
+        r'\[(\d+)일차\]',          # [1일차]
+        r'(\d+)일차',              # 1일차
+        r'\*\*(\d+)일차\*\*'       # **1일차**
+    ]
+
+    # 가장 많이 매칭되는 패턴 사용
+    best_pattern = None
+    best_matches = []
+
+    for pattern in day_patterns:
+        matches = re.findall(pattern, response)
+        if len(matches) > len(best_matches):
+            best_matches = matches
+            best_pattern = pattern
+
     itinerary = []
-    
-    # 응답을 일차별로 분할
-    day_sections = re.split(day_pattern, response)
-    
-    current_day = 1
-    for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 일차 번호, 짝수가 내용
-        if i + 1 < len(day_sections):
-            day_num = day_sections[i]
-            day_content = day_sections[i + 1]
-            
-            # 해당 일차의 일정 파싱
-            day_schedule = parse_day_schedule(day_content, structured_places)
-            
+
+    if best_pattern and best_matches:
+        print(f"🗓️ 일차 패턴 인식: {len(best_matches)}개 일차 발견")
+
+        # 응답을 일차별로 분할
+        day_sections = re.split(best_pattern, response)
+
+        for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 일차 번호, 짝수가 내용
+            if i + 1 < len(day_sections):
+                day_num_str = day_sections[i]
+                day_content = day_sections[i + 1]
+
+                try:
+                    day_num = int(day_num_str)
+                except ValueError:
+                    continue
+
+                # 해당 일차의 일정 파싱
+                day_schedule = parse_day_schedule(day_content, structured_places)
+
+                if day_schedule:  # 일정이 있을 때만 추가
+                    itinerary.append({
+                        "day": day_num,
+                        "schedule": day_schedule
+                    })
+    else:
+        print(f"⚠️ 일차 패턴 인식 실패, 단일 일정으로 처리")
+        # 일차 구분 없이 전체를 하나의 일정으로 처리
+        single_day_schedule = parse_day_schedule(response, structured_places)
+        if single_day_schedule:
             itinerary.append({
-                "day": int(day_num),
-                "schedule": day_schedule
+                "day": 1,
+                "schedule": single_day_schedule
             })
-    
-    # 실제 응답에 포함된 장소들만 추출
+
+    # 실제 응답에 포함된 장소들만 추출 (LLM 판단 신뢰)
     response_places = extract_places_from_response(response, structured_places)
-    
+
     # 상세 여행 계획 구조
     enhanced_plan = {
         "region": regions[0] if regions else "미지정",
         "cities": cities,
         "duration": duration,
-        "categories": list(set(categories + [place["category"] for place in response_places if place["category"]])),
+        "categories": list(set(categories + [place["category"] for place in response_places if place.get("category")])),
         "itinerary": itinerary,
         "places": response_places,  # 실제 응답에 포함된 장소들만
         "raw_response": response,
@@ -1445,37 +1565,86 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
         "total_places": len(structured_places),
         "confidence_score": calculate_plan_confidence(structured_places, response)
     }
-    
+
+    print(f"✨ 일정 파싱 완료: {len(itinerary)}일차, 총 {sum(len(day.get('schedule', [])) for day in itinerary)}개 일정")
+
     return enhanced_plan
 
 def parse_day_schedule(day_content: str, structured_places: List[dict]) -> List[dict]:
-    """하루 일정 파싱"""
+    """하루 일정 파싱 (개선된 패턴 인식)"""
     import re
-    
+
     schedule = []
-    
-    # • 09:00-12:00 **장소명** - 설명 패턴
-    schedule_pattern = r'•\s*(\d{2}:\d{2}(?:-\d{2}:\d{2})?)\s*\*\*([^*]+)\*\*\s*-\s*([^\n]+)'
-    matches = re.findall(schedule_pattern, day_content)
-    
-    for time_range, place_name, description in matches:
-        # 구조화된 장소에서 매칭되는 정보 찾기
-        matched_place = None
-        for place in structured_places:
-            if place["name"] and place["name"] in place_name:
-                matched_place = place
-                break
-        
-        schedule_item = {
-            "time": time_range,
-            "place_name": place_name.strip(),
-            "description": description.strip(),
-            "category": matched_place["category"] if matched_place else "",
-            "place_info": matched_place
-        }
-        schedule.append(schedule_item)
-    
-    return schedule
+
+    # 더 유연한 패턴들 (다양한 형식 지원)
+    patterns = [
+        # • 09:00-12:00 **장소명** - 설명
+        r'•\s*(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)',
+        # • 09:00 **장소명** - 설명 (단일 시간)
+        r'•\s*(\d{1,2}:\d{2})\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)',
+        # • **장소명** (09:00-12:00) - 설명
+        r'•\s*\*\*([^*\n]+)\*\*\s*\((\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\)\s*-\s*([^\n]+)',
+        # 시간 없이: • **장소명** - 설명
+        r'•\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)'
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, day_content)
+
+        for match in matches:
+            if len(match) == 3:
+                if pattern == patterns[2]:  # 3번째 패턴 (장소명이 첫 번째)
+                    place_name, time_range, description = match
+                else:
+                    time_range, place_name, description = match
+            elif len(match) == 2:  # 시간 없는 경우
+                place_name, description = match
+                time_range = ""
+            else:
+                continue
+
+            # 장소명 정리
+            place_name_clean = normalize_place_name(place_name)
+
+            # 구조화된 장소에서 매칭되는 정보 찾기 (개선된 매칭)
+            matched_place = None
+            best_score = 0
+
+            for place in structured_places:
+                place_name_normalized = normalize_place_name(place.get("name", ""))
+
+                # 정확한 매칭
+                if place_name_clean == place_name_normalized:
+                    matched_place = place
+                    break
+
+                # 부분 매칭
+                if place_name_clean and place_name_normalized:
+                    if place_name_clean in place_name_normalized or place_name_normalized in place_name_clean:
+                        score = min(len(place_name_clean), len(place_name_normalized)) / max(len(place_name_clean), len(place_name_normalized))
+                        if score > best_score:
+                            best_score = score
+                            matched_place = place
+
+            schedule_item = {
+                "time": time_range.strip() if time_range else "",
+                "place_name": place_name.strip(),
+                "description": description.strip(),
+                "category": matched_place.get("category", "") if matched_place else "",
+                "place_info": matched_place
+            }
+            schedule.append(schedule_item)
+
+    # 중복 제거 (같은 장소명과 시간)
+    seen = set()
+    unique_schedule = []
+    for item in schedule:
+        key = (item["place_name"], item["time"])
+        if key not in seen:
+            seen.add(key)
+            unique_schedule.append(item)
+
+    return unique_schedule
 
 def calculate_plan_confidence(structured_places: List[dict], response: str) -> float:
     """여행 계획의 신뢰도 점수 계산"""
