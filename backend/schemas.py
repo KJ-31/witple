@@ -176,6 +176,9 @@ class SavedLocationCreate(SavedLocationBase):
 class SavedLocationResponse(SavedLocationBase):
     id: int
     user_id: str
+    place_name: Optional[str] = None  # 장소명 추가
+    place_image: Optional[str] = None  # 장소 이미지 추가
+    place_address: Optional[str] = None  # 장소 주소 추가
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -220,9 +223,17 @@ class TripCreate(TripBase):
     pass
 
 
-class TripResponse(TripBase):
+class TripResponse(BaseModel):
     id: int
     user_id: str
+    title: str
+    places: Any  # JSON 문자열 또는 리스트
+    start_date: datetime
+    end_date: datetime
+    status: TripStatus = TripStatus.planned
+    total_budget: Optional[int] = None
+    cover_image: Optional[str] = None
+    description: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -233,3 +244,8 @@ class TripResponse(TripBase):
 class TripListResponse(BaseModel):
     trips: List[TripResponse]
     total: int
+
+
+class TripCopyRequest(BaseModel):
+    trip_id: int
+    new_title: Optional[str] = None
