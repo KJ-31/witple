@@ -7,7 +7,7 @@ from sqlalchemy import desc
 from database import get_db
 from models import SavedLocation, User
 from schemas import SavedLocationCreate, SavedLocationResponse, SavedLocationListResponse
-from auth_utils import get_current_user
+from auth_utils import get_current_user, get_current_user_optional
 from cache_utils import cache
 
 # 로깅 설정
@@ -284,3 +284,68 @@ async def check_saved_location(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"저장된 장소 확인 중 오류 발생: {str(e)}"
         )
+
+
+@router.get("/user/{user_id}", response_model=SavedLocationListResponse)
+async def get_user_saved_locations(
+    user_id: str,
+    page: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional)
+):
+    """다른 사용자의 공개 저장된 장소 목록을 조회합니다."""
+    # 캐시 키 생성
+    cache_key = f"saved_locations:public:{user_id}:{page}:{limit}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        logger.info(f"Cache hit for public saved locations: {cache_key}")
+        return SavedLocationListResponse(**cached_result)
+    
+    # 사용자 존재 확인
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="사용자를 찾을 수 없습니다."
+        )
+    
+    # 해당 사용자의 저장된 장소 목록 조회 (공개 정보만)
+    locations = (
+        db.query(SavedLocation)
+        .filter(SavedLocation.user_id == user_id)
+        .order_by(desc(SavedLocation.created_at))
+        .offset(page * limit)
+        .limit(limit)
+        .all()
+    )
+    
+    # 총 개수 조회
+    total = db.query(SavedLocation).filter(SavedLocation.user_id == user_id).count()
+    
+    # 응답 데이터 구성
+    location_list = []
+    for location in locations:
+        location_dict = {
+            "id": location.id,
+            "user_id": location.user_id,
+            "places": location.places,
+            "created_at": location.created_at.isoformat() if location.created_at else None,
+            "updated_at": location.updated_at.isoformat() if location.updated_at else None
+        }
+        location_list.append(location_dict)
+    
+    result = {
+        "locations": location_list,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "hasMore": (page + 1) * limit < total
+    }
+    
+    # 결과를 캐시에 저장 (5분 - 다른 사용자 데이터이므로 짧게)
+    cache.set(cache_key, result, expire=300)
+    
+    return SavedLocationListResponse(**result)

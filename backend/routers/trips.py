@@ -9,6 +9,7 @@ from database import get_db
 from models import Trip, User
 from schemas import TripCreate, TripResponse, TripListResponse, TripStatus
 from routers.auth import get_current_user
+from auth_utils import get_current_user_optional
 from cache_utils import cache
 
 router = APIRouter()
@@ -95,6 +96,72 @@ async def get_user_trips(
     
     # 결과를 캐시에 저장 (15분)
     cache.set(cache_key, result, expire=900)
+    
+    return result
+
+
+@router.get("/user/{user_id}")
+async def get_user_public_trips(
+    user_id: str,
+    status_filter: Optional[TripStatus] = None,
+    limit: int = 20,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional)
+):
+    """다른 사용자의 공개 여행 목록 조회"""
+    # 캐시 키 생성
+    cache_key = f"trips:public:{user_id}:{status_filter.value if status_filter else 'all'}:{offset}:{limit}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
+    # 사용자 존재 확인
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="사용자를 찾을 수 없습니다."
+        )
+    
+    query = db.query(Trip).filter(Trip.user_id == user_id)
+    
+    if status_filter:
+        query = query.filter(Trip.status == status_filter.value)
+    
+    trips = query.offset(offset).limit(limit).all()
+    total = query.count()
+    
+    # trips를 dict로 변환하여 반환
+    trips_list = []
+    for trip in trips:
+        places = []
+        if trip.places:
+            places_data = json.loads(trip.places)
+            # 각 장소에 대해 실제 장소명을 조회하여 추가
+            for place in places_data:
+                place_name = get_place_name(db, place.get('table_name', ''), place.get('id', ''))
+                place['name'] = place_name
+                places.append(place)
+        
+        trips_list.append({
+            "id": trip.id,
+            "title": trip.title,
+            "description": trip.description,
+            "places": places,
+            "start_date": trip.start_date.isoformat() if trip.start_date else None,
+            "end_date": trip.end_date.isoformat() if trip.end_date else None,
+            "status": trip.status,
+            "status_display": get_status_display(trip.status),
+            "created_at": trip.created_at.isoformat() if trip.created_at else None
+        })
+    
+    result = {"trips": trips_list, "total": total}
+    
+    # 결과를 캐시에 저장 (5분 - 다른 사용자 데이터이므로 짧게)
+    cache.set(cache_key, result, expire=300)
     
     return result
 
