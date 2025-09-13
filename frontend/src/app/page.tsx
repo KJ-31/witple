@@ -14,9 +14,6 @@ export default function Home() {
   const [userInfo, setUserInfo] = useState<{ name: string, preferences: any } | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
-
-
-
   // 사용자 정보 및 여행 취향 로드 함수
   const loadUserInfo = useCallback(async () => {
     if (!session || !(session as any).backendToken) {
@@ -60,7 +57,7 @@ export default function Home() {
             accommodation: userData.accommodation,
             exploration: userData.exploration
           }
-          
+
           setUserInfo({
             name: userData.name || defaultUserInfo.name,
             preferences: preferences
@@ -106,12 +103,12 @@ export default function Home() {
         // categorySections가 있으면 그대로 사용 (백엔드에서 이미 처리됨)
         if (section.categorySections && section.categorySections.length > 0) {
           console.log(`섹션 ${section.cityName}: 카테고리별 ${section.categorySections.length}개 카테고리`)
-          
+
           // 각 카테고리의 attractions 수 로깅
           section.categorySections.forEach(cat => {
             console.log(`  - ${cat.categoryName}: ${cat.attractions?.length || 0}개`)
           })
-          
+
           return {
             ...section,
             attractions: [], // categorySections를 사용하므로 비워둠
@@ -121,7 +118,7 @@ export default function Home() {
 
         // attractions만 있는 경우의 fallback 처리
         let attractions = section.attractions || []
-        
+
         // 별점 필터링 제거 - 모든 데이터 표시
         let filteredAttractions = attractions.slice(0, 8) // 상위 8개만 표시
 
@@ -140,12 +137,12 @@ export default function Home() {
       const totalAttractions = processedData.reduce((sum, section) => {
         if (section.categorySections && section.categorySections.length > 0) {
           // categorySections가 있으면 해당 attractions 수 계산
-          return sum + section.categorySections.reduce((catSum, cat) => 
+          return sum + section.categorySections.reduce((catSum, cat) =>
             catSum + (cat.attractions?.length || 0), 0)
         }
         return sum + (section.attractions?.length || 0)
       }, 0)
-      
+
       console.log('총 추천 장소 수:', totalAttractions)
 
       if (totalAttractions === 0) {
@@ -163,7 +160,6 @@ export default function Home() {
     }
   }, [session]) // userInfo 의존성 제거
 
-
   // 사용자 선호도 체크 (profile API 데이터 기반)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
     if (!session || !(session as any).backendToken) {
@@ -178,9 +174,9 @@ export default function Home() {
 
       // profile API에서 받은 preferences 데이터로 확인
       const hasPreferences = userPreferences && (
-        userPreferences.persona || 
-        userPreferences.priority || 
-        userPreferences.accommodation || 
+        userPreferences.persona ||
+        userPreferences.priority ||
+        userPreferences.accommodation ||
         userPreferences.exploration
       )
 
@@ -199,7 +195,6 @@ export default function Home() {
       // 에러 시에도 메인 페이지는 정상 작동
     }
   }, [session, router])
-
 
   // 세션 상태 변경 시 초기화 플래그 리셋
   useEffect(() => {
@@ -220,10 +215,10 @@ export default function Home() {
           try {
             // 1. 사용자 정보 로드
             await loadUserInfo()
-            
+
             // 2. 추천 데이터 로드 (사용자 정보 로드 완료 후)
             await loadRecommendedCities()
-            
+
             // 3. 선호도 체크 (현재 userInfo state를 참조)
             // userInfo가 업데이트된 후에 체크하기 위해 setTimeout 사용
             setTimeout(() => {
@@ -231,13 +226,13 @@ export default function Home() {
                 checkUserPreferences(userInfo.preferences)
               }
             }, 100)
-            
+
             console.log('로그인 사용자 초기화 완료')
           } catch (error) {
             console.warn('로그인 사용자 초기화 오류:', error)
           }
         }
-        
+
         initializeUser()
       } else {
         // 비로그인 상태: 추천 데이터만 로드
@@ -250,13 +245,12 @@ export default function Home() {
     }
   }, [status, isInitialized])
 
-
   return (
-    <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
+    <div className="min-h-screen bg-[#0B1220] text-slate-200 pb-20">
       {/* Header with Logo and Chatbot */}
-      <div className="flex items-center justify-between px-4 mt-4 mb-8">
-        <h1 className="text-4xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
-        <button
+      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between px-4 pt-4 pb-4 mb-10">
+        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
+        {/* <button
           onClick={() => {
             const chatbotEvent = new CustomEvent('openChatbot');
             window.dispatchEvent(chatbotEvent);
@@ -268,14 +262,11 @@ export default function Home() {
             alt="챗봇"
             className="w-8 h-8"
           />
-        </button>
+        </button> */}
       </div>
 
-
-
-
       {/* 추천 도시별 명소 섹션 (2개 고정) */}
-      <main className="pl-[21px] pr-0 pb-24 space-y-12">
+      <main className="pl-[20px] pr-0 pb-24 space-y-12">
         {citySections.map((citySection, index) => {
           // 사용자 이름 기반 제목 생성
           let personalizedTitle = citySection.description
@@ -322,7 +313,6 @@ export default function Home() {
         )}
       </main>
 
-
       <BottomNavigation />
     </div>
   )
@@ -347,7 +337,7 @@ function SectionCarousel({
       {/* 도시 제목과 추천 점수 */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-2xl md:text-3xl font-semibold text-[#94A9C9]">
+          <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
             {title}
           </h2>
           {/* <div className="flex items-center mt-2 space-x-2">
@@ -436,13 +426,18 @@ function AttractionCard({
 }) {
   const categoryColor = getCategoryColor(attraction.category?.trim())
 
+  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
+  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
+    ? '#E8EAFF'
+    : '#0D121C'
+
   return (
     <figure
       className="
         snap-start shrink-0
-        rounded-2xl overflow-hidden
+        rounded-lg overflow-hidden
         shadow-lg
-        w-[280px] h-[280px]
+        w-[200px] h-[200px]
         cursor-pointer transition-all duration-300
         group relative
       "
@@ -499,9 +494,10 @@ function AttractionCard({
         {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
           <span
-            className="px-3 py-1 text-xs text-white rounded-full font-medium"
+            className="px-3 py-1 text-xs rounded-full font-medium"
             style={{
-              backgroundColor: categoryColor
+              backgroundColor: categoryColor,
+              color: textColor
             }}
           >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
@@ -513,12 +509,12 @@ function AttractionCard({
       {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
       <div className="absolute bottom-4 left-4 right-4">
         <div
-          className="rounded-2xl px-4 py-3 flex items-center justify-center"
+          className="rounded-xl px-4 py-3 flex items-center justify-center"
           style={{
             backgroundColor: categoryColor
           }}
         >
-          <h3 className="font-bold text-white text-base text-center leading-tight">
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
             {attraction.name}
           </h3>
         </div>

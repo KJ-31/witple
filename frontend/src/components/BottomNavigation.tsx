@@ -31,11 +31,10 @@ export default function BottomNavigation() {
       <div className="flex items-center justify-around px-4 py-5 max-w-md mx-auto">
         <Link
           href="/"
-          className={`flex flex-col items-center py-1 px-2 transition-colors ${
-            isActive('/') 
-              ? 'text-[#3E68FF]' 
+          className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/')
+              ? 'text-[#3E68FF]'
               : 'text-[#6FA0E6] hover:text-[#3E68FF]'
-          }`}
+            }`}
           aria-label="홈"
         >
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,11 +44,10 @@ export default function BottomNavigation() {
 
         <Link
           href="/recommendations"
-          className={`flex flex-col items-center py-1 px-2 transition-colors ${
-            isActive('/recommendations') 
-              ? 'text-[#3E68FF]' 
+          className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/recommendations')
+              ? 'text-[#3E68FF]'
               : 'text-[#6FA0E6] hover:text-[#3E68FF]'
-          }`}
+            }`}
           aria-label="추천"
         >
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,11 +57,10 @@ export default function BottomNavigation() {
 
         <Link
           href="/plan/calendar"
-          className={`flex flex-col items-center py-1 px-2 transition-colors ${
-            isActive('/plan') 
-              ? 'text-[#3E68FF]' 
+          className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/plan')
+              ? 'text-[#3E68FF]'
               : 'text-[#6FA0E6] hover:text-[#3E68FF]'
-          }`}
+            }`}
           aria-label="일정 작성"
         >
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -73,11 +70,10 @@ export default function BottomNavigation() {
 
         <Link
           href="/feed"
-          className={`flex flex-col items-center py-1 px-2 transition-colors ${
-            isActive('/feed') 
-              ? 'text-[#3E68FF]' 
+          className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/feed')
+              ? 'text-[#3E68FF]'
               : 'text-[#6FA0E6] hover:text-[#3E68FF]'
-          }`}
+            }`}
           aria-label="피드"
         >
           <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">

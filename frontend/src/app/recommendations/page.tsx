@@ -479,8 +479,8 @@ export default function RecommendationsPage() {
   return (
     <div className="min-h-screen bg-[#0B1220] text-white pb-20">
       {/* Header */}
-      <div className="sticky top-0 bg-[#0B1220]/95 backdrop-blur-md z-40 border-b border-[#1F3C7A]/30">
-        <div className="px-4 py-4">
+      <div className="sticky top-0 z-40 bg-[#0B1220] border-b border-[#1F3C7A]/30">
+        <div className="px-4 pt-4 pb-4">
           <h1 className="text-2xl font-bold text-[#3E68FF]">추천</h1>
           <p className="text-[#94A9C9] text-sm mt-1">당신을 위한 맞춤 여행 추천</p>
         </div>
