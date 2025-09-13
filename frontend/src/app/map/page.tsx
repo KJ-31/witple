@@ -3263,7 +3263,7 @@ export default function MapPage() {
                             onDragOver={(e) => handleDragOver(e, index, day)}
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, day)}
-                            className={`h-2 w-full transition-all duration-200 ${
+                            className={`w-full transition-all duration-200 ${
                               dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
                                 ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
                                 : ''
@@ -3421,7 +3421,7 @@ export default function MapPage() {
                             if (segmentInfo) {
                               return (
                                 <div className="my-4">
-                                  <div className="flex items-center justify-center mb-1">
+                                  <div className="flex items-center justify-center">
                                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
                                     <div className="mx-4 flex items-center space-x-2 text-sm">
                                       <span className="text-[#34D399] font-medium">{segmentInfo.duration}</span>
@@ -3694,7 +3694,7 @@ export default function MapPage() {
                         onDragOver={(e) => handleDragOver(e, (groupedPlaces[day] || []).length, day)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, (groupedPlaces[day] || []).length, day)}
-                        className={`h-2 w-full transition-all duration-200 ${
+                        className={`w-full transition-all duration-200 ${
                           dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem 
                             ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
                             : ''
