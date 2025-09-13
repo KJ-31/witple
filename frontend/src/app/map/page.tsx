@@ -3480,7 +3480,7 @@ export default function MapPage() {
                                           <div className="w-full overflow-x-auto">
                                             <div className="relative py-1">
                                               {/* 연속된 타임라인 바 */}
-                                              <div className="flex h-4 rounded-full overflow-hidden">
+                                              <div className="flex h-4 rounded-full overflow-hidden pl-2">
                                                 {processedSteps.map((step: any, index: number) => (
                                                   <div 
                                                     key={`segment-${index}`}
