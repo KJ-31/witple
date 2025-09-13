@@ -20,7 +20,7 @@ from schemas import (
     ProfilePreferencesUpdate
 )
 from config import settings
-from auth_utils import get_current_user
+from auth_utils import get_current_user, get_current_user_optional
 from cache_utils import cache
 
 # 로깅 설정
@@ -118,6 +118,56 @@ async def get_current_user_profile(
     
     # 결과를 캐시에 저장 (20분)
     cache.set(cache_key, user_data, expire=1200)
+    
+    return UserResponse(**user_data)
+
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user_profile(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional)
+):
+    """다른 사용자의 공개 프로필 정보를 조회합니다."""
+    # 캐시 키 생성
+    cache_key = f"profile:public:{user_id}"
+    
+    # 캐시에서 조회 시도
+    cached_result = cache.get(cache_key)
+    if cached_result is not None:
+        logger.info(f"Cache hit for public profile: {cache_key}")
+        return UserResponse(**cached_result)
+    
+    # 사용자 정보 조회
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="사용자를 찾을 수 없습니다."
+        )
+    
+    # 사용자 취향 정보 조회
+    user_preference = db.query(UserPreference).filter(
+        UserPreference.user_id == user_id
+    ).first()
+    
+    # 공개 프로필 데이터 구성 (민감한 정보 제외)
+    user_data = {
+        "user_id": user.user_id,
+        "email": user.email,  # 이메일은 공개 정보로 포함
+        "name": user.name,
+        "age": user.age,
+        "nationality": user.nationality,
+        "profile_image": user.profile_image,
+        "created_at": user.created_at.isoformat() if hasattr(user.created_at, 'isoformat') and user.created_at else str(user.created_at) if user.created_at else None,
+        "persona": user_preference.persona if user_preference else None,
+        "priority": user_preference.priority if user_preference else None,
+        "accommodation": user_preference.accommodation if user_preference else None,
+        "exploration": user_preference.exploration if user_preference else None
+    }
+    
+    # 결과를 캐시에 저장 (10분 - 다른 사용자 프로필이므로 짧게)
+    cache.set(cache_key, user_data, expire=600)
     
     return UserResponse(**user_data)
 
