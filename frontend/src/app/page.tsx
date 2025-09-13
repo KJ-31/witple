@@ -58,10 +58,15 @@ export default function Home() {
             exploration: userData.exploration
           }
 
-          setUserInfo({
+          const newUserInfo = {
             name: userData.name || defaultUserInfo.name,
             preferences: preferences
-          })
+          }
+
+          setUserInfo(newUserInfo)
+
+          // 사용자 정보 설정 후 바로 선호도 체크 (추가 렌더링 방지)
+          setTimeout(() => checkUserPreferences(preferences), 0)
         } catch (jsonError) {
           console.warn('사용자 프로필 JSON 파싱 오류:', jsonError)
           // JSON 파싱 실패 시 기본 정보 유지
@@ -196,12 +201,27 @@ export default function Home() {
     }
   }, [session, router])
 
-  // 세션 상태 변경 시 초기화 플래그 리셋
+  // 세션 상태 변경 시 초기화 플래그 리셋 (실제 사용자 변경시에만)
   useEffect(() => {
+    // 로그인/로그아웃 시에만 리셋 (이메일이 실제로 변경되는 경우만)
     if (status !== 'loading') {
-      setIsInitialized(false)
+      const currentEmail = session?.user?.email
+      const previousEmail = sessionStorage.getItem('previous_user_email')
+
+      if (previousEmail && previousEmail !== currentEmail) {
+        // 실제로 다른 사용자로 로그인한 경우에만 리셋
+        setIsInitialized(false)
+        sessionStorage.setItem('previous_user_email', currentEmail || '')
+      } else if (!previousEmail && currentEmail) {
+        // 첫 로그인인 경우 이메일만 저장하고 리셋하지 않음
+        sessionStorage.setItem('previous_user_email', currentEmail)
+      } else if (!currentEmail) {
+        // 로그아웃한 경우
+        sessionStorage.removeItem('previous_user_email')
+        setIsInitialized(false)
+      }
     }
-  }, [session?.user?.email, status]) // 사용자 이메일 변경 시에만 리셋
+  }, [session?.user?.email, status])
 
   // 사용자 정보 로드 및 추천 데이터 로드 (순차 처리) - 한 번만 실행
   useEffect(() => {
@@ -210,22 +230,14 @@ export default function Home() {
       console.log('초기화 시작 - 세션:', !!session)
 
       if (session) {
-        // 로그인 상태: 사용자 정보 먼저 로드한 후 추천 데이터 로드
+        // 로그인 상태: 사용자 정보 먼저 로드 후 추천 데이터 로드
         const initializeUser = async () => {
           try {
-            // 1. 사용자 정보 로드
+            // 먼저 사용자 정보를 로드하고, 그 정보를 기반으로 선호도 체크
             await loadUserInfo()
 
-            // 2. 추천 데이터 로드 (사용자 정보 로드 완료 후)
+            // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
             await loadRecommendedCities()
-
-            // 3. 선호도 체크 (현재 userInfo state를 참조)
-            // userInfo가 업데이트된 후에 체크하기 위해 setTimeout 사용
-            setTimeout(() => {
-              if (userInfo?.preferences) {
-                checkUserPreferences(userInfo.preferences)
-              }
-            }, 100)
 
             console.log('로그인 사용자 초기화 완료')
           } catch (error) {
@@ -244,6 +256,7 @@ export default function Home() {
       }
     }
   }, [status, isInitialized])
+
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 pb-20">
