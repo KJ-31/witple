@@ -3444,39 +3444,65 @@ export default function MapPage() {
                                         
                                         if (totalMinutes === 0) return null;
                                         
+                                        // 도보 인덱스 체크를 위해 먼저 도보들을 찾기
+                                        const walkIndices = segmentInfo.transitDetails
+                                          .map((step: any, idx: number) => (step.mode === 'WALKING' || !step.transitDetails) ? idx : -1)
+                                          .filter((idx: number) => idx !== -1);
+
                                         // 각 스텝별 정보 준비
-                                        const processedSteps = segmentInfo.transitDetails.map((step: any) => {
+                                        const processedSteps = segmentInfo.transitDetails.map((step: any, stepIndex: number) => {
                                           const isWalk = step.mode === 'WALKING' || !step.transitDetails;
                                           const originalLine = step.transitDetails?.line || step.transitDetails?.vehicle || '';
                                           const cleanName = step.transitDetails ? getCleanTransitName(step.transitDetails) : '';
                                           const vehicleType = step.transitDetails?.vehicle_type || '';
                                           const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL';
                                           const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine) || vehicleType === 'BUS';
-                                          
-                                          let bgColor = '#6B7280'; // 도보 회색
-                                          let icon = '🚶';
-                                          
-                                          if (!isWalk && step.transitDetails) {
-                                            if (isSubway) {
-                                              bgColor = getSubwayLineColor(originalLine);
-                                              icon = '🚇';
-                                            } else if (isBus) {
-                                              bgColor = getBusColor(originalLine);
-                                              icon = '🚌';
-                                            }
-                                          }
-                                          
+
                                           const duration = step.duration?.text || step.duration || '0분';
                                           const minutes = parseInt(duration.toString().replace(/[^0-9]/g, '')) || 0;
-                                          const percentage = Math.max((minutes / totalMinutes) * 100, 8); // 최소 8% 보장
-                                          
+                                          const percentage = totalMinutes > 0 ? (minutes / totalMinutes) * 100 : 100 / segmentInfo.transitDetails.length;
+
+                                          // 첫 번째 도보인지 체크
+                                          const isFirstWalk = isWalk && walkIndices[0] === stepIndex;
+
+                                          // 너무 짧은 구간인지 체크 (3% 미만)
+                                          const isVeryShort = percentage < 3;
+
+                                          let bgColor = '#6B7280'; // 도보 회색
+                                          let icon = '';
+                                          let showTime = true;
+
+                                          if (isWalk) {
+                                            // 도보: 첫 번째는 무조건 표시, 나머지는 30px 이상일 때만 표시
+                                            const walkWidthPx = (percentage / 100) * 400; // 대략적인 컨테이너 너비 400px 가정
+                                            const shouldShowWalkIcon = isFirstWalk || walkWidthPx >= 30;
+                                            icon = shouldShowWalkIcon ? '🚶' : '';
+                                            showTime = shouldShowWalkIcon;
+                                          } else {
+                                            // 대중교통: 무조건 표시
+                                            showTime = true;
+                                            if (step.transitDetails) {
+                                              if (isSubway) {
+                                                bgColor = getSubwayLineColor(originalLine);
+                                                icon = '🚇';
+                                              } else if (isBus) {
+                                                bgColor = getBusColor(originalLine);
+                                                icon = '🚌';
+                                              } else {
+                                                bgColor = '#3E68FF';
+                                                icon = '🚌';
+                                              }
+                                            }
+                                          }
+
                                           return {
                                             icon,
                                             bgColor,
                                             cleanName,
-                                            duration: duration.toString(),
+                                            duration: showTime ? duration.toString() : '', // showTime에 따라 시간 표시/숨김
                                             minutes,
-                                            percentage
+                                            percentage,
+                                            isWalk
                                           };
                                         });
                                         
@@ -3500,20 +3526,22 @@ export default function MapPage() {
                                                     style={{
                                                       backgroundColor: step.bgColor,
                                                       width: `${step.percentage}%`,
-                                                      minWidth: '40px'
+                                                      minWidth: (!step.isWalk || step.icon) ? '30px' : '5px' // 대중교통과 아이콘 있는 도보는 30px
                                                     }}
                                                   >
                                                     {/* 아이콘의 중앙을 각 막대의 시작점에 배치 */}
-                                                    <div 
-                                                      className="absolute left-0 w-4 h-4 rounded-full flex items-center justify-center text-white border border-white shadow-sm"
-                                                      style={{ 
-                                                        backgroundColor: step.bgColor,
-                                                        fontSize: '8px',
-                                                        transform: 'translateX(-50%)' // 아이콘 중앙이 막대 시작점에 위치
-                                                      }}
-                                                    >
-                                                      {step.icon}
-                                                    </div>
+                                                    {step.icon && (
+                                                      <div
+                                                        className="absolute left-0 w-4 h-4 rounded-full flex items-center justify-center text-white border border-white shadow-sm"
+                                                        style={{
+                                                          backgroundColor: step.bgColor,
+                                                          fontSize: '8px',
+                                                          transform: 'translateX(-50%)' // 아이콘 중앙이 막대 시작점에 위치
+                                                        }}
+                                                      >
+                                                        {step.icon}
+                                                      </div>
+                                                    )}
                                                     
                                                     {/* 시간 표시 */}
                                                     <span className="text-white text-[10px] font-medium">
