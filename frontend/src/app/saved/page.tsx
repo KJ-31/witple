@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
+import { trackBookmark, trackClick } from '../../utils/actionTracker'
+import { useActionTrackerSession } from '../../hooks/useActionTrackerSession'
 
 interface SavedPlace {
   id: string
@@ -17,7 +18,7 @@ interface SavedPlace {
 
 export default function SavedPage() {
   const router = useRouter()
-  const { data: session } = useSession()
+  const { session } = useActionTrackerSession() // NextAuth 세션과 actionTracker 자동 동기화
   const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -59,6 +60,13 @@ export default function SavedPage() {
       })
 
       if (response.ok) {
+        // 🎯 북마크 제거 추적
+        const place = savedPlaces.find(p => p.id === placeId)
+        trackBookmark(placeId, false, {
+          attraction_name: place?.name || 'Unknown',
+          category: place?.category || 'Unknown',
+          source: 'saved_places_page'
+        })
         setSavedPlaces(prev => prev.filter(place => place.id !== placeId))
       } else {
         console.error('북마크 제거 실패')
@@ -129,7 +137,19 @@ export default function SavedPage() {
       {/* Saved Places List */}
       <div className="px-4 py-4 space-y-4 pb-20">
         {savedPlaces.map((place) => (
-          <div key={place.id} className="bg-[#12345D]/50 rounded-2xl p-4 border border-[#1F3C7A]/30">
+          <div 
+            key={place.id} 
+            className="bg-[#12345D]/50 rounded-2xl p-4 border border-[#1F3C7A]/30 cursor-pointer hover:bg-[#12345D]/70 transition-colors"
+            onClick={() => {
+              // 🎯 저장된 장소 클릭 추적
+              trackClick(place.id, {
+                attraction_name: place.name,
+                category: place.category,
+                source: 'saved_places_click'
+              })
+              router.push(`/attraction/${place.id}`)
+            }}
+          >
             <div className="flex justify-between items-start mb-3">
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-white mb-1">{place.name}</h3>
@@ -144,7 +164,10 @@ export default function SavedPage() {
               </div>
               
               <button
-                onClick={() => handleRemoveBookmark(place.id)}
+                onClick={(e) => {
+                  e.stopPropagation() // 카드 클릭 이벤트 방지
+                  handleRemoveBookmark(place.id)
+                }}
                 className="p-2 hover:bg-[#1F3C7A]/30 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5 text-[#ef4444]" fill="currentColor" viewBox="0 0 24 24">

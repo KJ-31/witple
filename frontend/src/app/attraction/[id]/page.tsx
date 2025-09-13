@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { trackClick, trackBookmark } from '@/utils/actionTracker'
 
 interface AttractionDetailProps {
   params: { id: string }
@@ -115,6 +116,14 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         const data = await response.json()
         setAttraction(data)
         
+        // 🎯 페이지 뷰 추적 (클릭 액션)
+        trackClick(params.id, {
+          attraction_name: data.name,
+          category: data.category,
+          region: data.region,
+          source: 'attraction_detail_page'
+        })
+        
         // 저장 상태도 함께 확인
         await checkSavedStatus(data)
       } catch (error) {
@@ -201,6 +210,12 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
             
             if (deleteResponse.ok) {
               setIsSaved(false)
+              // 🎯 북마크 해제 추적
+              trackBookmark(params.id, false, {
+                attraction_name: attraction.name,
+                category: attraction.category,
+                source: 'attraction_detail_page'
+              })
             } else if (deleteResponse.status === 401) {
               alert('세션이 만료되었습니다. 다시 로그인해주세요.')
               localStorage.removeItem('access_token')
@@ -229,6 +244,12 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         
         if (response.ok) {
           setIsSaved(true)
+          // 🎯 북마크 추가 추적
+          trackBookmark(params.id, true, {
+            attraction_name: attraction.name,
+            category: attraction.category,
+            source: 'attraction_detail_page'
+          })
         } else if (response.status === 401) {
           alert('세션이 만료되었습니다. 다시 로그인해주세요.')
           localStorage.removeItem('access_token')

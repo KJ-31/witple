@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON, Float
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -26,6 +27,10 @@ class User(Base):
     preference_tags = relationship("UserPreferenceTag", back_populates="user")
     saved_locations = relationship("SavedLocation", back_populates="user")
     trips = relationship("Trip", back_populates="user")
+    
+    # 새로운 데이터 수집 관련 관계들
+    actions = relationship("UserAction", back_populates="user")
+    behavior_vector = relationship("UserBehaviorVector", back_populates="user", uselist=False)
 
 
 class OAuthAccount(Base):
@@ -130,3 +135,102 @@ class Trip(Base):
 
     # Relationship to user
     user = relationship("User", back_populates="trips")
+
+
+class UserAction(Base):
+    """사용자 행동 데이터 - Collection Server에서 수집된 데이터 저장"""
+    __tablename__ = "user_actions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False, index=True)
+    place_category = Column(String, nullable=False, index=True)  # actionTracker 호환
+    place_id = Column(String, nullable=False, index=True)        # actionTracker 호환  
+    action_type = Column(String, nullable=False, index=True)     # 'click', 'like', 'bookmark'
+    action_value = Column(Integer, nullable=True)                # actionTracker 호환
+    action_detail = Column(JSON, nullable=True)                  # actionTracker 호환
+    session_id = Column(String, nullable=True, index=True)
+    
+    # 서버 메타데이터
+    server_timestamp = Column(DateTime(timezone=True), nullable=True)
+    client_ip = Column(String, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    request_id = Column(String, nullable=True)
+    
+    # AWS Batch 처리 상태
+    batch_processed = Column(Boolean, default=False, index=True)
+    batch_processed_at = Column(DateTime(timezone=True), nullable=True)
+    batch_id = Column(String, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    
+    # 인덱스 최적화를 위한 테이블 설정
+    __table_args__ = (
+        {'extend_existing': True}
+    )
+    
+    # Relationship
+    user = relationship("User")
+
+
+class UserBehaviorVector(Base):
+    """AWS Batch에서 생성하는 사용자 행동 벡터 (BERT 384차원)"""
+    __tablename__ = "user_behavior_vectors"
+    
+    user_id = Column(String, ForeignKey("users.user_id"), primary_key=True)
+    
+    # BERT 벡터 (384차원) - PostgreSQL ARRAY 타입
+    behavior_vector = Column(ARRAY(Float), nullable=True)
+    
+    # 행동 점수들 (0.0~100.0)
+    like_score = Column(Float, default=0.0)              # 좋아요 선호도 점수
+    bookmark_score = Column(Float, default=0.0)          # 북마크 선호도 점수
+    click_score = Column(Float, default=0.0)             # 클릭 패턴 점수
+    dwell_time_score = Column(Float, default=0.0)        # 체류시간 점수 (향후 확장)
+    
+    # 통계 메타데이터
+    total_actions = Column(Integer, default=0)           # 총 액션 수
+    total_likes = Column(Integer, default=0)             # 총 좋아요 수
+    total_bookmarks = Column(Integer, default=0)         # 총 북마크 수
+    total_clicks = Column(Integer, default=0)            # 총 클릭 수
+    
+    # 최신성 정보
+    last_action_date = Column(DateTime(timezone=True), nullable=True)
+    vector_updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship  
+    user = relationship("User")
+
+
+class PlaceVector(Base):
+    """장소별 벡터 데이터 (추천 성능 향상용)"""
+    __tablename__ = "place_vectors"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    place_id = Column(String, nullable=False, index=True)
+    place_category = Column(String, nullable=False, index=True)
+    
+    # 장소 특성 벡터들
+    content_vector = Column(ARRAY(Float), nullable=True)    # 내용 기반 벡터 (장소 설명, 태그 등)
+    behavior_vector = Column(ARRAY(Float), nullable=True)   # 행동 기반 벡터 (사용자 액션 기반)
+    combined_vector = Column(ARRAY(Float), nullable=True)   # 결합 벡터 (추천용)
+    
+    # 장소별 통계 정보
+    total_likes = Column(Integer, default=0)
+    total_bookmarks = Column(Integer, default=0) 
+    total_clicks = Column(Integer, default=0)
+    unique_users = Column(Integer, default=0)               # 고유 사용자 수
+    avg_dwell_time = Column(Float, default=0.0)             # 평균 체류시간
+    
+    # 인기도 점수 (0.0~100.0)
+    popularity_score = Column(Float, default=0.0)
+    engagement_score = Column(Float, default=0.0)           # 참여도 점수
+    
+    # 벡터 업데이트 정보
+    vector_updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    stats_updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    __table_args__ = (
+        {'extend_existing': True}
+    )
