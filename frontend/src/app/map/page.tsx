@@ -3492,10 +3492,12 @@ export default function MapPage() {
                                                 }))}
                                               >
                                                 {processedSteps.map((step: any, index: number) => (
-                                                  <div 
+                                                  <div
                                                     key={`segment-${index}`}
-                                                    className="relative flex items-center justify-center"
-                                                    style={{ 
+                                                    className={`relative flex items-center justify-center ${
+                                                      index === processedSteps.length - 1 ? 'rounded-r-full' : ''
+                                                    }`}
+                                                    style={{
                                                       backgroundColor: step.bgColor,
                                                       width: `${step.percentage}%`,
                                                       minWidth: '40px'
