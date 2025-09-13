@@ -3473,9 +3473,9 @@ export default function MapPage() {
                                           let showTime = true;
 
                                           if (isWalk) {
-                                            // 도보: 첫 번째는 무조건 표시, 나머지는 30px 이상일 때만 표시
+                                            // 도보: 첫 번째는 무조건 표시, 나머지는 35px 이상일 때만 표시
                                             const walkWidthPx = (percentage / 100) * 400; // 대략적인 컨테이너 너비 400px 가정
-                                            const shouldShowWalkIcon = isFirstWalk || walkWidthPx >= 30;
+                                            const shouldShowWalkIcon = isFirstWalk || walkWidthPx >= 35;
                                             icon = shouldShowWalkIcon ? '🚶' : '';
                                             showTime = shouldShowWalkIcon;
                                           } else {
@@ -3526,7 +3526,7 @@ export default function MapPage() {
                                                     style={{
                                                       backgroundColor: step.bgColor,
                                                       width: `${step.percentage}%`,
-                                                      minWidth: (!step.isWalk || step.icon) ? '30px' : '5px' // 대중교통과 아이콘 있는 도보는 30px
+                                                      minWidth: (!step.isWalk || step.icon) ? '35px' : '5px' // 대중교통과 아이콘 있는 도보는 35px
                                                     }}
                                                   >
                                                     {/* 아이콘의 중앙을 각 막대의 시작점에 배치 */}
