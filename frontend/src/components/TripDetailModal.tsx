@@ -30,17 +30,35 @@ export default function TripDetailModal({
 }: TripDetailModalProps) {
   const [isCopying, setIsCopying] = useState(false)
   const [copySuccess, setCopySuccess] = useState(false)
+  const [toast, setToast] = useState<{
+    show: boolean
+    type: 'success' | 'error' | 'info'
+    message: string
+  }>({
+    show: false,
+    type: 'success',
+    message: ''
+  })
 
   if (!isOpen) return null
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+    setToast({ show: true, type, message })
+    setTimeout(() => {
+      setToast(prev => ({ ...prev, show: false }))
+    }, 3000)
+  }
 
   const handleCopyTrip = async () => {
     try {
       setIsCopying(true)
       await onCopyTrip(trip.id)
       setCopySuccess(true)
+      showToast('success', '일정이 성공적으로 복사되었습니다!')
       setTimeout(() => setCopySuccess(false), 2000)
     } catch (error) {
       console.error('일정 복사 실패:', error)
+      showToast('error', '일정 복사 중 오류가 발생했습니다.')
     } finally {
       setIsCopying(false)
     }
@@ -179,6 +197,50 @@ export default function TripDetailModal({
           )}
         </div>
       </div>
+
+      {/* Toast 알림 */}
+      {toast.show && (
+        <div className={`fixed top-20 left-4 right-4 z-[60] p-4 rounded-2xl backdrop-blur-sm transition-all duration-300 transform ${
+          toast.show ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0'
+        } ${
+          toast.type === 'success' ? 'bg-green-900/90 text-green-100 border border-green-700/50' :
+          toast.type === 'error' ? 'bg-red-900/90 text-red-100 border border-red-700/50' :
+          'bg-blue-900/90 text-blue-100 border border-blue-700/50'
+        }`}>
+          <div className="flex items-center space-x-3">
+            {toast.type === 'success' && (
+              <div className="flex-shrink-0">
+                <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            )}
+            {toast.type === 'error' && (
+              <div className="flex-shrink-0">
+                <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            )}
+            {toast.type === 'info' && (
+              <div className="flex-shrink-0">
+                <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            )}
+            <div className="flex-1">
+              <p className="text-sm font-medium">{toast.message}</p>
+            </div>
+            <button
+              onClick={() => setToast(prev => ({ ...prev, show: false }))}
+              className="flex-shrink-0 text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
