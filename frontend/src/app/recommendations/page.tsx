@@ -10,7 +10,6 @@ interface RecommendationItem {
   title: string
   author: string
   genre: string
-  rating: number
   imageUrl: string
   isNew?: boolean
   isUpdated?: boolean
@@ -211,7 +210,6 @@ export default function RecommendationsPage() {
             title: attraction.name || attraction.title,
             author: attraction.city?.name || attraction.region || '여행지',
             genre: selectedCategory,
-            rating: attraction.rating || Math.round((attraction.similarity_score + 0.3) * 5 * 10) / 10 || (4.9 - index * 0.1),
             views: attraction.views || Math.floor(Math.random() * 5000) + 1000,
             imageUrl: attraction.imageUrl || getImageUrl(attraction.image_urls) || `https://picsum.photos/100/100?random=${Date.now() + index}`
           }))
@@ -289,7 +287,6 @@ export default function RecommendationsPage() {
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '여행지',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.7,
             views: Math.floor(Math.random() * 3000) + 1000,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random()}`,
             tags: ['추천', '인기', '특별']
@@ -309,7 +306,6 @@ export default function RecommendationsPage() {
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '새로운 여행지',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.5,
             views: Math.floor(Math.random() * 2000) + 500,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 1000}`
           }))
@@ -321,14 +317,13 @@ export default function RecommendationsPage() {
         const popularResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=5`)
         if (popularResponse.ok) {
           const popularData = await popularResponse.json()
-          const popularAttractions = popularData.results?.sort((a: any, b: any) => (b.rating || 0) - (a.rating || 0)) || []
+          const popularAttractions = popularData.results || []
           
           const formattedPopularItems = popularAttractions.slice(0, 5).map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '인기 여행지',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.8,
             views: Math.floor(Math.random() * 8000) + 3000,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 100}`
           }))
@@ -347,7 +342,6 @@ export default function RecommendationsPage() {
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '숨은 명소',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.6,
             views: Math.floor(Math.random() * 2500) + 800,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 200}`
           }))
@@ -366,7 +360,6 @@ export default function RecommendationsPage() {
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '테마 여행',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.5,
             views: Math.floor(Math.random() * 4000) + 1500,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 300}`
           }))
@@ -385,7 +378,6 @@ export default function RecommendationsPage() {
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '계절 추천',
             genre: getCategoryInKorean(attraction.category),
-            rating: attraction.rating || 4.4,
             views: Math.floor(Math.random() * 3500) + 1200,
             imageUrl: attraction.imageUrl || `https://picsum.photos/200/280?random=${Date.now() + Math.random() * 400}`
           }))
@@ -560,7 +552,6 @@ export default function RecommendationsPage() {
                                 <svg className="w-3 h-3 text-yellow-400 mr-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
-                                <span className="text-[#6FA0E6] text-xs mr-1 flex-shrink-0">{item.rating}</span>
                                 <span className="text-[#94A9C9] text-xs truncate flex-1">({item.views?.toLocaleString()})</span>
                               </div>
                             </div>
@@ -595,7 +586,6 @@ export default function RecommendationsPage() {
                                 <svg className="w-3 h-3 text-yellow-400 mr-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                   <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
-                                <span className="text-[#6FA0E6] text-xs mr-1 flex-shrink-0">{item.rating}</span>
                                 <span className="text-[#94A9C9] text-xs truncate flex-1">({item.views?.toLocaleString()})</span>
                               </div>
                             </div>
@@ -648,7 +638,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
@@ -697,7 +686,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
@@ -746,7 +734,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
@@ -795,7 +782,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
@@ -844,7 +830,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>
@@ -893,7 +878,6 @@ export default function RecommendationsPage() {
                         <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span className="text-white text-sm font-medium mr-1">{item.rating}</span>
                         <span className="text-[#9CA3AF] text-sm">({item.views})</span>
                       </div>
                     </div>

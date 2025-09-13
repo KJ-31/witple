@@ -14,7 +14,6 @@ interface AttractionData {
   name: string
   description: string
   imageUrl: string
-  rating: number
   category: string
   address: string
   region: string
@@ -48,7 +47,6 @@ interface SelectedPlace {
   id: string
   name: string
   category: string
-  rating: number
   description: string
   dayNumber?: number // 선택된 날짜 (1, 2, 3...)
   sourceTable?: string // 어떤 테이블에서 온 데이터인지 추적
@@ -534,7 +532,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           latitude: location.latitude ? parseFloat(location.latitude) : undefined,
           longitude: location.longitude ? parseFloat(location.longitude) : undefined,
           category: tableName || location.category || '저장된 장소',
-          rating: location.rating || 0,
           sourceTable: tableName || 'saved',
           places: location.places // 원본 places 정보 보존
         }
@@ -592,7 +589,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       id: place.id,
       name: place.name,
       category: place.category,
-      rating: place.rating,
       description: place.description,
       dayNumber: selectedDayForAdding,
       sourceTable: place.sourceTable // 테이블 정보 저장
@@ -781,7 +777,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                       name: placeData.name || location.name || '저장된 장소',
                       description: placeData.description || location.description || '저장된 장소입니다',
                       address: placeData.address || location.address || '',
-                      rating: placeData.rating || location.rating || 0,
                       latitude: placeData.latitude || location.latitude,
                       longitude: placeData.longitude || location.longitude,
                       category: placeData.category || tableName,
@@ -950,12 +945,6 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
                           <span className="text-[#6FA0E6] text-xs bg-[#1F3C7A]/50 px-2 py-1 rounded-full">
                             {getCategoryName(place.category)}
                           </span>
-                          <div className="flex items-center">
-                            <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                            <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
-                          </div>
                         </div>
                       </div>
 

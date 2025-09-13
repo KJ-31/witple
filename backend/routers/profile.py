@@ -85,41 +85,70 @@ async def get_current_user_profile(
     current_user: User = Depends(get_current_user)
 ):
     """현재 사용자의 프로필 정보를 가져옵니다."""
-    # 캐시 키 생성
-    cache_key = f"profile:{current_user.user_id}"
-    
-    # 캐시에서 조회 시도
-    cached_result = cache.get(cache_key)
-    if cached_result is not None:
-        logger.info(f"Cache hit for profile: {cache_key}")
-        return UserResponse(**cached_result)
-    
-    logger.info(f"Cache miss for profile: {cache_key}")
-    
-    # 사용자의 여행 취향 정보도 함께 가져오기
-    user_preference = db.query(UserPreference).filter(
-        UserPreference.user_id == current_user.user_id
-    ).first()
-    
-    # UserResponse 객체 생성 시 여행 취향 정보 포함
-    user_data = {
-        "user_id": current_user.user_id,
-        "email": current_user.email,
-        "name": current_user.name,
-        "age": current_user.age,
-        "nationality": current_user.nationality,
-        "profile_image": current_user.profile_image,
-        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
-        "persona": user_preference.persona if user_preference else None,
-        "priority": user_preference.priority if user_preference else None,
-        "accommodation": user_preference.accommodation if user_preference else None,
-        "exploration": user_preference.exploration if user_preference else None
-    }
-    
-    # 결과를 캐시에 저장 (20분)
-    cache.set(cache_key, user_data, expire=1200)
-    
-    return UserResponse(**user_data)
+    try:
+        # 캐시 키 생성
+        cache_key = f"profile:{current_user.user_id}"
+        
+        # 캐시에서 조회 시도 (캐시 오류 시 무시하고 계속 진행)
+        cached_result = None
+        try:
+            cached_result = cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Cache hit for profile: {cache_key}")
+                return UserResponse(**cached_result)
+        except Exception as cache_error:
+            logger.warning(f"Cache read error for {cache_key}: {cache_error}")
+        
+        logger.info(f"Cache miss for profile: {cache_key}")
+        
+        # 사용자의 여행 취향 정보도 함께 가져오기
+        user_preference = None
+        try:
+            user_preference = db.query(UserPreference).filter(
+                UserPreference.user_id == current_user.user_id
+            ).first()
+        except Exception as db_error:
+            logger.warning(f"Database query error for user preferences: {db_error}")
+        
+        # created_at 필드 안전하게 처리
+        created_at_str = None
+        if current_user.created_at:
+            if hasattr(current_user.created_at, 'isoformat'):
+                # datetime 객체인 경우
+                created_at_str = current_user.created_at.isoformat()
+            else:
+                # 이미 문자열인 경우
+                created_at_str = str(current_user.created_at)
+        
+        # UserResponse 객체 생성 시 여행 취향 정보 포함
+        user_data = {
+            "user_id": current_user.user_id,
+            "email": current_user.email,
+            "name": current_user.name,
+            "age": current_user.age,
+            "nationality": current_user.nationality,
+            "profile_image": current_user.profile_image,
+            "created_at": created_at_str,
+            "persona": user_preference.persona if user_preference else None,
+            "priority": user_preference.priority if user_preference else None,
+            "accommodation": user_preference.accommodation if user_preference else None,
+            "exploration": user_preference.exploration if user_preference else None
+        }
+        
+        # 결과를 캐시에 저장 (캐시 오류 시 무시하고 계속 진행)
+        try:
+            cache.set(cache_key, user_data, expire=1200)
+        except Exception as cache_error:
+            logger.warning(f"Cache write error for {cache_key}: {cache_error}")
+        
+        return UserResponse(**user_data)
+        
+    except Exception as e:
+        logger.error(f"Profile API error for user {current_user.user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"프로필 정보 조회 중 오류 발생: {str(e)}"
+        )
 
 
 @router.put("/image", response_model=UserResponse)
