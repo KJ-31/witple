@@ -248,8 +248,8 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 pb-20">
       {/* Header with Logo and Chatbot */}
-      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between px-4 pt-4 pb-4 mb-10">
-        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
+      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between px-4 py-2 mb-10">
+        <h1 className="text-[2.5rem] font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
         {/* <button
           onClick={() => {
             const chatbotEvent = new CustomEvent('openChatbot');
