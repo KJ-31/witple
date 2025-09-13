@@ -11,6 +11,7 @@ import traceback
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import gzip
+from pathlib import Path
 
 import boto3
 import pandas as pd
@@ -19,6 +20,14 @@ from sentence_transformers import SentenceTransformer
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import requests
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ Loaded .env file from {env_path}")
+else:
+    print(f"⚠️ .env file not found at {env_path}")
 
 # 로깅 설정
 logging.basicConfig(
@@ -33,13 +42,23 @@ logger = logging.getLogger(__name__)
 
 # 환경 변수 설정
 AWS_REGION = os.getenv('AWS_REGION', 'ap-northeast-2')
-S3_BUCKET = os.getenv('S3_BUCKET', 'user-actions-data')
+S3_BUCKET = os.getenv('S3_BUCKET', os.getenv('S3_EVENTS_BUCKET', 'user-actions-data'))
 S3_PREFIX = os.getenv('S3_PREFIX', 'user-actions/')
 DATABASE_URL = os.getenv('DATABASE_URL')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # Main EC2 webhook URL
 BATCH_ID = os.getenv('BATCH_ID', f'batch_{int(datetime.now().timestamp())}')
 JOB_NAME = os.getenv('AWS_BATCH_JOB_NAME', 'witple-vectorization-job')
 JOB_ID = os.getenv('AWS_BATCH_JOB_ID', 'unknown')
+
+# 로드된 환경변수 확인
+logger = logging.getLogger(__name__)
+print(f"🔧 Environment Variables:")
+print(f"  AWS_REGION: {AWS_REGION}")
+print(f"  S3_BUCKET: {S3_BUCKET}")
+print(f"  S3_PREFIX: {S3_PREFIX}")
+print(f"  DATABASE_URL: {'***' if DATABASE_URL else 'NOT SET'}")
+print(f"  WEBHOOK_URL: {WEBHOOK_URL}")
+print(f"  AWS_ACCESS_KEY_ID: {'***' if os.getenv('AWS_ACCESS_KEY_ID') else 'NOT SET'}")
 
 # BERT 모델 설정
 BERT_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
@@ -232,7 +251,7 @@ class BatchProcessor:
                     'like_score': round(like_score, 2),
                     'bookmark_score': round(bookmark_score, 2),
                     'click_score': round(click_score, 2),
-                    'dwell_time_score': round(diversity_score, 2),  # 다양성을 체류시간 점수로 사용
+                    'dwell_time_score': 0.0,  # 기본값 설정
                     'total_actions': total_actions,
                     'total_likes': data['total_likes'],
                     'total_bookmarks': data['total_bookmarks'],
