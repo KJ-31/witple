@@ -196,6 +196,9 @@ export default function MapPage() {
   // 선택된 마커 ID 상태 (지도와 동기화)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
+  // 막대그래프 상세보기 토글 상태 (구간별)
+  const [showRouteDetails, setShowRouteDetails] = useState<{[key: string]: boolean}>({})
+
 
   // 장소 ID 파싱 함수
   const parsePlaceId = (placeId: string): {tableName: string, numericId: string} => {
@@ -3413,7 +3416,8 @@ export default function MapPage() {
                           (() => {
                             const nextPlace = groupedPlaces[day][index + 1];
                             const segmentInfo = getRouteSegmentInfo(day, place.id, nextPlace.id);
-                            
+                            const segmentKey = `${day}-${index}`; // 구간별 고유 키
+
                             if (segmentInfo) {
                               return (
                                 <div className="my-4">
@@ -3480,7 +3484,13 @@ export default function MapPage() {
                                           <div className="w-full overflow-x-auto">
                                             <div className="relative py-1">
                                               {/* 연속된 타임라인 바 */}
-                                              <div className="flex h-4 rounded-full overflow-hidden pl-2">
+                                              <div
+                                                className="flex h-4 rounded-full overflow-hidden pl-2 cursor-pointer"
+                                                onClick={() => setShowRouteDetails(prev => ({
+                                                  ...prev,
+                                                  [segmentKey]: !prev[segmentKey]
+                                                }))}
+                                              >
                                                 {processedSteps.map((step: any, index: number) => (
                                                   <div 
                                                     key={`segment-${index}`}
@@ -3526,9 +3536,9 @@ export default function MapPage() {
                                       })()}
                                     </div>
                                   )}
-                                  
+
                                   {/* 상세 교통수단 정보 */}
-                                  {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
+                                  {showRouteDetails[segmentKey] && segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
                                     <div className="bg-[#0B1220]/90 backdrop-blur-sm border border-[#3E68FF]/20 rounded-xl p-4 mx-2">
                                       <div className="space-y-3">
                                         {segmentInfo.transitDetails.map((step: any, stepIndex: number) => (
