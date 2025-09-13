@@ -3424,9 +3424,9 @@ export default function MapPage() {
                                   <div className="flex items-center justify-center mb-1">
                                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
                                     <div className="mx-4 flex items-center space-x-2 text-sm">
-                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
-                                      <span className="text-[#94A9C9]">·</span>
                                       <span className="text-[#34D399] font-medium">{segmentInfo.duration}</span>
+                                      <span className="text-[#94A9C9]">·</span>
+                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
                                     </div>
                                     <div className="flex-1 h-px bg-gradient-to-r from-[#3E68FF]/30 via-transparent to-transparent"></div>
                                   </div>
@@ -3633,19 +3633,14 @@ export default function MapPage() {
                                                 const walkingText = isLastStep ? `${segmentInfo.destination.name}까지 도보` : (step.instruction || '도보 이동');
                                                 
                                                 return (
-                                                  <div className="flex items-center space-x-3">
-                                                    <div className="flex-shrink-0">
-                                                      <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
-                                                        <span className="text-sm">🚶</span>
-                                                      </div>
-                                                    </div>
+                                                  <div className="flex items-center justify-between">
                                                     <div className="flex-1 text-sm text-[#94A9C9]">
                                                       <div className="truncate">
                                                         {walkingText}
                                                       </div>
-                                                      <div className="text-xs text-[#6FA0E6] mt-1">
-                                                        {step.distance} · {step.duration}
-                                                      </div>
+                                                    </div>
+                                                    <div className="flex-shrink-0 text-xs text-[#94A9C9]">
+                                                      {step.duration}
                                                     </div>
                                                   </div>
                                                 );
