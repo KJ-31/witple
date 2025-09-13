@@ -1704,9 +1704,10 @@ export default function MapPage() {
               <div style="
                 display: inline-flex;
                 align-items: center;
-                gap: 4px;
+                gap: 2px;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 white-space: nowrap;
+                transform: translateX(-10px);
               ">
                 <!-- 색상 동그라미에 이모티콘 -->
                 <div style="
@@ -3425,6 +3426,106 @@ export default function MapPage() {
                                     </div>
                                     <div className="flex-1 h-px bg-gradient-to-r from-[#3E68FF]/30 via-transparent to-transparent"></div>
                                   </div>
+                                  
+                                  {/* Timeline 막대그래프 */}
+                                  {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
+                                    <div className="mb-4 px-4">
+                                      {(() => {
+                                        // 총 소요시간 계산
+                                        const totalMinutes = segmentInfo.transitDetails.reduce((total: number, step: any) => {
+                                          const duration = step.duration?.text || step.duration || '0분';
+                                          const minutes = parseInt(duration.toString().replace(/[^0-9]/g, '')) || 0;
+                                          return total + minutes;
+                                        }, 0);
+                                        
+                                        if (totalMinutes === 0) return null;
+                                        
+                                        // 각 스텝별 정보 준비
+                                        const processedSteps = segmentInfo.transitDetails.map((step: any) => {
+                                          const isWalk = step.mode === 'WALKING' || !step.transitDetails;
+                                          const originalLine = step.transitDetails?.line || step.transitDetails?.vehicle || '';
+                                          const cleanName = step.transitDetails ? getCleanTransitName(step.transitDetails) : '';
+                                          const vehicleType = step.transitDetails?.vehicle_type || '';
+                                          const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL';
+                                          const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine) || vehicleType === 'BUS';
+                                          
+                                          let bgColor = '#6B7280'; // 도보 회색
+                                          let icon = '🚶';
+                                          
+                                          if (!isWalk && step.transitDetails) {
+                                            if (isSubway) {
+                                              bgColor = getSubwayLineColor(originalLine);
+                                              icon = '🚇';
+                                            } else if (isBus) {
+                                              bgColor = getBusColor(originalLine);
+                                              icon = '🚌';
+                                            }
+                                          }
+                                          
+                                          const duration = step.duration?.text || step.duration || '0분';
+                                          const minutes = parseInt(duration.toString().replace(/[^0-9]/g, '')) || 0;
+                                          const percentage = Math.max((minutes / totalMinutes) * 100, 8); // 최소 8% 보장
+                                          
+                                          return {
+                                            icon,
+                                            bgColor,
+                                            cleanName,
+                                            duration: duration.toString(),
+                                            minutes,
+                                            percentage
+                                          };
+                                        });
+                                        
+                                        return (
+                                          <div className="w-full overflow-x-auto">
+                                            <div className="relative py-1">
+                                              {/* 연속된 타임라인 바 */}
+                                              <div className="flex h-4 rounded-full overflow-hidden">
+                                                {processedSteps.map((step: any, index: number) => (
+                                                  <div 
+                                                    key={`segment-${index}`}
+                                                    className="relative flex items-center justify-center"
+                                                    style={{ 
+                                                      backgroundColor: step.bgColor,
+                                                      width: `${step.percentage}%`,
+                                                      minWidth: '40px'
+                                                    }}
+                                                  >
+                                                    {/* 아이콘의 중앙을 각 막대의 시작점에 배치 */}
+                                                    <div 
+                                                      className="absolute left-0 w-4 h-4 rounded-full flex items-center justify-center text-white border border-white shadow-sm"
+                                                      style={{ 
+                                                        backgroundColor: step.bgColor,
+                                                        fontSize: '8px',
+                                                        transform: 'translateX(-50%)' // 아이콘 중앙이 막대 시작점에 위치
+                                                      }}
+                                                    >
+                                                      {step.icon}
+                                                    </div>
+                                                    
+                                                    {/* 시간 표시 */}
+                                                    <span className="text-white text-[10px] font-medium">
+                                                      {step.duration}
+                                                    </span>
+                                                    
+                                                    {/* 버스/지하철 번호 (위쪽에 표시) */}
+                                                    {step.cleanName && (
+                                                      <span 
+                                                        className="absolute -top-5 text-[10px] font-medium"
+                                                        style={{ color: step.bgColor }}
+                                                      >
+                                                        {step.cleanName}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
                                   
                                   {/* 상세 교통수단 정보 */}
                                   {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
