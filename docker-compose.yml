@@ -24,6 +24,35 @@ services:
       - redis_data:/data
     networks:
       - witple_network
+
+  # Collection Server (Node.js)
+  collection-server:
+    build:
+      context: ./collection-server
+      dockerfile: Dockerfile
+    container_name: witple_collection_server
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - S3_EVENTS_BUCKET=${S3_EVENTS_BUCKET:-user-actions-data}
+      - S3_PREFIX=${S3_PREFIX:-user-actions/}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://backend:8000/api/v1/batch-processing/webhook/completion}
+      - MAX_BUFFER_SIZE=${MAX_BUFFER_SIZE:-100}
+      - FLUSH_INTERVAL_MS=${FLUSH_INTERVAL_MS:-300000}
+    volumes:
+      - ~/.aws:/root/.aws:ro
+    networks:
+      - witple_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
   # Backend (FastAPI)
   backend:
     build:
@@ -65,9 +94,11 @@ services:
       - API_INTERNAL_URL=http://backend:8000
       - NEXT_PUBLIC_API_BASE=/api
       - NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+      - NEXT_PUBLIC_COLLECTION_SERVER_URL=http://collection-server:8080
       - NODE_ENV=production
     depends_on:
       - backend
+      - collection-server
     networks:
       - witple_network
 volumes:

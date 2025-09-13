@@ -7,7 +7,7 @@ import redis
 import logging
 import os
 from database import engine, Base
-from routers import auth, users, posts, attractions, recommendations, profile, saved_locations, trips, chat
+from routers import auth, users, posts, attractions, recommendations, profile, saved_locations, trips, chat, batch_processing
 from config import settings
 
 # 로깅 설정
@@ -78,6 +78,7 @@ app.include_router(profile.router, prefix="/api/v1/profile", tags=["profile"])
 app.include_router(saved_locations.router, prefix="/api/v1/saved-locations", tags=["saved-locations"])
 app.include_router(trips.router, prefix="/api/v1/trips", tags=["trips"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+app.include_router(batch_processing.router, prefix="/api/v1", tags=["batch-processing"])
 
 
 @app.get("/")
