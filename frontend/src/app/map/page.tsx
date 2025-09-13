@@ -3421,7 +3421,7 @@ export default function MapPage() {
                             if (segmentInfo) {
                               return (
                                 <div className="my-4">
-                                  <div className="flex items-center justify-center mb-3">
+                                  <div className="flex items-center justify-center mb-1">
                                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
                                     <div className="mx-4 flex items-center space-x-2 text-sm">
                                       <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
@@ -3482,7 +3482,7 @@ export default function MapPage() {
                                         
                                         return (
                                           <div className="w-full overflow-x-auto">
-                                            <div className="relative py-1">
+                                            <div className="relative py-1 pb-6">
                                               {/* 연속된 타임라인 바 */}
                                               <div
                                                 className="flex h-4 rounded-full overflow-visible pl-2 cursor-pointer"
