@@ -265,6 +265,16 @@ export default function Home() {
         </button> */}
       </div>
 
+      {/* Main Card 섹션 */}
+      {citySections.length > 0 && (
+        <div className="px-5 mb-12">
+          <MainCard
+            attraction={citySections[0]?.categorySections?.[0]?.attractions?.[0] || citySections[0]?.attractions?.[0]}
+            onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
+          />
+        </div>
+      )}
+
       {/* 추천 도시별 명소 섹션 (2개 고정) */}
       <main className="pl-[20px] pr-0 pb-24 space-y-12">
         {citySections.map((citySection, index) => {
@@ -547,4 +557,112 @@ function getCategoryColor(category: string): string {
     accommodation: '#FFD53F'
   }
   return colorMap[category] || '#3E68FF'
+}
+
+/** 메인 카드 컴포넌트 */
+function MainCard({
+  attraction,
+  onAttractionClick,
+}: {
+  attraction: { id: string; name: string; description: string; imageUrl: string; category: string }
+  onAttractionClick: (attractionId: string) => void
+}) {
+  if (!attraction) return null
+
+  const categoryColor = getCategoryColor(attraction.category?.trim())
+
+  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
+  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
+    ? '#E8EAFF'
+    : '#0D121C'
+  return (
+    <figure
+      className="
+        snap-start shrink-0
+        rounded-lg overflow-hidden
+        shadow-lg
+        w-full max-w-lg h-[200px]
+        cursor-pointer transition-all duration-300
+        group relative
+      "
+      onClick={() => onAttractionClick(attraction.id)}
+    >
+      {/* 이미지 영역 */}
+      <div className="relative w-full h-full overflow-hidden">
+        {attraction.imageUrl && attraction.imageUrl !== "/images/default.jpg" && attraction.imageUrl !== null ? (
+          <>
+            {/* 이미지 로딩 인디케이터 */}
+            <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+            </div>
+
+            <img
+              src={attraction.imageUrl}
+              alt={attraction.name}
+              className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
+              onLoad={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.opacity = '1';
+                const loadingIndicator = target.previousElementSibling as HTMLElement;
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+              }}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+                const loadingIndicator = target.previousElementSibling as HTMLElement;
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+                const fallback = target.nextElementSibling as HTMLElement;
+                if (fallback) fallback.style.display = 'flex';
+              }}
+            />
+
+            {/* 이미지 로드 실패 시 대체 UI */}
+            <div
+              className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center"
+              style={{ display: 'none' }}
+            >
+              <span className="text-gray-600 text-lg text-center px-2">
+                {attraction.name}
+              </span>
+            </div>
+          </>
+        ) : (
+          /* 이미지가 없는 경우 기본 UI */
+          <div className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center">
+            <span className="text-gray-600 text-lg text-center px-2">
+              {attraction.name}
+            </span>
+          </div>
+        )}
+
+        {/* 카테고리 배지 - 좌상단 */}
+        <div className="absolute top-3 left-3">
+          <span
+            className="px-3 py-1 text-xs rounded-full font-medium"
+            style={{
+              backgroundColor: categoryColor,
+              color: textColor
+            }}
+          >
+            {getCategoryName(attraction.category?.trim()) || attraction.category}
+          </span>
+        </div>
+
+      </div>
+
+      {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
+      <div className="absolute bottom-4 left-4 right-4">
+        <div
+          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          style={{
+            backgroundColor: categoryColor
+          }}
+        >
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+            {attraction.name}
+          </h3>
+        </div>
+      </div>
+    </figure>
+  )
 }
