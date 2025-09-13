@@ -22,7 +22,10 @@ interface UserProfile {
 interface SavedLocation {
   id: number;
   user_id: string;
-  places: any;
+  places: string;
+  place_name?: string;
+  place_image?: string;
+  place_address?: string;
   created_at: string;
   updated_at: string;
 }
@@ -390,22 +393,56 @@ export default function UserProfilePage() {
           {savedLocations.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {savedLocations.map((location) => (
-                <div key={location.id} className="border border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-gray-700">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium text-white mb-2">
-                        {location.places?.name || '장소명 없음'}
+                <div 
+                  key={location.id} 
+                  className="border border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-gray-700 cursor-pointer"
+                  onClick={() => {
+                    // places 필드에서 테이블명과 ID 추출
+                    const placeInfo = location.places;
+                    if (placeInfo && placeInfo.includes(':')) {
+                      const [tableName, placeId] = placeInfo.split(':');
+                      // 올바른 URL 형식으로 변환: tableName_placeId
+                      router.push(`/attraction/${tableName}_${placeId}`);
+                    }
+                  }}
+                >
+                  <div className="flex items-start space-x-4">
+                    {/* 장소 이미지 */}
+                    <div className="flex-shrink-0">
+                      {location.place_image ? (
+                        <img
+                          src={location.place_image}
+                          alt={location.place_name || '장소 이미지'}
+                          className="w-16 h-16 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-lg bg-gray-600 flex items-center justify-center">
+                          <MapPin className="w-8 h-8 text-gray-400" />
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 장소 정보 */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-white mb-1 truncate">
+                        {location.place_name || '장소명 없음'}
                       </h3>
-                      {location.places?.address && (
-                        <p className="text-sm text-gray-300 mb-2">
-                          {location.places.address}
+                      {location.place_address && (
+                        <p className="text-sm text-gray-300 mb-2 line-clamp-2">
+                          {location.place_address}
                         </p>
                       )}
                       <p className="text-xs text-gray-400">
                         {formatDate(location.created_at)} 저장
                       </p>
                     </div>
-                    <MapPin className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    
+                    {/* 화살표 아이콘 */}
+                    <div className="flex-shrink-0">
+                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
                   </div>
                 </div>
               ))}

@@ -2,7 +2,7 @@ import logging
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 
 from database import get_db
 from models import SavedLocation, User
@@ -14,6 +14,42 @@ from cache_utils import cache
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["saved-locations"])
+
+
+def get_place_info(db: Session, table_name: str, place_id: str):
+    """테이블명과 ID를 통해 장소 정보를 조회"""
+    try:
+        # 안전한 테이블명 검증 (SQL 인젝션 방지)
+        valid_tables = ['accommodation', 'humanities', 'leisure_sports', 'nature', 'restaurants', 'shopping']
+        if table_name not in valid_tables:
+            return {"name": "Unknown Place", "image": None, "address": None}
+        
+        # 동적 쿼리 실행 - 이름, 이미지, 주소 조회
+        query = text(f"SELECT name, image_urls, address FROM {table_name} WHERE id = :place_id")
+        result = db.execute(query, {"place_id": place_id}).fetchone()
+        
+        if result:
+            # image_urls가 JSON 배열인 경우 첫 번째 이미지 사용
+            image_url = None
+            if result[1]:
+                try:
+                    import json
+                    image_urls = json.loads(result[1]) if isinstance(result[1], str) else result[1]
+                    if isinstance(image_urls, list) and len(image_urls) > 0:
+                        image_url = image_urls[0]
+                except:
+                    image_url = result[1]  # 문자열인 경우 그대로 사용
+            
+            return {
+                "name": result[0] or "Unknown Place",
+                "image": image_url,
+                "address": result[2]
+            }
+        else:
+            return {"name": "Unknown Place", "image": None, "address": None}
+    except Exception as e:
+        print(f"Error getting place info: {e}")
+        return {"name": "Unknown Place", "image": None, "address": None}
 
 
 @router.post("/", response_model=SavedLocationResponse)
@@ -328,10 +364,25 @@ async def get_user_saved_locations(
     # 응답 데이터 구성
     location_list = []
     for location in locations:
+        # places 필드에서 테이블명과 ID 추출
+        place_info = location.places
+        place_name = "Unknown Place"
+        
+        if place_info and ":" in place_info:
+            table_name, place_id = place_info.split(":", 1)
+            place_data = get_place_info(db, table_name, place_id)
+            place_name = place_data["name"]
+            place_image = place_data["image"]
+            place_address = place_data["address"]
+            logger.info(f"Place info: {place_info}, table: {table_name}, id: {place_id}, name: {place_name}")
+        
         location_dict = {
             "id": location.id,
             "user_id": location.user_id,
-            "places": location.places,
+            "places": place_info,  # 기존 형식 유지
+            "place_name": place_name,  # 장소명 추가
+            "place_image": place_image if 'place_image' in locals() else None,  # 장소 이미지 추가
+            "place_address": place_address if 'place_address' in locals() else None,  # 장소 주소 추가
             "created_at": location.created_at.isoformat() if location.created_at else None,
             "updated_at": location.updated_at.isoformat() if location.updated_at else None
         }

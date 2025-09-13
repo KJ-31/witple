@@ -176,6 +176,9 @@ class SavedLocationCreate(SavedLocationBase):
 class SavedLocationResponse(SavedLocationBase):
     id: int
     user_id: str
+    place_name: Optional[str] = None  # 장소명 추가
+    place_image: Optional[str] = None  # 장소 이미지 추가
+    place_address: Optional[str] = None  # 장소 주소 추가
     created_at: datetime
     updated_at: Optional[datetime] = None
     
