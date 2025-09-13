@@ -109,7 +109,7 @@ async def get_current_user_profile(
         "age": current_user.age,
         "nationality": current_user.nationality,
         "profile_image": current_user.profile_image,
-        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "created_at": current_user.created_at.isoformat() if hasattr(current_user.created_at, 'isoformat') and current_user.created_at else str(current_user.created_at) if current_user.created_at else None,
         "persona": user_preference.persona if user_preference else None,
         "priority": user_preference.priority if user_preference else None,
         "accommodation": user_preference.accommodation if user_preference else None,
