@@ -223,9 +223,17 @@ class TripCreate(TripBase):
     pass
 
 
-class TripResponse(TripBase):
+class TripResponse(BaseModel):
     id: int
     user_id: str
+    title: str
+    places: Any  # JSON 문자열 또는 리스트
+    start_date: datetime
+    end_date: datetime
+    status: TripStatus = TripStatus.planned
+    total_budget: Optional[int] = None
+    cover_image: Optional[str] = None
+    description: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -236,3 +244,8 @@ class TripResponse(TripBase):
 class TripListResponse(BaseModel):
     trips: List[TripResponse]
     total: int
+
+
+class TripCopyRequest(BaseModel):
+    trip_id: int
+    new_title: Optional[str] = None

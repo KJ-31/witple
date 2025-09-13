@@ -7,7 +7,7 @@ import json
 
 from database import get_db
 from models import Trip, User
-from schemas import TripCreate, TripResponse, TripListResponse, TripStatus
+from schemas import TripCreate, TripResponse, TripListResponse, TripStatus, TripCopyRequest
 from routers.auth import get_current_user
 from auth_utils import get_current_user_optional
 from cache_utils import cache
@@ -491,4 +491,81 @@ async def update_trip_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"여행 상태 변경 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.post("/copy", response_model=TripResponse)
+async def copy_trip(
+    copy_request: TripCopyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """다른 사용자의 여행 일정을 내 일정으로 복사"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"일정 복사 요청 시작 - trip_id: {copy_request.trip_id}, user: {current_user.email}")
+        # 원본 여행 일정 조회
+        original_trip = db.query(Trip).filter(Trip.id == copy_request.trip_id).first()
+        logger.info(f"원본 일정 조회 결과: {original_trip is not None}")
+        if not original_trip:
+            logger.error(f"일정을 찾을 수 없음 - trip_id: {copy_request.trip_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="복사할 여행 일정을 찾을 수 없습니다."
+            )
+        
+        # 새로운 제목 설정 (기본값: "복사본 - 원본제목")
+        new_title = copy_request.new_title or f"복사본 - {original_trip.title}"
+        
+        # places 필드 처리 (JSON 문자열인 경우 파싱)
+        places_data = original_trip.places
+        logger.info(f"원본 places 데이터 타입: {type(places_data)}, 값: {places_data}")
+        if isinstance(places_data, str):
+            try:
+                places_data = json.loads(places_data)
+                logger.info(f"JSON 파싱 성공: {places_data}")
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 파싱 실패: {e}")
+                places_data = []
+        
+        # places_data가 리스트인 경우 JSON 문자열로 변환
+        if isinstance(places_data, list):
+            places_data = json.dumps(places_data)
+            logger.info(f"places 데이터를 JSON 문자열로 변환: {places_data}")
+        
+        # 새로운 여행 일정 생성
+        new_trip = Trip(
+            user_id=current_user.user_id,
+            title=new_title,
+            places=places_data,  # 파싱된 JSON 데이터
+            start_date=original_trip.start_date,
+            end_date=original_trip.end_date,
+            status="planned",  # 복사된 일정은 항상 계획 상태로 시작
+            total_budget=original_trip.total_budget,
+            cover_image=original_trip.cover_image,
+            description=original_trip.description
+        )
+        
+        logger.info(f"새 일정 생성 시작 - title: {new_title}")
+        db.add(new_trip)
+        db.commit()
+        db.refresh(new_trip)
+        logger.info(f"새 일정 생성 완료 - id: {new_trip.id}")
+        
+        # 캐시 무효화
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:20")
+        cache.delete(f"trips:list:{current_user.user_id}:all:0:10")
+        
+        return new_trip
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"일정 복사 중 오류 발생: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"여행 일정 복사 중 오류가 발생했습니다: {str(e)}"
         )

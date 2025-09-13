@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { User, MapPin, Calendar, Heart, Users, Globe, Clock } from 'lucide-react';
+import TripDetailModal from '@/components/TripDetailModal';
 
 interface UserProfile {
   user_id: string;
@@ -66,6 +67,8 @@ export default function UserProfilePage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   useEffect(() => {
@@ -148,6 +151,77 @@ export default function UserProfilePage() {
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  // 토큰 가져오기 함수
+  const getToken = () => {
+    // 먼저 세션에서 토큰 확인
+    if ((session as any)?.backendToken) {
+      return (session as any).backendToken
+    }
+    
+    // 다른 가능한 토큰 키들 확인
+    const possibleTokenKeys = ['accessToken', 'access_token', 'token', 'jwt']
+    for (const key of possibleTokenKeys) {
+      if ((session as any)?.[key]) {
+        return (session as any)[key]
+      }
+    }
+    
+    // localStorage에서 토큰 확인
+    const localToken = localStorage.getItem('access_token')
+    if (localToken) {
+      return localToken
+    }
+    
+    // localStorage의 다른 키들도 확인
+    const localKeys = ['token', 'jwt', 'accessToken']
+    for (const key of localKeys) {
+      const token = localStorage.getItem(key)
+      if (token) {
+        return token
+      }
+    }
+    
+    return null
+  };
+
+  // 일정 복사 함수
+  const handleCopyTrip = async (tripId: number) => {
+    try {
+      const token = getToken();
+      if (!token) {
+        alert('로그인이 필요합니다.');
+        return;
+      }
+
+      const response = await fetch('/api/proxy/api/v1/trips/copy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          trip_id: tripId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('일정 복사에 실패했습니다.');
+      }
+
+      alert('일정이 성공적으로 복사되었습니다!');
+    } catch (error) {
+      console.error('일정 복사 오류:', error);
+      alert('일정 복사 중 오류가 발생했습니다.');
+      throw error;
+    }
+  };
+
+  // 일정 클릭 핸들러
+  const handleTripClick = (trip: Trip) => {
+    setSelectedTrip(trip);
+    setIsModalOpen(true);
   };
 
   const getPersonaIcon = (persona: string) => {
@@ -321,10 +395,14 @@ export default function UserProfilePage() {
             </span>
           </div>
 
-          {trips.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {trips.map((trip) => (
-                <div key={trip.id} className="border border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-gray-700">
+                {trips.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {trips.map((trip) => (
+                      <div 
+                        key={trip.id} 
+                        className="border border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow bg-gray-700 cursor-pointer"
+                        onClick={() => handleTripClick(trip)}
+                      >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
                       <h3 className="font-medium text-white mb-1">
@@ -455,6 +533,20 @@ export default function UserProfilePage() {
           )}
         </div>
       </div>
+
+      {/* Trip Detail Modal */}
+      {selectedTrip && (
+        <TripDetailModal
+          trip={selectedTrip}
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedTrip(null);
+          }}
+          onCopyTrip={handleCopyTrip}
+          isOwner={isOwnProfile}
+        />
+      )}
     </div>
   );
 }
