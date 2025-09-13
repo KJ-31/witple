@@ -3433,7 +3433,7 @@ export default function MapPage() {
                                   
                                   {/* Timeline 막대그래프 */}
                                   {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
-                                    <div className="mb-4 px-4">
+                                    <div className="px-4">
                                       {(() => {
                                         // 총 소요시간 계산
                                         const totalMinutes = segmentInfo.transitDetails.reduce((total: number, step: any) => {
@@ -3485,7 +3485,7 @@ export default function MapPage() {
                                             <div className="relative py-1">
                                               {/* 연속된 타임라인 바 */}
                                               <div
-                                                className="flex h-4 rounded-full overflow-hidden pl-2 cursor-pointer"
+                                                className="flex h-4 rounded-full overflow-visible pl-2 cursor-pointer"
                                                 onClick={() => setShowRouteDetails(prev => ({
                                                   ...prev,
                                                   [segmentKey]: !prev[segmentKey]
@@ -3518,13 +3518,16 @@ export default function MapPage() {
                                                       {step.duration}
                                                     </span>
                                                     
-                                                    {/* 버스/지하철 번호 (위쪽에 표시) */}
-                                                    {step.cleanName && (
-                                                      <span 
-                                                        className="absolute -top-5 text-[10px] font-medium"
-                                                        style={{ color: step.bgColor }}
+                                                    {/* 버스/지하철 번호 (아래쪽에 표시) */}
+                                                    {!step.isWalk && (step.transitDetails || step.cleanName) && (
+                                                      <span
+                                                        className="absolute top-5 left-0 text-[9px] font-bold"
+                                                        style={{
+                                                          color: step.bgColor,
+                                                          transform: 'translateX(-50%)'
+                                                        }}
                                                       >
-                                                        {step.cleanName}
+                                                        {step.transitDetails ? getTransitNumber(step.transitDetails) : step.cleanName}
                                                       </span>
                                                     )}
                                                   </div>
@@ -3536,6 +3539,7 @@ export default function MapPage() {
                                       })()}
                                     </div>
                                   )}
+
 
                                   {/* 상세 교통수단 정보 */}
                                   {showRouteDetails[segmentKey] && segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
