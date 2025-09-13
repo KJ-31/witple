@@ -131,14 +131,12 @@ export default function TripDetailModal({
 
           {/* Date Range */}
           {trip.start_date && trip.end_date && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-blue-400" />
-                <span className="text-white font-medium">여행 기간</span>
-              </div>
-              <div className="text-gray-300">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-400 flex-shrink-0" />
+              <span className="text-white font-medium">여행 기간:</span>
+              <span className="text-gray-300 text-sm">
                 {formatDate(trip.start_date)} ~ {formatDate(trip.end_date)}
-              </div>
+              </span>
             </div>
           )}
 
