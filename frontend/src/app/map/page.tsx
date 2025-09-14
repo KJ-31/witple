@@ -2777,6 +2777,7 @@ export default function MapPage() {
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
+          source={sourceParam}
           onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시

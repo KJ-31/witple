@@ -1055,9 +1055,9 @@ export default function ProfilePage() {
                     trip.status === 'completed' ? 'bg-gray-500' : 
                     'bg-green-500'
                   }`}>
-                    {trip.status === 'active' && '🚩 진행중'}
-                    {trip.status === 'completed' && '✓ 완료됨'}
-                    {trip.status === 'planned' && '📋 예정됨'}
+                    {trip.status === 'planned' && '📋 준비중'}
+                    {trip.status === 'active' && '🗺️ 여행중'}
+                    {trip.status === 'completed' && '👣 발자취'}
                   </span>
                   
                   {/* 휴지통 버튼 */}

@@ -36,9 +36,9 @@ def get_place_name(db: Session, table_name: str, place_id: str):
 def get_status_display(status: str):
     """여행 상태를 한국어로 변환"""
     status_map = {
-        'planned': '📋 예정됨',
-        'active': '🚩 진행중',
-        'completed': '✓ 완료됨'
+        'planned': '📋 준비중',
+        'active': '🗺️ 여행중',
+        'completed': '👣 발자취'
     }
     return status_map.get(status, status)
 
