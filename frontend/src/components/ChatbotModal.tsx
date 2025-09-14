@@ -66,9 +66,31 @@ export function ChatbotModal() {
                 ? 'bg-[#3E68FF] text-white'
                 : 'bg-white border border-gray-200'
                 } rounded-2xl px-4 py-2 shadow-sm`}>
-                <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
-                  {msg.message}
-                </p>
+                {msg.type === 'bot' && msg.isHtml ? (
+                  // HTML 형태로 렌더링 (개행이 <br>로 변환됨)
+                  <div 
+                    className="text-sm text-gray-800"
+                    dangerouslySetInnerHTML={{ __html: msg.message }}
+                  />
+                ) : msg.type === 'bot' && msg.lines && Array.isArray(msg.lines) ? (
+                  // 줄별 배열로 렌더링
+                  <div className="text-sm text-gray-800">
+                    {msg.lines.map((line, index) => (
+                      <div key={index}>
+                        {line === '' ? (
+                          <br />
+                        ) : (
+                          <span>{line}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  // 기본 텍스트 렌더링
+                  <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
+                    {msg.message}
+                  </p>
+                )}
               </div>
             </div>
           ))}
