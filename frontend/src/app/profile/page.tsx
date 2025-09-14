@@ -5,6 +5,22 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 
+// 여행 상태를 날짜 기준으로 계산하는 함수
+const getTripStatus = (startDate: string, endDate: string): 'planned' | 'active' | 'completed' => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // 시간 부분을 00:00:00으로 설정
+
+  const start = new Date(startDate)
+  start.setHours(0, 0, 0, 0)
+
+  const end = new Date(endDate)
+  end.setHours(23, 59, 59, 999) // 끝나는 날의 마지막 시간으로 설정
+
+  if (today < start) return 'planned'      // 준비중
+  if (today >= start && today <= end) return 'active'  // 여행중
+  return 'completed'                       // 발자취
+}
+
 
 interface TripPlace {
   table_name: string
@@ -1051,13 +1067,13 @@ export default function ProfilePage() {
                 {/* 상태 표시와 버튼들 - 오른쪽 상단 */}
                 <div className="absolute top-4 right-4 flex items-center space-x-2">
                   <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
-                    trip.status === 'active' ? 'bg-red-500' : 
-                    trip.status === 'completed' ? 'bg-gray-500' : 
+                    getTripStatus(trip.start_date, trip.end_date) === 'active' ? 'bg-red-500' :
+                    getTripStatus(trip.start_date, trip.end_date) === 'completed' ? 'bg-gray-500' :
                     'bg-green-500'
                   }`}>
-                    {trip.status === 'planned' && '📋 준비중'}
-                    {trip.status === 'active' && '🗺️ 여행중'}
-                    {trip.status === 'completed' && '👣 발자취'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'planned' && '📋 준비중'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'active' && '🗺️ 여행중'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'completed' && '👣 발자취'}
                   </span>
                   
                   {/* 휴지통 버튼 */}
