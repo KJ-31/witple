@@ -1710,7 +1710,6 @@ export default function MapPage() {
                 gap: 2px;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 white-space: nowrap;
-                transform: translateX(-10px);
               ">
                 <!-- 색상 동그라미에 이모티콘 -->
                 <div style="
