@@ -3264,9 +3264,9 @@ export default function MapPage() {
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, day)}
                             className={`w-full transition-all duration-200 ${
-                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
-                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
-                                : ''
+                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem
+                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2 h-4'
+                                : 'h-2'
                             }`}
                           />
                           
@@ -3695,9 +3695,9 @@ export default function MapPage() {
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, (groupedPlaces[day] || []).length, day)}
                         className={`w-full transition-all duration-200 ${
-                          dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem 
-                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
-                            : ''
+                          dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem
+                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2 h-4'
+                            : 'h-2'
                         }`}
                       />
                     </div>
