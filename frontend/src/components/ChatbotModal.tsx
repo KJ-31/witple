@@ -35,8 +35,15 @@ export function ChatbotModal() {
   if (!showChatbot) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: 99999 }}
+      onClick={() => setShowChatbot(false)}
+    >
+      <div
+        className="bg-white rounded-lg w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="bg-[#3E68FF] p-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -51,8 +58,13 @@ export function ChatbotModal() {
             </div>
           </div>
           <button
-            onClick={() => setShowChatbot(false)}
-            className="text-white hover:text-blue-200 text-xl font-bold w-8 h-8 flex items-center justify-center"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log('Close button clicked') // 디버깅용
+              setShowChatbot(false)
+            }}
+            className="text-white hover:text-blue-200 text-2xl font-bold w-12 h-12 flex items-center justify-center rounded-full hover:bg-white/10 transition-all"
           >
             ×
           </button>
