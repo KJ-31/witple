@@ -1,77 +1,114 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRive } from '@rive-app/react-canvas'
+import { useRive, useStateMachineInput } from '@rive-app/react-canvas'
 import { useChatbot } from './ChatbotProvider'
 
 export default function BubbleAnimation() {
   const { setShowChatbot, showChatbot } = useChatbot()
+
   const { rive, RiveComponent } = useRive({
-    src: '/rive/bubble.riv',
-    autoplay: false,          // 상태머신 미사용. 수동 제어
-    animations: 'closed',     // 초기 포즈가 있다면 'closed' 타임라인 지정
+    src: '/rive/bubble_2.riv',
+    stateMachines: 'State Machine 1',
+    autoplay: true,
+    autoBind: true as any, // ViewModel(Default Instance) 자동 바인딩
   })
 
+  // ✅ .riv에 존재하는 Trigger는 'show' 하나
+  const showTrigger = useStateMachineInput(rive, 'State Machine 1', 'show')
+
   const firstTimeout = useRef<number | null>(null)
-  const loopInterval = useRef<number | null>(null)
+  const textInterval = useRef<number | null>(null)
+  const startedRef = useRef(false) // StrictMode 중복 가드
+
   const [visible, setVisible] = useState(false)
 
-  useEffect(() => {
+  // ---- ViewModel을 통해 문구 바꾸기 (1순위) ----
+  function setSpeech(text: string) {
     if (!rive) return
-
-    // 1) 초기 'closed' 포즈 적용 후 다음 프레임에만 캔버스 보이기 (플래시 방지)
-    // 'closed'가 없다면 아래 두 줄은 제거해도 됨
-    rive.play('closed')
-    requestAnimationFrame(() => {
-      rive.pause('closed')
-      setVisible(true)
-    })
-
-    // 2) 단일 사이클: show 2 타임라인만 재생
-    const playShow2Once = () => {
-      if (document.visibilityState !== 'visible') return
-      if (showChatbot) return  // 챗봇 모달이 열려있으면 애니메이션 중단
-      rive.stop('show 3')      // 혹시 재생 중이면 정지
-      rive.play('show 3')      // ★ 이 타임라인만 실행 (Rive에서 One Shot로 설정)
+    // ViewModel(speech).sentence:String 갱신
+    try {
+      const vmi =
+        (rive as any)?.viewModelInstance ??
+        (rive as any)?.defaultViewModelInstance
+      const stringProp = vmi?.string?.('sentence')
+      if (stringProp) {
+        stringProp.value = text
+        return
+      }
+    } catch {
+      /* noop */
     }
-
-    const start = () => {
-      // 로드 후 5초 뒤 첫 재생
-      firstTimeout.current = window.setTimeout(() => {
-        playShow2Once()
-        // 이후 5분마다 반복
-        loopInterval.current = window.setInterval(playShow2Once, 500_0)
-      }, 5_000)
+    // 폴백: Export된 Text Run 이름이 'sentence'일 때만
+    try {
+      (rive as any)?.setTextRunValue?.('sentence', text)
+    } catch {
+      /* noop */
     }
+  }
 
-    // 런타임 시작(타임라인 호출에 반응하도록)
-    rive.play()
+  function triggerSpeakOnce() {
+    if (!rive || !showTrigger) return
+    if (document.visibilityState !== 'visible') return
+    if (showChatbot) return
+    // 상태머신이 재생 상태인지 보장 (이름으로 명시)
+    try {
+      rive.play && rive.play('State Machine 1')
+    } catch {
+      /* noop */
+    }
+    showTrigger.fire()
+  }
 
-    if (document.readyState === 'complete') start()
-    else window.addEventListener('load', start, { once: true })
+  useEffect(() => {
+    if (!rive || startedRef.current) return
+    startedRef.current = true
 
-    // 정리
+    setVisible(true)
+
+    // 초기 진입: 약간의 딜레이 후 첫 실행
+    firstTimeout.current = window.setTimeout(() => {
+      try {
+        rive.play && rive.play('State Machine 1') // 상태머신 재생 보장
+      } catch { }
+      triggerSpeakOnce()
+    }, 800)
+
+    // 샘플 문구 순환
+    const samples = [
+      '^.^',
+      'hello, World!',
+      '안녕하세요! 길이가 조금 더 긴 문장입니다.',
+      'Rive + Data Binding 테스트 중…',
+      '줄바꿈/오토 레이아웃 확인용 문구예요.',
+    ]
+    let idx = 0
+    setSpeech(samples[idx])
+
+    textInterval.current = window.setInterval(() => {
+      idx = (idx + 1) % samples.length
+      setSpeech(samples[idx])
+      // 텍스트 반영 다음 프레임에 트리거 발사 → 레이아웃/오토사이징 먼저 적용
+      requestAnimationFrame(() => triggerSpeakOnce())
+    }, 4000)
+
     return () => {
-      window.removeEventListener('load', start)
       if (firstTimeout.current) clearTimeout(firstTimeout.current)
-      if (loopInterval.current) clearInterval(loopInterval.current)
+      if (textInterval.current) clearInterval(textInterval.current)
+      startedRef.current = false
     }
-  }, [rive, showChatbot])
+  }, [rive, showChatbot, showTrigger])
 
   return (
-    <div className="fixed" style={{ top: '-40px', right: '20px', zIndex: 9999 }}>
+    <div className="fixed" style={{ top: '-110px', right: '35px', zIndex: 9999 }}>
       <div style={{ visibility: visible ? 'visible' : 'hidden' }}>
         <div className="relative">
-          <RiveComponent style={{ width: 250, height: 250 }} />
+          <RiveComponent style={{ width: 400, height: 400 }} />
+          {/* 클릭 히트박스 */}
           <div
             onClick={() => setShowChatbot(true)}
             className="absolute cursor-pointer"
-            style={{
-              top: '25%',
-              left: '50%',
-              width: '80%',
-              height: '25%',
-            }}
+            style={{ top: '25%', left: '50%', width: '80%', height: '25%' }}
           />
         </div>
       </div>
