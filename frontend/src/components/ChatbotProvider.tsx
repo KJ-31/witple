@@ -7,6 +7,9 @@ interface ChatMessage {
   type: 'user' | 'bot'
   message: string
   timestamp: Date
+  isHtml?: boolean  // HTML 형태인지 여부
+  lines?: string[]  // 줄별 배열 데이터
+  formatted_response?: any  // 구조화된 응답 데이터
 }
 
 interface ChatbotContextType {
@@ -137,9 +140,21 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
         const botResponse: ChatMessage = {
           id: Date.now() + 2,
           type: 'bot',
-          message: data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
-          timestamp: new Date()
+          message: data.response_html || data.response || '죄송합니다. 응답을 생성할 수 없습니다.',
+          timestamp: new Date(),
+          isHtml: !!data.response_html,  // HTML 형태인지 표시
+          lines: data.response_lines,    // 줄별 배열 데이터
+          formatted_response: data.formatted_response  // 구조화된 데이터
         }
+        
+        // 리다이렉트 URL이 있으면 페이지 이동
+        if (data.redirect_url) {
+          console.log('🗺️ 지도 페이지로 리다이렉트:', data.redirect_url)
+          setTimeout(() => {
+            window.location.href = data.redirect_url
+          }, 2000) // 2초 후 리다이렉트 (사용자가 확정 메시지를 읽을 시간 제공)
+        }
+        
         return [...filteredMessages, botResponse]
       })
 

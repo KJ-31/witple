@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, status, Request
+from fastapi.security import OAuth2PasswordBearer, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -112,4 +112,74 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     cache.set(cache_key, user_dict, expire=1800)
         
     logger.info(f"사용자 인증 성공: {user.email}")
+    return user
+
+
+async def get_current_user_optional(request: Request, db: Session = Depends(get_db)):
+    """선택적 사용자 인증 - 토큰이 없어도 None을 반환"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Authorization 헤더에서 토큰 추출
+    authorization = request.headers.get("Authorization")
+    if not authorization or not authorization.startswith("Bearer "):
+        logger.info("토큰이 없음 - 익명 사용자")
+        return None
+    
+    token = authorization.split(" ")[1]
+    
+    try:
+        logger.info(f"선택적 토큰 검증 시작 - 토큰 길이: {len(token) if token else 0}")
+        
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        logger.info(f"JWT 디코딩 성공 - payload: {payload}")
+        
+        email: str = payload.get("sub")
+        if email is None:
+            logger.error("JWT payload에서 email(sub) 찾을 수 없음")
+            return None
+            
+        logger.info(f"토큰에서 추출된 이메일: {email}")
+        token_data = TokenData(email=email)
+        
+    except JWTError as e:
+        logger.error(f"JWT 에러 발생 (선택적): {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"예상치 못한 에러 (선택적): {str(e)}")
+        return None
+    
+    # 캐시 키 생성 (이메일 기반)
+    cache_key = f"user_session:{token_data.email}"
+    
+    # 캐시에서 사용자 정보 조회 시도
+    cached_user = cache.get(cache_key)
+    if cached_user is not None:
+        logger.info(f"Cache hit for user session (선택적): {cache_key}")
+        # 캐시된 데이터를 User 객체로 변환
+        user = User(**cached_user)
+        return user
+    
+    logger.info(f"Cache miss for user session (선택적): {cache_key}")
+    
+    # DB에서 사용자 조회
+    user = db.query(User).filter(User.email == token_data.email).first()
+    if user is None:
+        logger.error(f"사용자 찾을 수 없음 (선택적): {token_data.email}")
+        return None
+    
+    # 사용자 정보를 dict로 변환하여 캐시에 저장 (30분)
+    user_dict = {
+        "user_id": user.user_id,
+        "email": user.email,
+        "name": user.name,
+        "age": user.age,
+        "nationality": user.nationality,
+        "profile_image": user.profile_image,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None
+    }
+    cache.set(cache_key, user_dict, expire=1800)
+        
+    logger.info(f"사용자 인증 성공 (선택적): {user.email}")
     return user

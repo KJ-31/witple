@@ -119,6 +119,12 @@ export default function MapPage() {
   const [highlightedDay, setHighlightedDay] = useState<number | null>(null)
   const [directionsRenderers, setDirectionsRenderers] = useState<any[]>([])
   const [sequenceMarkers, setSequenceMarkers] = useState<any[]>([])
+  const [transitInfoWindows, setTransitInfoWindows] = useState<any[]>([])
+  const [visibleSegments, setVisibleSegments] = useState<Set<number>>(new Set())
+  const [activeMarkerIndex, setActiveMarkerIndex] = useState<number | null>(null)
+  const transitInfoWindowsRef = useRef<any[]>([])
+  const [currentSegments, setCurrentSegments] = useState<any[]>([])
+  const [isOptimizedRoute, setIsOptimizedRoute] = useState(false)
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [routeSegments, setRouteSegments] = useState<{
     origin: {lat: number, lng: number, name: string},
@@ -127,6 +133,7 @@ export default function MapPage() {
     duration: string,
     transitDetails?: any
   }[]>([])
+  const [cachedRouteResults, setCachedRouteResults] = useState<any[]>([])
   const [mapInstance, setMapInstance] = useState<any>(null)
   const [draggedItem, setDraggedItem] = useState<{placeId: string, dayNumber: number, index: number} | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<{day: number, index: number} | null>(null)
@@ -187,16 +194,71 @@ export default function MapPage() {
   // 선택된 마커 ID 상태 (지도와 동기화)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
+  // 막대그래프 상세보기 토글 상태 (구간별)
+  const [showRouteDetails, setShowRouteDetails] = useState<{[key: string]: boolean}>({})
+
+
+  // 장소 ID 파싱 함수
+  const parsePlaceId = (placeId: string): {tableName: string, numericId: string} => {
+    let tableName = ''
+    let numericId = ''
+    
+    if (placeId.includes('_')) {
+      const parts = placeId.split('_')
+      if (parts[0] === 'leisure' && parts[1] === 'sports' && parts.length >= 3) {
+        tableName = 'leisure_sports'
+        numericId = parts[2]
+      } else {
+        tableName = parts[0]
+        numericId = parts[parts.length - 1]
+      }
+    } else {
+      tableName = 'general'
+      numericId = placeId
+    }
+    
+    return { tableName, numericId }
+  }
 
   // 장소 선택 상태 확인 함수
   const isPlaceInItinerary = (placeId: string): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
     return selectedItineraryPlaces.some(p => {
-      // 원본 데이터의 ID로 비교 (새로 추가된 장소)
-      if (p.originalData && p.originalData.id === placeId) {
-        return true
+      // 새로 추가된 장소의 경우 - originalData로 비교
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && p.originalData.id === numericId
       }
-      // 기존 ID 비교
+      // 기존 ID 비교 (하위 호환성)
       return p.id.includes(placeId)
+    })
+  }
+
+  // 특정 Day에 장소가 선택되었는지 확인
+  const isPlaceSelectedOnDay = (placeId: string, dayNumber: number): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
+    return selectedItineraryPlaces.some(p => {
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && 
+               p.originalData.id === numericId && 
+               p.dayNumber === dayNumber
+      }
+      return p.id.includes(placeId) && p.dayNumber === dayNumber
+    })
+  }
+
+  // 다른 Day에 이미 선택된 장소인지 확인
+  const isPlaceSelectedOnOtherDay = (placeId: string, currentDay: number): boolean => {
+    const { tableName, numericId } = parsePlaceId(placeId)
+    
+    return selectedItineraryPlaces.some(p => {
+      if (p.originalData) {
+        return p.originalData.table_name === tableName && 
+               p.originalData.id === numericId && 
+               p.dayNumber !== currentDay
+      }
+      return p.id.includes(placeId) && p.dayNumber !== currentDay
     })
   }
 
@@ -210,10 +272,15 @@ export default function MapPage() {
     // 이미 일정에 있는 장소인지 확인
     if (isPlaceInItinerary(place.id)) {
       // 일정에서 제거
+      const { tableName, numericId } = parsePlaceId(place.id)
+      
       setSelectedItineraryPlaces(prev => prev.filter(p => {
-        if (p.originalData && p.originalData.id === place.id) {
-          return false
+        // 새로 추가된 장소의 경우
+        if (p.originalData) {
+          // table_name과 id가 모두 일치하는 경우 제거 (false 반환)
+          return !(p.originalData.table_name === tableName && p.originalData.id === numericId)
         }
+        // 기존 장소의 경우
         return !p.id.includes(place.id)
       }))
       
@@ -308,15 +375,68 @@ export default function MapPage() {
     };
   }, [longPressData?.isDragging]);
 
-  // 화면 높이 측정
+  // 화면 높이 측정 및 Google Maps 정보창 제거
   useEffect(() => {
     const updateViewportHeight = () => {
       setViewportHeight(window.innerHeight)
     }
     updateViewportHeight()
     window.addEventListener('resize', updateViewportHeight)
-    return () => window.removeEventListener('resize', updateViewportHeight)
+    
+    // Google Maps 정보창을 주기적으로 제거하는 interval
+    const removeGoogleMapsInfoWindows = () => {
+      // 교통수단 정보창 제거
+      const transitInfos = document.querySelectorAll('div[style*="box-shadow: rgba(0, 0, 0, 0.6)"][style*="border-radius: 3px 3px 3px 0px"]')
+      transitInfos.forEach(el => {
+        if (el instanceof HTMLElement) {
+          el.style.display = 'none'
+        }
+      })
+      
+      // 모든 Google Maps 정보창 제거
+      const allInfoWindows = document.querySelectorAll('div[style*="font-family: Roboto, Arial, sans-serif"][style*="white-space: nowrap"]')
+      allInfoWindows.forEach(el => {
+        if (el instanceof HTMLElement) {
+          el.style.display = 'none'
+        }
+      })
+    }
+    
+    const interval = setInterval(removeGoogleMapsInfoWindows, 500)
+    
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight)
+      clearInterval(interval)
+    }
   }, [])
+
+  // activeMarkerIndex 변경 시 경로와 마커들 완전히 다시 렌더링
+  useEffect(() => {
+    if (currentSegments.length > 0 && mapInstance) {
+      console.log('activeMarkerIndex 변경됨, 경로와 마커들 완전히 다시 렌더링:', activeMarkerIndex);
+      
+      // 기존 경로들 완전히 제거
+      directionsRenderers.forEach(renderer => {
+        if (renderer) {
+          renderer.setMap(null);
+          // DirectionsRenderer인 경우에만 setDirections 호출
+          if (renderer.setDirections && typeof renderer.setDirections === 'function') {
+            renderer.setDirections(null);
+          }
+        }
+      });
+      
+      // 기존 마커들 제거
+      sequenceMarkers.forEach(marker => {
+        if (marker) {
+          marker.setMap(null);
+        }
+      });
+      
+      // 경로와 마커들 다시 렌더링
+      renderRouteWithActiveSegment(currentSegments, isOptimizedRoute);
+    }
+  }, [activeMarkerIndex])
 
   // 바텀 시트 드래그 핸들러
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1236,7 +1356,9 @@ export default function MapPage() {
     directionsRenderers.forEach(renderer => {
       if (renderer) {
         renderer.setMap(null);
-        renderer.setDirections(null);
+        if (renderer.setDirections && typeof renderer.setDirections === 'function') {
+          renderer.setDirections(null);
+        }
       }
     });
     setDirectionsRenderers([]);
@@ -1249,14 +1371,31 @@ export default function MapPage() {
     });
     setSequenceMarkers([]);
     
+    // 모든 기존 교통수단 정보창 제거
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item && item.infoWindow) {
+        item.infoWindow.close();
+      }
+    });
+    setTransitInfoWindows([]);
+    transitInfoWindowsRef.current = [];
+    
+    // 가시성 상태 초기화
+    setVisibleSegments(new Set());
+    setActiveMarkerIndex(null);
+    setCurrentSegments([]);
+    setIsOptimizedRoute(false);
+    
     // 상태 메시지 제거
     setRouteStatus(null);
     
     // 경로 구간 정보 초기화
     setRouteSegments([]);
     
+    // 캐싱된 경로 결과 초기화
+    setCachedRouteResults([]);
 
-    console.log('모든 경로와 마커가 제거되었습니다');
+    console.log('모든 경로, 마커, 정보창이 제거되었습니다');
   };
 
   // 특정 일차와 구간에 해당하는 경로 정보 가져오기
@@ -1338,7 +1477,64 @@ export default function MapPage() {
     return '#9e9e9e'; // 기본 회색
   };
 
-  // 교통수단 이름 정리 (버스 번호만 추출)
+  // 교통수단 이모티콘만 반환
+  const getTransitIcon = (transitDetails: any) => {
+    const vehicleType = transitDetails.vehicle_type || '';
+    const lineName = transitDetails.line || '';
+    
+    // 지하철인 경우
+    if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+      return '🚇';
+    }
+    
+    // 버스인 경우
+    if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+      return '🚌';
+    }
+    
+    return '🚌'; // 기본값
+  };
+
+  // 교통수단 번호만 반환
+  const getTransitNumber = (transitDetails: any) => {
+    const lineName = transitDetails.line || '';
+    const shortName = transitDetails.short_name || '';
+    
+    // short_name이 있고 숫자로만 이루어져 있으면 버스 번호일 가능성이 높음
+    if (shortName && /^\d+$/.test(shortName)) {
+      return shortName;
+    }
+    
+    // line name에서 번호 추출
+    const busNumber = lineName.match(/\d+/);
+    if (busNumber) {
+      return busNumber[0];
+    }
+    
+    // 지하철인 경우 호선 정보 추출
+    const lineMatch = lineName.match(/(\d+호선|경의중앙선|공항철도|경춘선|수인분당선|신분당선|우이신설선|서해선|김포골드라인|신림선)/);
+    if (lineMatch) {
+      return lineMatch[1];
+    }
+    
+    return shortName || '알 수 없음';
+  };
+
+  // 정류장/역 정보 반환
+  const getStopInfo = (transitDetails: any) => {
+    const departureStop = transitDetails.departure_stop || '';
+    const arrivalStop = transitDetails.arrival_stop || '';
+    
+    // 출발지와 도착지가 있으면 출발지 표시
+    if (departureStop) {
+      // 괄호와 불필요한 정보 제거
+      return departureStop.replace(/\([^)]*\)/g, '').trim();
+    }
+    
+    return '';
+  };
+
+  // 교통수단 이름 정리 (기존 호환성을 위해 유지)
   const getCleanTransitName = (transitDetails: any) => {
     // step.transitDetails 객체에서 정보 추출
     const lineName = transitDetails.line || '';
@@ -1393,10 +1589,324 @@ export default function MapPage() {
     return shortName || lineName || '알 수 없음';
   };
 
+  // 구간의 주요 교통수단 색상 가져오기
+  const getSegmentTransitColor = (result: any): string => {
+    if (!result || !result.routes || !result.routes[0] || !result.routes[0].legs || !result.routes[0].legs[0]) {
+      return '#3E68FF'; // 기본 파란색
+    }
+
+    const leg = result.routes[0].legs[0];
+    const steps = leg.steps;
+    
+    if (!steps || steps.length === 0) {
+      return '#3E68FF'; // 기본 파란색
+    }
+
+    // 교통수단 스텝들만 필터링
+    const transitSteps = steps.filter((step: any) => step.transit);
+    
+    if (transitSteps.length === 0) {
+      return '#3E68FF'; // 기본 파란색 (도보만 있는 경우)
+    }
+
+    // 가장 긴 거리의 교통수단을 찾기
+    let longestTransitStep = transitSteps[0];
+    let longestDistance = 0;
+
+    transitSteps.forEach((step: any) => {
+      const distance = step.distance?.value || 0;
+      if (distance > longestDistance) {
+        longestDistance = distance;
+        longestTransitStep = step;
+      }
+    });
+
+    // 주요 교통수단의 정보 추출
+    const transitDetail = longestTransitStep.transit;
+    const vehicleType = transitDetail?.line?.vehicle?.type || '';
+    const lineName = transitDetail?.line?.name || '';
+
+    // 지하철인 경우
+    if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+      return getSubwayLineColor(lineName);
+    }
+    
+    // 버스인 경우
+    if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+      return getBusColor(lineName);
+    }
+    
+    // 기본값
+    return '#3E68FF';
+  };
+
+  // 커스텀 교통수단 정보창 생성 (초기에는 숨김, 클릭시 표시)
+  const createCustomTransitInfoWindows = async (allResults: any[], segmentDetails: any[]) => {
+    console.log('createCustomTransitInfoWindows 시작');
+    console.log('allResults.length:', allResults.length);
+    console.log('segmentDetails.length:', segmentDetails.length);
+    
+    if (!mapInstance) {
+      console.log('mapInstance가 없음');
+      return;
+    }
+    
+    const newInfoWindows: any[] = [];
+    
+    for (let i = 0; i < allResults.length; i++) {
+      const result = allResults[i];
+      const segment = segmentDetails[i];
+      
+      console.log(`구간 ${i} 처리 중:`, segment);
+      
+      if (!segment || !segment.transitDetails) {
+        console.log(`구간 ${i}: 교통수단 정보 없음`);
+        continue;
+      }
+      
+      const route = result.routes[0];
+      const leg = route.legs[0];
+      
+      // 교통수단 스텝들만 필터링
+      const transitSteps = segment.transitDetails.filter((step: any) => step.transitDetails);
+      
+      transitSteps.forEach((step: any, stepIndex: number) => {
+        if (!step.transitDetails) return;
+        
+        // 교통수단 정보 추출
+        const transitDetail = step.transitDetails;
+        const transitIcon = getTransitIcon(transitDetail);
+        const transitNumber = getTransitNumber(transitDetail);
+        const stopInfo = getStopInfo(transitDetail);
+        const vehicleType = transitDetail.vehicle_type || '';
+        const lineName = transitDetail.line || '';
+        
+        // 지하철/버스 색깔 가져오기
+        let backgroundColor = '#34A853';
+        if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+          backgroundColor = getSubwayLineColor(lineName);
+        } else if (vehicleType === 'BUS' || lineName.includes('버스')) {
+          backgroundColor = getBusColor(lineName);
+        }
+        
+        // 경로의 중간 지점 계산
+        const steps = leg.steps;
+        if (steps && steps.length > stepIndex) {
+          const targetStep = steps.find((s: any) => s.transit && s.transit.line?.name === lineName);
+          if (targetStep && targetStep.start_location) {
+            const position = {
+              lat: targetStep.start_location.lat(),
+              lng: targetStep.start_location.lng()
+            };
+            
+            // 커스텀 정보창 HTML (동그라미 이모티콘 + 흰색 바탕 정보)
+            const content = `
+              <div style="
+                display: inline-flex;
+                align-items: center;
+                gap: 2px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                white-space: nowrap;
+                transform: translateX(-10px);
+              ">
+                <!-- 색상 동그라미에 이모티콘 -->
+                <div style="
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  width: 20px;
+                  height: 20px;
+                  background: ${backgroundColor};
+                  border-radius: 50%;
+                  font-size: 10px;
+                  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                ">
+                  ${transitIcon}
+                </div>
+                
+                <!-- 흰색 바탕에 번호와 역/정류장 정보 -->
+                <div style="
+                  display: inline-flex;
+                  align-items: center;
+                  background: white;
+                  color: #333;
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  font-size: 10px;
+                  font-weight: 600;
+                  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+                  max-width: 100px;
+                ">
+                  <span style="color: ${backgroundColor}; font-weight: 700;">${transitNumber}</span>
+                  ${stopInfo ? `<span style="margin-left: 3px; color: #666; font-size: 9px; overflow: hidden; text-overflow: ellipsis;">${stopInfo}</span>` : ''}
+                </div>
+              </div>
+            `;
+            
+            const infoWindow = new (window as any).google.maps.InfoWindow({
+              content: content,
+              position: position,
+              disableAutoPan: true,
+              pixelOffset: new (window as any).google.maps.Size(0, -5),
+              maxWidth: 150,
+              zIndex: 1000
+            });
+            
+            // 초기에는 열지 않음 - 나중에 순차적으로 표시
+            // infoWindow.open(mapInstance);
+            
+            // 세그먼트 인덱스와 함께 저장
+            const infoWindowData = {
+              infoWindow: infoWindow,
+              segmentIndex: i
+            };
+            newInfoWindows.push(infoWindowData);
+            console.log(`구간 ${i}에 정보창 추가됨:`, infoWindowData);
+          }
+        }
+      });
+    }
+    
+    console.log('생성된 총 정보창 수:', newInfoWindows.length);
+    console.log('newInfoWindows:', newInfoWindows);
+    setTransitInfoWindows(newInfoWindows);
+    transitInfoWindowsRef.current = newInfoWindows;
+  };
+  
+  // 특정 구간의 교통수단 정보 표시
+  const showSegmentTransit = (segmentIndex: number) => {
+    console.log('showSegmentTransit 호출됨:', segmentIndex);
+    console.log('transitInfoWindowsRef.current:', transitInfoWindowsRef.current);
+    console.log('transitInfoWindows state:', transitInfoWindows);
+    console.log('mapInstance:', mapInstance);
+    
+    setVisibleSegments(prev => {
+      const newSet = new Set(prev);
+      newSet.add(segmentIndex);
+      return newSet;
+    });
+    
+    // 해당 구간의 정보창들을 표시 (ref 사용)
+    let foundCount = 0;
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item.segmentIndex === segmentIndex) {
+        console.log('해당 구간의 정보창 발견:', item);
+        if (item.infoWindow && mapInstance) {
+          item.infoWindow.open(mapInstance);
+          foundCount++;
+        }
+      }
+    });
+    console.log(`구간 ${segmentIndex}에서 ${foundCount}개의 정보창을 표시했습니다.`);
+  };
+
+  // 특정 구간의 교통수단 정보 숨기기
+  const hideSegmentTransit = (segmentIndex: number) => {
+    console.log('hideSegmentTransit 호출됨:', segmentIndex);
+    
+    setVisibleSegments(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(segmentIndex);
+      return newSet;
+    });
+    
+    // 해당 구간의 정보창들을 숨기기
+    let hiddenCount = 0;
+    transitInfoWindowsRef.current.forEach(item => {
+      if (item.segmentIndex === segmentIndex) {
+        if (item.infoWindow) {
+          item.infoWindow.close();
+          hiddenCount++;
+        }
+      }
+    });
+    console.log(`구간 ${segmentIndex}에서 ${hiddenCount}개의 정보창을 숨겼습니다.`);
+  };
+
+  // 특정 구간의 경로에 지도 포커스
+  const focusOnSegment = (segmentIndex: number, segments: any[]) => {
+    if (!mapInstance || segmentIndex >= segments.length) return;
+    
+    const segment = segments[segmentIndex];
+    if (!segment) return;
+    
+    // 해당 구간의 바운딩 박스 생성
+    const bounds = new (window as any).google.maps.LatLngBounds();
+    bounds.extend({ lat: segment.origin.lat, lng: segment.origin.lng });
+    bounds.extend({ lat: segment.destination.lat, lng: segment.destination.lng });
+    
+    // 지도를 해당 구간에 맞춰서 조정 (여백 추가)
+    mapInstance.fitBounds(bounds, {
+      padding: 100 // 구간 주변에 여백 추가
+    });
+    
+    console.log(`구간 ${segmentIndex}에 지도 포커스:`, segment);
+  };
+
+  // 전체 경로로 지도 포커스
+  const focusOnFullRoute = () => {
+    if (!mapInstance) return;
+    try {
+      // 캐싱된 결과 기준으로 전체 bounds 계산
+      if (cachedRouteResults && cachedRouteResults.length > 0) {
+        const bounds = new (window as any).google.maps.LatLngBounds();
+        cachedRouteResults.forEach((res: any) => {
+          const route = res?.routes?.[0];
+          if (route?.bounds) bounds.union(route.bounds);
+        });
+        if (!bounds.isEmpty()) {
+          mapInstance.fitBounds(bounds, { padding: 50 });
+          return;
+        }
+      }
+      // 캐시가 없으면 현재 세그먼트 기준으로 계산
+      if (currentSegments && currentSegments.length > 0) {
+        const bounds = new (window as any).google.maps.LatLngBounds();
+        currentSegments.forEach((seg: any) => {
+          bounds.extend({ lat: seg.origin.lat, lng: seg.origin.lng });
+          bounds.extend({ lat: seg.destination.lat, lng: seg.destination.lng });
+        });
+        if (!bounds.isEmpty()) {
+          mapInstance.fitBounds(bounds, { padding: 50 });
+        }
+      }
+    } catch (e) {
+      // noop
+    }
+  };
+
+  // 활성 구간 초기화하고 전체 경로 뷰로 복귀
+  const resetToFullRoute = () => {
+    if (activeMarkerIndex === null) return;
+    // 활성 구간 정보창 숨기기
+    if (activeMarkerIndex === 0) {
+      hideSegmentTransit(0);
+    } else if (currentSegments && activeMarkerIndex > 0 && activeMarkerIndex < currentSegments.length) {
+      hideSegmentTransit(activeMarkerIndex);
+    }
+    // 전체 뷰로 전환
+    setActiveMarkerIndex(null);
+    focusOnFullRoute();
+  };
+
+  // 맵 빈 영역 클릭 시 전체 경로로 복귀
+  useEffect(() => {
+    if (!mapInstance) return;
+    const listener = mapInstance.addListener('click', () => {
+      resetToFullRoute();
+    });
+    return () => {
+      if (listener && listener.remove) listener.remove();
+    };
+  }, [mapInstance, activeMarkerIndex, currentSegments, cachedRouteResults]);
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
+    
+    // segments와 optimized 상태 저장
+    setCurrentSegments(segments);
+    setIsOptimizedRoute(isOptimized);
     
     const newSequenceMarkers = [];
     const allPoints = [segments[0].origin, ...segments.map(s => s.destination)];
@@ -1409,46 +1919,85 @@ export default function MapPage() {
                            i === allPoints.length - 1 ? 'END' : 
                            i.toString();
         
-        const markerColor = i === 0 ? '#4CAF50' : 
-                           i === allPoints.length - 1 ? '#F44336' : 
-                           isOptimized ? '#FF9800' : '#2196F3'; // 최적화된 경로는 주황색
+        // 그라데이션 색상 계산 함수 (START에서 진하게 시작해서 END로 갈수록 옅어짐)
+        const getGradientColor = (index: number, total: number, isOptimized: boolean) => {
+          // 모든 핀에 그라데이션 적용 (START, 1, 2, 3, 4, ..., END)
+          const ratio = index / Math.max(1, total - 1);
+          
+          // #3E68FF (시작 - 진한 파랑): HSL(227, 100%, 62%)
+          // #3eb2ff (끝 - 연한 파랑): HSL(227, 100%, 80%)
+          const hue = 227;
+          const saturation = 100;
+          const startLightness = 62; // 진한 색상 (START)
+          const endLightness = 80;   // 연한 색상 (END)
+          
+          // ratio가 0일때 가장 어둡고(62%), ratio가 1일때 가장 밝음(80%)
+          const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+          
+          return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        };
+        
+        const markerColor = getGradientColor(i, allPoints.length, isOptimized);
+        
+        // 마커 크기 고정 (활성화되어도 크기 변경 없음)
+        const isActive = activeMarkerIndex === i;
+        const markerSize = 30;
+        const markerHeight = 40;
+        const fontSize = 10;
+        const anchorY = 40;
         
         const marker = new (window as any).google.maps.Marker({
           position: coords,
           map: mapInstance,
           icon: {
             url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40">
-                <path d="M15 0C6.7 0 0 6.7 0 15c0 8.3 15 25 15 25s15-16.7 15-25C30 6.7 23.3 0 15 0z" fill="${markerColor}" stroke="white" stroke-width="2"/>
-                <text x="15" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white">${markerLabel}</text>
+              <svg xmlns="http://www.w3.org/2000/svg" width="${markerSize}" height="${markerHeight}" viewBox="0 0 ${markerSize} ${markerHeight}">
+                <path d="M${markerSize/2} 0C${markerSize * 0.223} 0 0 ${markerSize * 0.223} 0 ${markerSize/2}c0 ${markerSize * 0.277} ${markerSize/2} ${markerHeight - markerSize/2} ${markerSize/2} ${markerHeight - markerSize/2}s${markerSize/2}-${(markerHeight - markerSize/2) * 0.556} ${markerSize/2}-${markerHeight - markerSize/2}C${markerSize} ${markerSize * 0.223} ${markerSize * 0.777} 0 ${markerSize/2} 0z" fill="${markerColor}" stroke="white" stroke-width="2"/>
+                <text x="${markerSize/2}" y="${markerSize * 0.67}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="bold" fill="white">${markerLabel}</text>
               </svg>
             `)}`,
-            scaledSize: new (window as any).google.maps.Size(30, 40),
-            anchor: new (window as any).google.maps.Point(15, 40)
+            scaledSize: new (window as any).google.maps.Size(markerSize, markerHeight),
+            anchor: new (window as any).google.maps.Point(markerSize/2, anchorY)
           },
           title: `${i === 0 ? '출발지' : i === allPoints.length - 1 ? '목적지' : `${i}번째 경유지`}: ${allPoints[i].name}`,
-          zIndex: 1000
-        });
-
-        const infoWindow = new (window as any).google.maps.InfoWindow({
-          content: `
-            <div style="padding: 10px; text-align: center;">
-              <h4 style="margin: 0 0 5px 0; color: ${markerColor};">
-                ${i === 0 ? '🚩 출발지' : i === allPoints.length - 1 ? '🏁 목적지' : `📍 ${i}번째 경유지`}
-              </h4>
-              <p style="margin: 0; font-weight: bold;">${allPoints[i].name}</p>
-              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
-                ${i === 0 ? '여행의 시작점입니다' : 
-                  i === allPoints.length - 1 ? '최종 목적지입니다' : 
-                  `${i === 1 ? '첫 번째' : i === 2 ? '두 번째' : i === 3 ? '세 번째' : `${i}번째`} 방문할 장소입니다`}
-              </p>
-              ${isOptimized && i > 0 && i < allPoints.length - 1 ? '<p style="margin: 5px 0 0 0; font-size: 10px; color: #FF9800; font-weight: bold;">🔄 최적화된 순서</p>' : ''}
-            </div>
-          `
+          zIndex: isActive ? 1001 : 1000
         });
 
         marker.addListener('click', () => {
-          infoWindow.open(mapInstance, marker);
+          console.log(`마커 ${i} 클릭됨, 현재 activeMarkerIndex:`, activeMarkerIndex);
+          
+          // END 마커는 비활성 처리 (클릭해도 상태 변경 없음)
+          if (i === allPoints.length - 1) {
+            console.log('END 마커 클릭 - 비활성 처리로 아무 동작 없음');
+            return;
+          }
+
+          // 기존 활성 구간 정보 숨기기
+          if (activeMarkerIndex !== null) {
+            if (activeMarkerIndex === 0) {
+              hideSegmentTransit(0);
+            } else if (activeMarkerIndex > 0 && activeMarkerIndex < allPoints.length - 1 && activeMarkerIndex < segments.length) {
+              hideSegmentTransit(activeMarkerIndex);
+            }
+          }
+
+          // 항상 새 마커 활성화
+          setActiveMarkerIndex(i);
+
+          // START 마커 또는 숫자 마커의 구간 정보 표시
+          if (i === 0) {
+            console.log('START 마커 클릭 - 구간 0 표시');
+            showSegmentTransit(0);
+            focusOnSegment(0, segments);
+          } else if (i > 0 && i < allPoints.length - 1) {
+            if (i < segments.length) {
+              console.log(`숫자 마커 ${i} 클릭 - 구간 ${i} 표시`);
+              showSegmentTransit(i);
+              focusOnSegment(i, segments);
+            } else {
+              console.log(`구간 ${i}는 segments 범위를 벗어남`);
+            }
+          }
         });
 
         newSequenceMarkers.push(marker);
@@ -1470,6 +2019,8 @@ export default function MapPage() {
     }
 
     try {
+      // 활성화된 마커 상태 초기화 (전체 동선 렌더링용)
+      setActiveMarkerIndex(null);
       // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
       // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
@@ -1507,7 +2058,7 @@ export default function MapPage() {
       }
 
       console.log(`${dayNumber}일차 기본 동선:`, segments);
-      await renderRoute(segments, false); // 기본 동선
+      await renderRoute(segments, false, true); // 기본 동선 - 활성 구간 무시하고 전체 렌더
 
     } catch (error) {
       console.error(`${dayNumber}일차 Basic route error:`, error);
@@ -1516,7 +2067,11 @@ export default function MapPage() {
   };
 
   // 경로 렌더링 (기본 동선 또는 최적화 경로)
-  const renderRoute = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+  const renderRoute = async (
+    segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], 
+    isOptimized: boolean = false,
+    ignoreActive: boolean = false
+  ) => {
     if (!(window as any).google?.maps?.DirectionsService) {
       console.error('Google Maps DirectionsService not available');
       return;
@@ -1605,15 +2160,54 @@ export default function MapPage() {
     for (let i = 0; i < allResults.length; i++) {
       const result = allResults[i];
       
+      // 활성화된 마커에 따른 색상 계산
+      let segmentColor = '#c4c4c4'; // 기본값: 회색 (비활성화)
+      let segmentOpacity = 0.5; // 기본값: 낮은 불투명도
+      
+      // 활성화된 마커가 있는 경우 해당 구간만 원래 색상으로 표시 (ignoreActive가 아닐 때만)
+      if (!ignoreActive && activeMarkerIndex !== null) {
+        // activeMarkerIndex가 0이면 첫 번째 구간(0), 1이면 두 번째 구간(1) 활성화
+        if (activeMarkerIndex === i) {
+          // 현재 구간이 활성화된 구간인 경우 원래 색상 사용
+          const segmentStartIndex = i;
+          const totalPoints = segments.length + 1;
+          const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+          
+          const hue = 227;
+          const saturation = 100;
+          const startLightness = 62; // 진한 색상 (START)
+          const endLightness = 80;   // 연한 색상 (END)
+          
+          const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+          segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          segmentOpacity = 0.8; // 원래 불투명도
+        }
+      } else {
+        // 활성화된 마커가 없는 경우 모든 구간을 원래 색상으로 표시
+        const segmentStartIndex = i;
+        const totalPoints = segments.length + 1;
+        const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+        
+        const hue = 227;
+        const saturation = 100;
+        const startLightness = 62; // 진한 색상 (START)
+        const endLightness = 80;   // 연한 색상 (END)
+        
+        const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+        segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        segmentOpacity = 0.8;
+      }
+      
       const renderer = new (window as any).google.maps.DirectionsRenderer({
         draggable: false,
         polylineOptions: {
-          strokeColor: isOptimized ? '#FF9800' : '#34A853', // 최적화는 주황색, 기본은 초록색
+          strokeColor: segmentColor,
           strokeWeight: 6,
-          strokeOpacity: 0.8
+          strokeOpacity: segmentOpacity
         },
-        suppressMarkers: i > 0,
-        preserveViewport: true // 모든 경로에서 뷰포트 유지
+        suppressMarkers: true,
+        suppressInfoWindows: true,
+        preserveViewport: true
       });
 
       renderer.setDirections(result);
@@ -1631,6 +2225,9 @@ export default function MapPage() {
 
     setDirectionsRenderers(newRenderers);
     await createSequenceMarkers(segments, isOptimized);
+    
+    // 커스텀 교통수단 정보창 생성
+    await createCustomTransitInfoWindows(allResults, segmentDetails);
 
     // 전체 경로가 보이도록 지도 뷰 조정
     if (mapInstance && bounds && !bounds.isEmpty()) {
@@ -1639,8 +2236,9 @@ export default function MapPage() {
       });
     }
 
-    // 구간 정보를 상태에 저장
+    // 구간 정보와 경로 결과를 상태에 저장
     setRouteSegments(segmentDetails);
+    setCachedRouteResults(allResults);
 
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
@@ -1650,6 +2248,147 @@ export default function MapPage() {
       `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
       'success'
     );
+  };
+
+  // 교통수단별로 개별 폴리라인 생성하는 함수
+  const createTransitSpecificPolylines = async (result: any, mapInstance: any, renderers: any[]) => {
+    if (!result || !result.routes || !result.routes[0] || !result.routes[0].legs || !result.routes[0].legs[0]) {
+      return;
+    }
+
+    const leg = result.routes[0].legs[0];
+    const steps = leg.steps;
+    
+    if (!steps || steps.length === 0) {
+      return;
+    }
+
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex];
+      
+      // 각 스텝의 경로를 폴리라인으로 생성
+      let stepColor = '#888888'; // 기본 회색 (도보)
+      
+      if (step.transit) {
+        // 교통수단이 있는 경우 해당 노선 색상 사용
+        const transitDetail = step.transit;
+        const vehicleType = transitDetail?.line?.vehicle?.type || '';
+        const lineName = transitDetail?.line?.name || '';
+
+        if (vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL' || lineName.includes('호선')) {
+          stepColor = getSubwayLineColor(lineName);
+        } else if (vehicleType === 'BUS' || lineName.includes('버스') || lineName.includes('Bus')) {
+          stepColor = getBusColor(lineName);
+        }
+      }
+      
+      // 폴리라인 생성
+      let stepPath = null;
+      
+      if (step.polyline && step.polyline.points) {
+        // encoded polyline을 디코드
+        stepPath = (window as any).google.maps.geometry.encoding.decodePath(step.polyline.points);
+      } else if (step.lat_lngs) {
+        stepPath = step.lat_lngs;
+      } else if (step.start_location && step.end_location) {
+        // 시작점과 끝점만 있는 경우 직선으로 연결
+        stepPath = [step.start_location, step.end_location];
+      }
+      
+      if (stepPath && stepPath.length > 0) {
+        const polyline = new (window as any).google.maps.Polyline({
+          path: stepPath,
+          strokeColor: stepColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          map: mapInstance
+        });
+        
+        // 렌더러 배열에 추가 (정리를 위해)
+        renderers.push(polyline);
+        console.log(`스텝 ${stepIndex}: ${step.travel_mode || '알 수 없음'} - ${stepColor} 폴리라인 생성`);
+      }
+    }
+  };
+
+  // activeMarkerIndex에 따라 캐싱된 경로 결과로 다시 렌더링하는 함수
+  const renderRouteWithActiveSegment = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
+    if (cachedRouteResults.length === 0 || cachedRouteResults.length !== segments.length) {
+      console.log('캐싱된 경로 결과가 없거나 일치하지 않습니다.');
+      return;
+    }
+
+    // 캐싱된 결과로 새로운 렌더러들 생성
+    const newRenderers = [];
+    let bounds = new (window as any).google.maps.LatLngBounds();
+
+    for (let i = 0; i < cachedRouteResults.length; i++) {
+      const result = cachedRouteResults[i];
+      
+      // 활성화된 마커에 따른 색상 계산
+      let segmentColor = '#888888'; // 기본값: 진한 회색 (비활성화)
+      let segmentOpacity = 0.4; // 기본값: 투명하게
+      
+      if (activeMarkerIndex !== null) {
+        // 특정 구간이 클릭된 경우
+        if (activeMarkerIndex === i) {
+          // 클릭된 구간: 교통수단 색상 사용
+          segmentColor = getSegmentTransitColor(result);
+          segmentOpacity = 0.8;
+        }
+        // 다른 구간들은 기본 회색으로 유지
+      } else {
+        // 아무 구간도 클릭되지 않은 경우: 그라데이션 색상 사용
+        const segmentStartIndex = i;
+        const totalPoints = segments.length + 1;
+        const ratio = segmentStartIndex / Math.max(1, totalPoints - 1);
+        
+        const hue = 227;
+        const saturation = 100;
+        const startLightness = 62; // 진한 색상 (START)
+        const endLightness = 80;   // 연한 색상 (END)
+        
+        const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+        segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        segmentOpacity = 0.8;
+      }
+      
+      const renderer = new (window as any).google.maps.DirectionsRenderer({
+        draggable: false,
+        polylineOptions: {
+          strokeColor: segmentColor,
+          strokeWeight: 6,
+          strokeOpacity: segmentOpacity
+        },
+        suppressMarkers: true,
+        suppressInfoWindows: true,
+        preserveViewport: true
+      });
+
+      if (activeMarkerIndex !== null && activeMarkerIndex === i) {
+        // 활성화된 구간: 교통수단별로 개별 폴리라인 생성
+        await createTransitSpecificPolylines(result, mapInstance, newRenderers);
+      } else {
+        // 비활성화된 구간 또는 전체 표시: 기존 방식 사용
+        renderer.setDirections(result);
+        if (mapInstance) {
+          renderer.setMap(mapInstance);
+        }
+        newRenderers.push(renderer);
+      }
+
+      // 각 경로의 바운딩 박스를 전체 바운딩 박스에 추가
+      const route = result.routes[0];
+      if (route && route.bounds) {
+        bounds.union(route.bounds);
+      }
+    }
+
+    // 상태 업데이트
+    setDirectionsRenderers(newRenderers);
+    
+    // 마커들 다시 생성
+    await createSequenceMarkers(segments, isOptimized);
   };
 
   // UI에서 장소 순서를 최적화된 순서로 변경
@@ -1719,6 +2458,8 @@ export default function MapPage() {
     }
 
     try {
+      // 활성화된 마커 상태 초기화 (전체 동선 렌더링용)
+      setActiveMarkerIndex(null);
       // 먼저 모든 기존 경로와 마커 완전히 제거
       clearRoute();
       // 잠깐 기다려서 이전 렌더링이 완전히 정리되도록 함
@@ -1796,7 +2537,7 @@ export default function MapPage() {
         });
       }
 
-      await renderRoute(segments, true);
+      await renderRoute(segments, true, true);
 
     } catch (error) {
       console.error(`${dayNumber}일차 Route optimization error:`, error);
@@ -1838,6 +2579,69 @@ export default function MapPage() {
 
   return (
     <>
+      {/* Google Maps 기본 교통수단 정보창 숨기기 */}
+      <style jsx global>{`
+        /* Google Maps 모든 정보창 숨기기 */
+        .gm-transit-info-window,
+        .gm-transit-details,
+        .gm-transit-line,
+        div[style*="box-shadow"][style*="border: 1px solid"][style*="padding: 2px"][style*="font-size: 13px"] {
+          display: none !important;
+        }
+        
+        /* 더 구체적인 선택자로 교통수단 정보창 숨기기 */
+        div[style*="position: absolute"][style*="bottom: 0px"][style*="background: rgb(240, 240, 240)"] {
+          display: none !important;
+        }
+        
+        /* 교통수단 아이콘이 포함된 정보창 숨기기 */
+        div[style*="box-shadow: rgba(0, 0, 0, 0.6)"][style*="border-radius: 3px 3px 3px 0px"] {
+          display: none !important;
+        }
+        
+        /* 버스/지하철 아이콘이 있는 정보창 숨기기 */
+        div[style*="font-family: Roboto, Arial, sans-serif"][style*="white-space: nowrap"] {
+          display: none !important;
+        }
+        
+        /* Google Maps directions 관련 정보창 모두 숨기기 */
+        .adp-transit,
+        .adp-directions,
+        .adp-summary,
+        div[jsaction*="transit"] {
+          display: none !important;
+        }
+        
+        /* 경로선 위의 모든 정보창 숨기기 */
+        div[style*="line-height: 12px"][style*="border: 1px solid"] {
+          display: none !important;
+        }
+        
+        /* 커스텀 InfoWindow 스타일링 - 기본 말풍선 모양 제거 */
+        .gm-style-iw {
+          background: transparent !important;
+          box-shadow: none !important;
+          border: none !important;
+          padding: 0 !important;
+        }
+        
+        .gm-style-iw-d {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+        
+        /* InfoWindow 닫기 버튼 숨기기 */
+        .gm-ui-hover-effect {
+          display: none !important;
+        }
+        
+        /* InfoWindow 꼬리 부분 숨기기 */
+        .gm-style-iw-tc::after {
+          display: none !important;
+        }
+      `}</style>
+      
       <div className="min-h-screen bg-[#0B1220] text-white relative">
       {/* Header Back */}
       <div className="absolute top-4 left-4 z-50">
@@ -2448,7 +3252,7 @@ export default function MapPage() {
                             onDragOver={(e) => handleDragOver(e, index, day)}
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, day)}
-                            className={`h-2 w-full transition-all duration-200 ${
+                            className={`w-full transition-all duration-200 ${
                               dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
                                 ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
                                 : ''
@@ -2600,22 +3404,163 @@ export default function MapPage() {
                           (() => {
                             const nextPlace = groupedPlaces[day][index + 1];
                             const segmentInfo = getRouteSegmentInfo(day, place.id, nextPlace.id);
-                            
+                            const segmentKey = `${day}-${index}`; // 구간별 고유 키
+
                             if (segmentInfo) {
                               return (
                                 <div className="my-4">
-                                  <div className="flex items-center justify-center mb-3">
+                                  <div className="flex items-center justify-center">
                                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#3E68FF]/30 to-transparent"></div>
                                     <div className="mx-4 flex items-center space-x-2 text-sm">
-                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
-                                      <span className="text-[#94A9C9]">·</span>
                                       <span className="text-[#34D399] font-medium">{segmentInfo.duration}</span>
+                                      <span className="text-[#94A9C9]">·</span>
+                                      <span className="text-[#60A5FA] font-medium">{segmentInfo.distance}</span>
                                     </div>
                                     <div className="flex-1 h-px bg-gradient-to-r from-[#3E68FF]/30 via-transparent to-transparent"></div>
                                   </div>
                                   
-                                  {/* 상세 교통수단 정보 */}
+                                  {/* Timeline 막대그래프 */}
                                   {segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
+                                    <div className="px-4">
+                                      {(() => {
+                                        // 총 소요시간 계산
+                                        const totalMinutes = segmentInfo.transitDetails.reduce((total: number, step: any) => {
+                                          const duration = step.duration?.text || step.duration || '0분';
+                                          const minutes = parseInt(duration.toString().replace(/[^0-9]/g, '')) || 0;
+                                          return total + minutes;
+                                        }, 0);
+                                        
+                                        if (totalMinutes === 0) return null;
+                                        
+                                        // 도보 인덱스 체크를 위해 먼저 도보들을 찾기
+                                        const walkIndices = segmentInfo.transitDetails
+                                          .map((step: any, idx: number) => (step.mode === 'WALKING' || !step.transitDetails) ? idx : -1)
+                                          .filter((idx: number) => idx !== -1);
+
+                                        // 각 스텝별 정보 준비
+                                        const processedSteps = segmentInfo.transitDetails.map((step: any, stepIndex: number) => {
+                                          const isWalk = step.mode === 'WALKING' || !step.transitDetails;
+                                          const originalLine = step.transitDetails?.line || step.transitDetails?.vehicle || '';
+                                          const cleanName = step.transitDetails ? getCleanTransitName(step.transitDetails) : '';
+                                          const vehicleType = step.transitDetails?.vehicle_type || '';
+                                          const isSubway = originalLine.includes('지하철') || originalLine.includes('호선') || originalLine.includes('경의중앙') || originalLine.includes('공항철도') || originalLine.includes('경춘') || originalLine.includes('수인분당') || originalLine.includes('신분당') || originalLine.includes('우이신설') || originalLine.includes('서해') || originalLine.includes('김포골드') || originalLine.includes('신림') || vehicleType === 'SUBWAY' || vehicleType === 'METRO_RAIL';
+                                          const isBus = originalLine.includes('버스') || /\d+번/.test(originalLine) || vehicleType === 'BUS';
+
+                                          const duration = step.duration?.text || step.duration || '0분';
+                                          const minutes = parseInt(duration.toString().replace(/[^0-9]/g, '')) || 0;
+                                          const percentage = totalMinutes > 0 ? (minutes / totalMinutes) * 100 : 100 / segmentInfo.transitDetails.length;
+
+                                          // 첫 번째 도보인지 체크
+                                          const isFirstWalk = isWalk && walkIndices[0] === stepIndex;
+
+                                          // 너무 짧은 구간인지 체크 (3% 미만)
+                                          const isVeryShort = percentage < 3;
+
+                                          let bgColor = '#6B7280'; // 도보 회색
+                                          let icon = '';
+                                          let showTime = true;
+
+                                          if (isWalk) {
+                                            // 도보: 첫 번째는 무조건 표시, 나머지는 35px 이상일 때만 표시
+                                            const walkWidthPx = (percentage / 100) * 400; // 대략적인 컨테이너 너비 400px 가정
+                                            const shouldShowWalkIcon = isFirstWalk || walkWidthPx >= 35;
+                                            icon = shouldShowWalkIcon ? '🚶' : '';
+                                            showTime = shouldShowWalkIcon;
+                                          } else {
+                                            // 대중교통: 무조건 표시
+                                            showTime = true;
+                                            if (step.transitDetails) {
+                                              if (isSubway) {
+                                                bgColor = getSubwayLineColor(originalLine);
+                                                icon = '🚇';
+                                              } else if (isBus) {
+                                                bgColor = getBusColor(originalLine);
+                                                icon = '🚌';
+                                              } else {
+                                                bgColor = '#3E68FF';
+                                                icon = '🚌';
+                                              }
+                                            }
+                                          }
+
+                                          return {
+                                            icon,
+                                            bgColor,
+                                            cleanName,
+                                            duration: showTime ? duration.toString() : '', // showTime에 따라 시간 표시/숨김
+                                            minutes,
+                                            percentage,
+                                            isWalk
+                                          };
+                                        });
+                                        
+                                        return (
+                                          <div className="w-full overflow-x-auto">
+                                            <div className="relative py-1 pb-6">
+                                              {/* 연속된 타임라인 바 */}
+                                              <div
+                                                className="flex h-4 rounded-full overflow-visible pl-2 cursor-pointer"
+                                                onClick={() => setShowRouteDetails(prev => ({
+                                                  ...prev,
+                                                  [segmentKey]: !prev[segmentKey]
+                                                }))}
+                                              >
+                                                {processedSteps.map((step: any, index: number) => (
+                                                  <div
+                                                    key={`segment-${index}`}
+                                                    className={`relative flex items-center justify-center ${
+                                                      index === processedSteps.length - 1 ? 'rounded-r-full' : ''
+                                                    }`}
+                                                    style={{
+                                                      backgroundColor: step.bgColor,
+                                                      width: `${step.percentage}%`,
+                                                      minWidth: (!step.isWalk || step.icon) ? '35px' : '5px' // 대중교통과 아이콘 있는 도보는 35px
+                                                    }}
+                                                  >
+                                                    {/* 아이콘의 중앙을 각 막대의 시작점에 배치 */}
+                                                    {step.icon && (
+                                                      <div
+                                                        className="absolute left-0 w-4 h-4 rounded-full flex items-center justify-center text-white border border-white shadow-sm"
+                                                        style={{
+                                                          backgroundColor: step.bgColor,
+                                                          fontSize: '8px',
+                                                          transform: 'translateX(-50%)' // 아이콘 중앙이 막대 시작점에 위치
+                                                        }}
+                                                      >
+                                                        {step.icon}
+                                                      </div>
+                                                    )}
+                                                    
+                                                    {/* 시간 표시 */}
+                                                    <span className="text-white text-[10px] font-medium">
+                                                      {step.duration}
+                                                    </span>
+                                                    
+                                                    {/* 버스/지하철 번호 (아래쪽에 표시) */}
+                                                    {!step.isWalk && (step.transitDetails || step.cleanName) && (
+                                                      <span
+                                                        className="absolute top-5 left-0 text-[9px] font-bold"
+                                                        style={{
+                                                          color: step.bgColor,
+                                                          transform: 'translateX(-50%)'
+                                                        }}
+                                                      >
+                                                        {step.transitDetails ? getTransitNumber(step.transitDetails) : step.cleanName}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
+
+
+                                  {/* 상세 교통수단 정보 */}
+                                  {showRouteDetails[segmentKey] && segmentInfo.transitDetails && segmentInfo.transitDetails.length > 0 && (
                                     <div className="bg-[#0B1220]/90 backdrop-blur-sm border border-[#3E68FF]/20 rounded-xl p-4 mx-2">
                                       <div className="space-y-3">
                                         {segmentInfo.transitDetails.map((step: any, stepIndex: number) => (
@@ -2676,19 +3621,14 @@ export default function MapPage() {
                                                 const walkingText = isLastStep ? `${segmentInfo.destination.name}까지 도보` : (step.instruction || '도보 이동');
                                                 
                                                 return (
-                                                  <div className="flex items-center space-x-3">
-                                                    <div className="flex-shrink-0">
-                                                      <div className="w-8 h-8 bg-[#34D399]/20 rounded-full flex items-center justify-center">
-                                                        <span className="text-sm">🚶</span>
-                                                      </div>
-                                                    </div>
+                                                  <div className="flex items-center justify-between">
                                                     <div className="flex-1 text-sm text-[#94A9C9]">
                                                       <div className="truncate">
                                                         {walkingText}
                                                       </div>
-                                                      <div className="text-xs text-[#6FA0E6] mt-1">
-                                                        {step.distance} · {step.duration}
-                                                      </div>
+                                                    </div>
+                                                    <div className="flex-shrink-0 text-xs text-[#94A9C9]">
+                                                      {step.duration}
                                                     </div>
                                                   </div>
                                                 );
@@ -2742,7 +3682,7 @@ export default function MapPage() {
                         onDragOver={(e) => handleDragOver(e, (groupedPlaces[day] || []).length, day)}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, (groupedPlaces[day] || []).length, day)}
-                        className={`h-2 w-full transition-all duration-200 ${
+                        className={`w-full transition-all duration-200 ${
                           dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem 
                             ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
                             : ''
@@ -2807,13 +3747,19 @@ export default function MapPage() {
               ) : categoryPlaces.length > 0 ? (
                 <div className="space-y-3">
                   {categoryPlaces.map(place => {
-                    const isSelected = isPlaceInItinerary(place.id)
+                    const currentDay = highlightedDay || 1
+                    const isSelectedOnCurrentDay = isPlaceSelectedOnDay(place.id, currentDay)
+                    const isSelectedOnOtherDay = isPlaceSelectedOnOtherDay(place.id, currentDay)
+                    const isSelected = isSelectedOnCurrentDay || isSelectedOnOtherDay
+                    
                     return (
                     <div
                       key={place.id}
                       className={`border rounded-xl p-4 transition-colors cursor-pointer ${
-                        isSelected 
+                        isSelectedOnCurrentDay 
                           ? 'bg-[#3E68FF]/10 border-[#3E68FF] ring-2 ring-[#3E68FF]'
+                          : isSelectedOnOtherDay
+                          ? 'bg-[#6FA0E6]/10 border-[#6FA0E6] ring-2 ring-[#6FA0E6]'
                           : 'bg-[#1F3C7A]/20 border-[#1F3C7A]/40 hover:bg-[#1F3C7A]/30'
                       }`}
                       onClick={() => {
@@ -2853,8 +3799,10 @@ export default function MapPage() {
                         </div>
                         <button 
                           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ml-4 ${
-                            isSelected
+                            isSelectedOnCurrentDay
                               ? 'bg-[#3E68FF] text-white hover:bg-[#4C7DFF]'
+                              : isSelectedOnOtherDay
+                              ? 'bg-[#6FA0E6] text-white hover:bg-[#5A8FD0]'
                               : 'bg-[#1F3C7A]/50 text-[#6FA0E6] hover:bg-[#3E68FF] hover:text-white'
                           }`}
                           onClick={(e) => {
@@ -2862,7 +3810,9 @@ export default function MapPage() {
                             addPlaceToItinerary(place)
                           }}
                         >
-                          {isSelected ? '선택됨' : `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
+                          {isSelectedOnCurrentDay ? '선택됨' :
+                           isSelectedOnOtherDay ? '다른날' : 
+                           `+ 추가${highlightedDay ? ` (${highlightedDay}일차)` : ''}`}
                         </button>
                       </div>
                     </div>

@@ -6,10 +6,12 @@ import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
 
 interface User {
-  id: number
-  full_name: string
-  username: string
+  user_id: string
   email: string
+  name: string
+  age: number | null
+  nationality: string | null
+  profile_image: string | null
 }
 
 interface Post {
@@ -164,29 +166,34 @@ export default function FeedPage() {
                   {(post.user as any).profile_image ? (
                     <img
                       src={(post.user as any).profile_image}
-                      alt={(post.user as any).name || post.user.email}
+                      alt={post.user.name || post.user.email}
                       className="w-full h-full object-cover"
                     />
                   ) : (post.user as any).oauth_accounts?.find((account: any) => account.provider === 'google')?.profile_picture ? (
                     <img
                       src={(post.user as any).oauth_accounts.find((account: any) => account.provider === 'google').profile_picture}
-                      alt={(post.user as any).name || post.user.email}
+                      alt={post.user.name || post.user.email}
                       className="w-full h-full object-cover"
                     />
                   ) : session?.user?.id === String(post.user_id) && session?.user?.image ? (
                     <img
                       src={session.user.image}
-                      alt={(post.user as any).name || post.user.email}
+                      alt={post.user.name || post.user.email}
                       className="w-full h-full object-cover"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-blue-500 text-white text-sm font-bold">
-                      {((post.user as any).name || post.user.email || 'U')[0].toUpperCase()}
+                      {(post.user.name || post.user.email || 'U')[0].toUpperCase()}
                     </div>
                   )}
                 </div>
                 <div>
-                  <p className="font-semibold text-white">{(post.user as any).name || post.user.email}</p>
+                  <button
+                    onClick={() => router.push(`/user/${post.user.user_id}`)}
+                    className="font-semibold text-white hover:text-blue-300 transition-colors cursor-pointer"
+                  >
+                    {post.user.name || post.user.email}
+                  </button>
                   {post.location && (
                     <p className="text-xs text-gray-400">{post.location}</p>
                   )}
@@ -254,7 +261,12 @@ export default function FeedPage() {
               {/* Caption */}
               <div className="mb-2">
                 <p className="text-white">
-                  <span className="font-semibold mr-2">{post.user.full_name || post.user.username}</span>
+                  <button
+                    onClick={() => router.push(`/user/${post.user.user_id}`)}
+                    className="font-semibold mr-2 hover:text-blue-300 transition-colors cursor-pointer"
+                  >
+                    {post.user.name || post.user.email}
+                  </button>
                   {post.caption}
                 </p>
               </div>

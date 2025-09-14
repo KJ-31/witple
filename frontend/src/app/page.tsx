@@ -2,14 +2,16 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
 import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
-import { BottomNavigation } from '../components'
 import BubbleAnimation from '../components/BubbleAnimation'
+import { BottomNavigation } from '../components'
+import { trackClick } from '../utils/actionTracker'
+import { useActionTrackerSession } from '../hooks/useActionTrackerSession'
 
 export default function Home() {
   const router = useRouter()
-  const { data: session, status } = useSession()
+  const { session, status } = useActionTrackerSession()
+  const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [loading, setLoading] = useState(false)
   const [userInfo, setUserInfo] = useState<{ name: string, preferences: any } | null>(null)
@@ -306,7 +308,22 @@ export default function Home() {
                 cityName={citySection.cityName}
                 attractions={citySection.attractions}
                 categorySections={citySection.categorySections}
-                onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
+                onAttractionClick={(attractionId) => {
+                  // 🎯 추천 카드 클릭 추적
+                  const attraction = citySection.attractions?.find(a => a.id === attractionId) ||
+                    citySection.categorySections?.flatMap(cs => cs.attractions || [])
+                      .find(a => a.id === attractionId)
+
+                  trackClick(attractionId, {
+                    attraction_name: attraction?.name || 'Unknown',
+                    category: attraction?.category || citySection.cityName,
+                    region: citySection.region || citySection.cityName,
+                    source: 'home_recommendations',
+                    city_section: citySection.cityName,
+                    recommendation_type: citySection.id?.includes('personalized') ? 'personalized' : 'popular'
+                  })
+                  router.push(`/attraction/${attractionId}`)
+                }}
               />
             </div>
           )

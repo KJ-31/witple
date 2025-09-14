@@ -74,13 +74,14 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   const [hasMore, setHasMore] = useState(true)
   const [noMoreResults, setNoMoreResults] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('all')
+  const [selectedRegion, setSelectedRegion] = useState<string>('') // 선택된 지역
   const [selectedDayForAdding, setSelectedDayForAdding] = useState<number>(1) // 현재 선택된 날짜 탭
   const [placesByDay, setPlacesByDay] = useState<{ [dayNumber: number]: SelectedPlace[] }>({}) // 날짜별로 장소 저장
   const [bookmarkedPlaces, setBookmarkedPlaces] = useState<Set<string>>(new Set()) // 북마크된 장소들
   const [savedLocations, setSavedLocations] = useState<any[]>([]) // 저장된 장소 목록
   const [loadingSavedLocations, setLoadingSavedLocations] = useState(false)
-  const [categoryCache, setCategoryCache] = useState<{ [key in CategoryKey]?: any[] }>({}) // 카테고리별 데이터 캐시
-  const [loadedCategories, setLoadedCategories] = useState<Set<CategoryKey>>(new Set()) // 로드된 카테고리 추적
+  const [categoryCache, setCategoryCache] = useState<Record<string, any[]>>({}) // 카테고리+지역별 데이터 캐시
+  const [loadedCategories, setLoadedCategories] = useState<Set<string>>(new Set()) // 로드된 카테고리+지역 조합 추적
 
   // 선택된 날짜 범위 생성
   const generateDateRange = () => {
@@ -119,11 +120,17 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // 추천 알고리즘 기반 관광지 로드 함수
   const loadFilteredAttractions = async (region: string, category: CategoryKey = 'all', isFirstLoad: boolean = false) => {
-    // 캐시 확인 - 이미 로드된 카테고리면 캐시된 데이터 사용
-    if (loadedCategories.has(category) && categoryCache[category]) {
-      console.log(`캐시된 데이터 사용: ${category}`)
+    // 지역 필터가 선택된 경우 해당 지역으로 제한
+    const searchRegion = selectedRegion && selectedRegion !== '전체' ? selectedRegion : region
+    
+    // 캐시 키 생성 (카테고리 + 지역)
+    const cacheKey = `${category}_${searchRegion}`
+    
+    // 캐시 확인 - 이미 로드된 카테고리+지역 조합이면 캐시된 데이터 사용
+    if (loadedCategories.has(cacheKey) && categoryCache[cacheKey]) {
+      console.log(`캐시된 데이터 사용: ${cacheKey}`)
       if (isFirstLoad) {
-        setRelatedAttractions(categoryCache[category] || [])
+        setRelatedAttractions(categoryCache[cacheKey] || [])
       }
       return
     }
@@ -140,7 +147,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       // /filtered API 사용 - 추천 알고리즘 적용
       const categoryParam = category === 'all' ? '' : `&category=${category}`
       const filteredResponse = await fetch(
-        `${API_BASE_URL}/api/v1/attractions/filtered?region=${encodeURIComponent(region)}&limit=50${categoryParam}`
+        `${API_BASE_URL}/api/v1/attractions/filtered?region=${encodeURIComponent(searchRegion)}&limit=50${categoryParam}`
       )
 
       if (filteredResponse.ok) {
@@ -163,15 +170,15 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           // 추천 API에서 50개 받았으면 더 많은 데이터를 위해 hasMore = true로 설정
           setHasMore(filtered.length >= 50)
 
-          // 캐시에 저장
+          // 캐시에 저장 (카테고리 + 지역 조합으로 키 생성)
           if (isFirstLoad) {
             setCategoryCache(prev => ({
               ...prev,
-              [category]: filtered
+              [cacheKey]: filtered
             }))
             setLoadedCategories(prev => {
               const newSet = new Set(prev)
-              newSet.add(category)
+              newSet.add(cacheKey)
               return newSet
             })
           }
@@ -199,10 +206,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
+      // 지역 필터가 선택된 경우 해당 지역으로 제한
+      const searchRegion = selectedRegion && selectedRegion !== '전체' ? selectedRegion : region
+
       // 1차: 해당 지역 + 카테고리로 검색
-      const categoryQuery = category === 'all' ? region : `${region} ${getCategoryName(category)}`
+      const categoryQuery = category === 'all' ? searchRegion : `${searchRegion} ${getCategoryName(category)}`
       const searchResponse = await fetch(
-        `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(categoryQuery)}&region=${encodeURIComponent(region)}&limit=50`
+        `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(categoryQuery)}&region=${encodeURIComponent(searchRegion)}&limit=50`
       )
 
       let filtered: any[] = []
@@ -467,6 +477,23 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
   }, [selectedCategory, attraction])
 
+  // 지역 필터 변경 시 추천 관광지 다시 로드
+  useEffect(() => {
+    if (selectedCategory && selectedCategory !== 'bookmarked') {
+      const loadCategoryPlaces = async () => {
+        const region = attraction?.region || '전국'
+        // 지역이 바뀌었으므로 현재 카테고리+지역 조합의 캐시는 무시하고 새로 로드
+        setRelatedAttractions([])
+        setAllCategoryPlaces([])
+        setCurrentPage(0)
+        setHasMore(true)
+        setNoMoreResults(false)
+        await loadFilteredAttractions(region, selectedCategory, true)
+      }
+      loadCategoryPlaces()
+    }
+  }, [selectedRegion])
+
   // 날짜별 장소 관리 헬퍼 함수들
   const getAllSelectedPlaces = (): SelectedPlace[] => {
     return Object.values(placesByDay).flat()
@@ -486,6 +513,28 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
   }
 
 
+  // 지역 목록 정의
+  const regions = [
+    '전체',
+    '서울특별시',
+    '부산광역시',
+    '대구광역시',
+    '인천광역시',
+    '광주광역시',
+    '대전광역시',
+    '울산광역시',
+    '세종특별자치시',
+    '경기도',
+    '강원특별자치도',
+    '충청북도',
+    '충청남도',
+    '전북특별자치도',
+    '전라남도',
+    '경상북도',
+    '경상남도',
+    '제주특별자치도'
+  ]
+
   // 카테고리 정의
   const categories = [
     { key: 'all' as CategoryKey, name: '전체', icon: '🏠' },
@@ -500,9 +549,13 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
   // 모든 장소 가져오기 (캐시 우선 사용)
   const getAllPlaces = () => {
-    // 현재 선택된 카테고리의 캐시된 데이터가 있으면 사용
-    if (selectedCategory !== 'bookmarked' && categoryCache[selectedCategory]) {
-      return categoryCache[selectedCategory] || []
+    // 현재 선택된 카테고리+지역의 캐시된 데이터가 있으면 사용
+    if (selectedCategory !== 'bookmarked') {
+      const searchRegion = selectedRegion && selectedRegion !== '전체' ? selectedRegion : (attraction?.region || '전국')
+      const cacheKey = `${selectedCategory}_${searchRegion}`
+      if (categoryCache[cacheKey]) {
+        return categoryCache[cacheKey] || []
+      }
     }
 
     // allCategoryPlaces가 비어있지 않으면 그것을 사용, 아니면 relatedAttractions 사용
@@ -1137,7 +1190,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         </div>
 
         {/* Category Tabs */}
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-2">
           <div className="flex space-x-2 overflow-x-auto no-scrollbar">
             {categories.map(category => (
               <button
@@ -1153,6 +1206,27 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
               >
                 <span>{category.icon}</span>
                 <span>{category.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Region Filter */}
+        <div className="px-4 pb-4">
+          <div className="flex space-x-2 overflow-x-auto no-scrollbar">
+            {regions.map(region => (
+              <button
+                key={region}
+                onClick={() => setSelectedRegion(region === '전체' ? '' : region)}
+                className={`
+                flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200
+                ${(selectedRegion === '' && region === '전체') || selectedRegion === region
+                    ? 'bg-[#3E68FF] text-white shadow-lg'
+                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:text-white hover:bg-[#1F3C7A]/50'
+                  }
+              `}
+              >
+                {region}
               </button>
             ))}
           </div>
