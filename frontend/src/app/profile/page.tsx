@@ -1058,7 +1058,25 @@ export default function ProfilePage() {
         
         return (
           <div className="space-y-4">
-            {trips.map((trip) => (
+            {trips
+              .sort((a, b) => {
+                const statusA = getTripStatus(a.start_date, a.end_date)
+                const statusB = getTripStatus(b.start_date, b.end_date)
+
+                // 상태별 우선순위: active(1) > planned(2) > completed(3)
+                const statusOrder = { active: 1, planned: 2, completed: 3 }
+
+                const orderA = statusOrder[statusA]
+                const orderB = statusOrder[statusB]
+
+                if (orderA !== orderB) {
+                  return orderA - orderB
+                }
+
+                // 같은 상태일 때는 시작 날짜 기준으로 정렬
+                return new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+              })
+              .map((trip) => (
               <div 
                 key={trip.id} 
                 className="bg-gray-800 p-4 rounded-2xl relative cursor-pointer hover:bg-gray-750 transition-colors"
