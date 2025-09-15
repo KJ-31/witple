@@ -337,11 +337,16 @@ export default function Home() {
         </button> */}
       </div>
 
-      {/* Main Card 섹션 */}
-      {citySections.length > 0 && (
+      {/* Main Card 섹션 - 로그인/비로그인 모두 표시 */}
+      {(citySections.length > 0 || popularSection) && (
         <div className="px-5 mb-12">
           <MainCard
-            attraction={citySections[0]?.categorySections?.[0]?.attractions?.[0] || citySections[0]?.attractions?.[0]}
+            attraction={
+              citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
+              citySections[0]?.attractions?.[0] ||
+              popularSection?.categorySections?.[0]?.attractions?.[0] ||
+              popularSection?.attractions?.[0]
+            }
             onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
           />
         </div>
