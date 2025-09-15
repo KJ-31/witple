@@ -85,11 +85,19 @@ async def get_similarity_based_places(region: str, category: str = None, limit: 
                    (random() + 0.5) as similarity_score
             FROM place_features pf
             LEFT JOIN place_recommendations pr ON pf.place_id = pr.place_id AND pf.table_name = pr.table_name
-            WHERE pf.region = $1
         """
         
-        params = [region]
-        param_count = 1
+        params = []
+        param_count = 0
+        
+        # 지역 필터 ('전국'이 아닐 때만 적용)
+        if region and region != '전국':
+            param_count += 1
+            query += f" WHERE pf.region = ${param_count}"
+            params.append(region)
+        else:
+            # '전국'일 때는 지역 필터를 적용하지 않음
+            query += " WHERE 1=1"
         
         # 카테고리 필터
         if category:

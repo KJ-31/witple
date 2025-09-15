@@ -311,8 +311,10 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
   }
 
-  // 기존 search API (fallback용)
+  // filtered API를 사용한 더 많은 장소 로드
   const loadMoreAttractions = async (cityName: string, region: string, page: number, isFirstLoad: boolean = false) => {
+    console.log('🔍 loadMoreAttractions 시작:', { cityName, region, page, isFirstLoad })
+    
     if (isFirstLoad) {
       setLoading(true)
     } else {
@@ -321,30 +323,89 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const searchResponse = await fetch(
-        `${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(cityName)}&region=${encodeURIComponent(region)}&page=${page}&limit=50`
-      )
+      
+      // 현재 선택된 카테고리와 지역 정보 가져오기
+      const searchRegion = selectedRegion && selectedRegion !== '전체' ? selectedRegion : (region || '전국')
+      const categoryParam = selectedCategory === 'all' ? '' : `&category=${selectedCategory}`
+      
+      // filtered API 사용 (추천 알고리즘 적용) - 캐시 무효화를 위해 timestamp 추가
+      const timestamp = Date.now()
+      // fetch가 자동으로 인코딩하도록 URLSearchParams 사용
+      const urlParams = new URLSearchParams({
+        region: searchRegion,
+        page: page.toString(),
+        limit: '50',
+        _t: timestamp.toString()
+      })
+      if (selectedCategory !== 'all') {
+        urlParams.append('category', selectedCategory)
+      }
+      
+      const url = `${API_BASE_URL}/api/v1/attractions/filtered?${urlParams.toString()}`
+      console.log('🔍 API 요청 URL:', url)
+      const filteredResponse = await fetch(url)
 
-      if (searchResponse.ok) {
-        const searchData = await searchResponse.json()
+      if (filteredResponse.ok) {
+        const filteredData = await filteredResponse.json()
+        console.log('🔍 API 응답 데이터:', {
+          attractionsCount: filteredData.attractions?.length,
+          hasMore: filteredData.hasMore,
+          totalAvailable: filteredData.totalAvailable
+        })
         // 현재 관광지 제외
-        const filtered = searchData.results.filter((item: any) => item.id !== params.attractionId)
+        const filtered = filteredData.attractions.filter((item: any) => item.id !== params.attractionId)
 
         if (isFirstLoad) {
+          console.log('🔍 첫 로드 - 상태 업데이트:', { filteredCount: filtered.length })
           setRelatedAttractions(filtered)
           setCurrentPage(0)
           setNoMoreResults(false)
         } else {
+          console.log('🔍 더 많은 장소 로드 - 상태 업데이트:', { 
+            filteredCount: filtered.length, 
+            isFirstLoad,
+            page 
+          })
           if (filtered.length === 0) {
+            console.log('🔍 필터링된 장소가 0개 - noMoreResults 설정')
             setNoMoreResults(true)
             setHasMore(false)
           } else {
-            setRelatedAttractions(prev => [...prev, ...filtered])
+            console.log('🔍 기존 장소에 새 장소 추가')
+            setRelatedAttractions(prev => {
+              const newList = [...prev, ...filtered]
+              console.log('🔍 장소 목록 업데이트:', { 
+                prevCount: prev.length, 
+                newCount: newList.length 
+              })
+              return newList
+            })
+            // allCategoryPlaces도 함께 업데이트
+            setAllCategoryPlaces(prev => {
+              const newList = [...prev, ...filtered]
+              console.log('🔍 전체 카테고리 장소 목록 업데이트:', { 
+                prevCount: prev.length, 
+                newCount: newList.length 
+              })
+              return newList
+            })
+            
+            // 캐시도 함께 업데이트
+            const cacheRegion = selectedRegion && selectedRegion !== '전체' ? selectedRegion : (region || '전국')
+            const cacheKey = `${selectedCategory}_${cacheRegion}`
+            setCategoryCache(prev => ({
+              ...prev,
+              [cacheKey]: [...(prev[cacheKey] || []), ...filtered]
+            }))
+            console.log('🔍 캐시 업데이트:', { cacheKey, addedCount: filtered.length })
+            
             setCurrentPage(page)
           }
         }
 
-        setHasMore(searchData.hasMore || false)
+        // 백엔드에서 올바른 hasMore 값 사용
+        console.log('🔍 hasMore 상태 업데이트:', filteredData.hasMore)
+        setHasMore(filteredData.hasMore || false)
       }
     } catch (error) {
       console.error('관광지 로드 오류:', error)
@@ -460,7 +521,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
     }
   }
 
-  // 카테고리 변경 시 추천 관광지 다시 로드
+  // 카테고리/지역 필터 변경 시 추천 관광지 다시 로드
   useEffect(() => {
     if (selectedCategory) {
       if (selectedCategory === 'bookmarked') {
@@ -469,30 +530,29 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
       } else {
         // 다른 카테고리인 경우 추천 관광지 로드
         const loadCategoryPlaces = async () => {
-          const region = attraction?.region || '전국'
+          const region = selectedRegion && selectedRegion !== '전체' ? selectedRegion : (attraction?.region || '전국')
+          
+          // 상태 및 캐시 초기화
+          setRelatedAttractions([])
+          setAllCategoryPlaces([])
+          setCurrentPage(0)
+          setHasMore(true)
+          setNoMoreResults(false)
+          
+          // 관련 캐시 초기화
+          const cacheKey = `${selectedCategory}_${region}`
+          setCategoryCache(prev => {
+            const newCache = { ...prev }
+            delete newCache[cacheKey]
+            return newCache
+          })
+          
           await loadFilteredAttractions(region, selectedCategory, true)
         }
         loadCategoryPlaces()
       }
     }
-  }, [selectedCategory, attraction])
-
-  // 지역 필터 변경 시 추천 관광지 다시 로드
-  useEffect(() => {
-    if (selectedCategory && selectedCategory !== 'bookmarked') {
-      const loadCategoryPlaces = async () => {
-        const region = attraction?.region || '전국'
-        // 지역이 바뀌었으므로 현재 카테고리+지역 조합의 캐시는 무시하고 새로 로드
-        setRelatedAttractions([])
-        setAllCategoryPlaces([])
-        setCurrentPage(0)
-        setHasMore(true)
-        setNoMoreResults(false)
-        await loadFilteredAttractions(region, selectedCategory, true)
-      }
-      loadCategoryPlaces()
-    }
-  }, [selectedRegion])
+  }, [selectedCategory, selectedRegion, attraction])
 
   // 날짜별 장소 관리 헬퍼 함수들
   const getAllSelectedPlaces = (): SelectedPlace[] => {
@@ -1047,42 +1107,53 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
 
         {/* Load More Button / No More Results Message */}
         {!loading && (
-          <div className="px-4 mb-6">
+          <div className="px-4">
             {hasMore && !noMoreResults ? (
-              <button
-                onClick={() => {
-                  if (!loadingMore) {
-                    const cityName = attraction?.city?.name || '전국'
-                    const region = attraction?.region || '전국'
-                    loadMoreAttractions(cityName, region, currentPage + 1, false)
-                  }
-                }}
-                disabled={loadingMore}
-                className={`
-                  w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
-                  ${loadingMore
-                    ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
-                    : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
-                  }
-                `}
-              >
-                {loadingMore ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#6FA0E6]"></div>
-                    더 많은 장소 로딩 중...
-                  </div>
-                ) : (
-                  '더 많은 장소 보기'
-                )}
-              </button>
+              <div className="mb-80">
+                <button
+                  onClick={() => {
+                    console.log('🔍 더 많은 장소 보기 버튼 클릭됨!', {
+                      loadingMore,
+                      currentPage,
+                      hasMore,
+                      selectedRegion,
+                      attractionRegion: attraction?.region
+                    })
+                    if (!loadingMore) {
+                      const cityName = attraction?.city?.name || '전국'
+                      // 현재 선택된 지역 또는 기본값 사용
+                      const region = selectedRegion && selectedRegion !== '전체' ? selectedRegion : (attraction?.region || '전국')
+                      console.log('🔍 loadMoreAttractions 호출:', { cityName, region, page: currentPage + 1 })
+                      loadMoreAttractions(cityName, region, currentPage + 1, false)
+                    }
+                  }}
+                  disabled={loadingMore}
+                  className={`
+                    w-full py-3 rounded-xl text-sm font-medium transition-all duration-200
+                    ${loadingMore
+                      ? 'bg-[#1F3C7A]/30 text-[#6FA0E6] cursor-not-allowed'
+                      : 'bg-[#12345D]/50 text-[#94A9C9] hover:bg-[#1F3C7A]/50 hover:text-white'
+                    }
+                  `}
+                >
+                  {loadingMore ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#6FA0E6]"></div>
+                      더 많은 장소 로딩 중...
+                    </div>
+                  ) : (
+                    '더 많은 장소 보기'
+                  )}
+                </button>
+              </div>
             ) : noMoreResults || !hasMore ? (
-              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
+              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center mb-80">
                 <div className="text-[#6FA0E6] text-sm mb-1">🏁</div>
                 <p className="text-[#94A9C9] text-sm">더 이상 추천할 장소가 없습니다</p>
                 <p className="text-[#6FA0E6] text-xs mt-1">위의 장소들 중에서 선택해보세요!</p>
               </div>
             ) : (
-              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center">
+              <div className="bg-[#0F1A31]/30 rounded-xl p-4 text-center mb-80">
                 <div className="text-[#3E68FF] text-sm mb-1">✨</div>
                 <p className="text-[#94A9C9] text-sm">개인화 추천 알고리즘이 적용된 장소들입니다</p>
                 <p className="text-[#6FA0E6] text-xs mt-1">취향에 맞는 {filteredPlaces.length}개 장소를 추천해드려요!</p>

@@ -493,7 +493,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
         </div>
 
         {/* Action button */}
-        <div className="mb-8">
+        {/* <div className="mb-8">
           <button 
             onClick={handleAddToItinerary}
             className="w-full bg-[#3E68FF] hover:bg-[#4C7DFF] text-white py-4 rounded-2xl text-lg font-semibold transition-colors flex items-center justify-center gap-2"
@@ -503,7 +503,7 @@ export default function AttractionDetail({ params }: AttractionDetailProps) {
             </svg>
             여행 계획 세우기
           </button>
-        </div>
+        </div> */}
       </div>
     </div>
   )
