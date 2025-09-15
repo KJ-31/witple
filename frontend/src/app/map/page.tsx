@@ -1347,7 +1347,7 @@ export default function MapPage() {
   // 상태 업데이트 함수
   const updateStatus = (message: string, type: 'loading' | 'success' | 'error') => {
     setRouteStatus({ message, type });
-    setTimeout(() => setRouteStatus(null), 3000);
+    setTimeout(() => setRouteStatus(null), 5000);
   };
 
   // 기존 경로 제거
@@ -2242,9 +2242,9 @@ export default function MapPage() {
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
     
-    const routeTypeText = isOptimized ? '최적화된 경로!' : '기본 동선 표시 완료!';
+    const routeTypeText = isOptimized ? '최적화 경로' : '기본 동선';
     updateStatus(
-      `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
+      `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}\n※ 현재 시간 기준의 예상치입니다.\n실제 여행 시 다시 확인하세요.`,
       'success'
     );
   };
@@ -2506,7 +2506,7 @@ export default function MapPage() {
       const optimized = optimizeRouteOrderWithConstraints(originCoords, destinationCoords, destinationNames, constraints);
       
 
-      updateStatus(`${dayNumber}일차 경로 최적화 완료! (${lockedCount}개 순서 고정) 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
+      updateStatus(`${dayNumber}일차 경로 최적화 중.. (${lockedCount}개 순서 고정)\n예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
 
       // 최적화된 순서대로 장소 객체 재구성
       const optimizedPlaces = [firstPlace];
@@ -2738,7 +2738,7 @@ export default function MapPage() {
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
             )}
-            <span className="text-sm font-medium">{routeStatus.message}</span>
+            <span className="text-sm font-medium whitespace-pre-line">{routeStatus.message}</span>
           </div>
         </div>
       )}
