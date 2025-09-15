@@ -78,7 +78,6 @@ def format_attraction_data(attraction, category: str, table_name: str = None):
         "name": attraction.name or "이름 없음",
         "description": attraction.overview[:100] + "..." if attraction.overview and len(attraction.overview) > 100 else (attraction.overview or "설명 없음"),
         "imageUrl": image_url,
-        "rating": 4.5,  # 실제 평점 데이터가 없으므로 기본값
         "category": category,
         "address": attraction.address,
         "region": attraction.region,
@@ -1028,7 +1027,7 @@ async def get_filtered_attractions(
                         "name": place.get('name', '이름 없음'),
                         "description": place.get('description', '설명 없음'),
                         "imageUrl": get_first_valid_image(place.get('image_urls')),
-                        "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+
                         "category": get_category_from_table(place['table_name']),
                         "region": place.get('region', region),
                         "city": {
@@ -1060,7 +1059,7 @@ async def get_filtered_attractions(
                         "name": place.get('name', '이름 없음'),
                         "description": place.get('description', '설명 없음'),
                         "imageUrl": get_first_valid_image(place.get('image_urls')),
-                        "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+
                         "category": get_category_from_table(place['table_name']),
                         "region": place.get('region', region),
                         "city": {
@@ -1090,7 +1089,7 @@ async def get_filtered_attractions(
                     "name": place.get('name', '이름 없음'),
                     "description": place.get('description', '설명 없음'),
                     "imageUrl": get_first_valid_image(place.get('image_urls')),
-                    "rating": round((place.get('similarity_score', 0.7) + 0.3) * 5, 1),
+
                     "category": get_category_from_table(place['table_name']),
                     "region": place.get('region', region),
                     "city": {

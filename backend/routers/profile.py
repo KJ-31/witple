@@ -14,9 +14,9 @@ from sqlalchemy import desc
 from database import get_db
 from models import User, UserPreference
 from schemas import (
-    UserResponse, 
-    ProfileImageUpdate, 
-    ProfileInfoUpdate, 
+    UserResponse,
+    ProfileImageUpdate,
+    ProfileInfoUpdate,
     ProfilePreferencesUpdate
 )
 from config import settings
@@ -47,13 +47,13 @@ def save_profile_image_to_s3(base64_data: str, user_id: str) -> str:
         # Base64 헤더 제거
         if ',' in base64_data:
             base64_data = base64_data.split(',')[1]
-        
+
         # Base64 디코딩
         image_data = base64.b64decode(base64_data)
-        
+
         # 고유한 파일명 생성
         filename = f"profile_{user_id}_{uuid.uuid4()}.jpg"
-        
+
         # S3에 업로드
         s3_client.put_object(
             Bucket=settings.S3_BUCKET_NAME,
@@ -62,11 +62,11 @@ def save_profile_image_to_s3(base64_data: str, user_id: str) -> str:
             ContentType='image/jpeg'
             # ACL 제거: 버킷에서 ACL이 비활성화되어 있음
         )
-        
+
         # S3 URL 반환
         s3_url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/profiles/{filename}"
         return s3_url
-        
+
     except ClientError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -87,20 +87,20 @@ async def get_current_user_profile(
     """현재 사용자의 프로필 정보를 가져옵니다."""
     # 캐시 키 생성
     cache_key = f"profile:{current_user.user_id}"
-    
+
     # 캐시에서 조회 시도
     cached_result = cache.get(cache_key)
     if cached_result is not None:
         logger.info(f"Cache hit for profile: {cache_key}")
         return UserResponse(**cached_result)
-    
+
     logger.info(f"Cache miss for profile: {cache_key}")
-    
+
     # 사용자의 여행 취향 정보도 함께 가져오기
     user_preference = db.query(UserPreference).filter(
         UserPreference.user_id == current_user.user_id
     ).first()
-    
+
     # UserResponse 객체 생성 시 여행 취향 정보 포함
     user_data = {
         "user_id": current_user.user_id,
@@ -115,10 +115,10 @@ async def get_current_user_profile(
         "accommodation": user_preference.accommodation if user_preference else None,
         "exploration": user_preference.exploration if user_preference else None
     }
-    
+
     # 결과를 캐시에 저장 (20분)
     cache.set(cache_key, user_data, expire=1200)
-    
+
     return UserResponse(**user_data)
 
 
@@ -131,13 +131,13 @@ async def get_user_profile(
     """다른 사용자의 공개 프로필 정보를 조회합니다."""
     # 캐시 키 생성
     cache_key = f"profile:public:{user_id}"
-    
+
     # 캐시에서 조회 시도
     cached_result = cache.get(cache_key)
     if cached_result is not None:
         logger.info(f"Cache hit for public profile: {cache_key}")
         return UserResponse(**cached_result)
-    
+
     # 사용자 정보 조회
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -145,12 +145,12 @@ async def get_user_profile(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="사용자를 찾을 수 없습니다."
         )
-    
+
     # 사용자 취향 정보 조회
     user_preference = db.query(UserPreference).filter(
         UserPreference.user_id == user_id
     ).first()
-    
+
     # 공개 프로필 데이터 구성 (민감한 정보 제외)
     user_data = {
         "user_id": user.user_id,
@@ -165,10 +165,10 @@ async def get_user_profile(
         "accommodation": user_preference.accommodation if user_preference else None,
         "exploration": user_preference.exploration if user_preference else None
     }
-    
+
     # 결과를 캐시에 저장 (10분 - 다른 사용자 프로필이므로 짧게)
     cache.set(cache_key, user_data, expire=600)
-    
+
     return UserResponse(**user_data)
 
 
@@ -182,7 +182,7 @@ async def update_profile_image(
     try:
         # 이미지를 S3에 업로드
         image_url = save_profile_image_to_s3(image_data.image_data, current_user.user_id)
-        
+
         # DB에서 사용자 객체를 다시 조회하여 세션에 연결
         user = db.query(User).filter(User.user_id == current_user.user_id).first()
         if not user:
@@ -190,21 +190,21 @@ async def update_profile_image(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="사용자를 찾을 수 없습니다."
             )
-        
+
         # 데이터베이스 업데이트
         user.profile_image = image_url
         user.updated_at = datetime.utcnow()
-        
+
         db.commit()
         db.refresh(user)
-        
+
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
         cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
-        
+
         logger.info(f"Profile image updated for user: {current_user.user_id}")
         return user
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -228,7 +228,7 @@ async def update_profile_info(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="사용자를 찾을 수 없습니다."
             )
-        
+
         # 업데이트할 필드들
         if profile_data.name is not None:
             user.name = profile_data.name
@@ -236,19 +236,19 @@ async def update_profile_info(
             user.age = profile_data.age
         if profile_data.nationality is not None:
             user.nationality = profile_data.nationality
-            
+
         user.updated_at = datetime.utcnow()
-        
+
         db.commit()
         db.refresh(user)
-        
+
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
         cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
-        
+
         logger.info(f"Profile info updated for user: {current_user.user_id}")
         return user
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -272,16 +272,16 @@ async def update_profile_preferences(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="사용자를 찾을 수 없습니다."
             )
-        
+
         # 기존 preferences 찾거나 새로 생성
         user_preference = db.query(UserPreference).filter(
             UserPreference.user_id == current_user.user_id
         ).first()
-        
+
         if not user_preference:
             user_preference = UserPreference(user_id=current_user.user_id)
             db.add(user_preference)
-        
+
         # 업데이트할 필드들
         if preferences_data.persona is not None:
             user_preference.persona = preferences_data.persona
@@ -291,47 +291,47 @@ async def update_profile_preferences(
             user_preference.accommodation = preferences_data.accommodation
         if preferences_data.exploration is not None:
             user_preference.exploration = preferences_data.exploration
-            
+
         user_preference.updated_at = datetime.utcnow()
         user.updated_at = datetime.utcnow()
-        
+
         db.commit()
         db.refresh(user)
-        
+
         # 캐시 무효화
         cache.delete(f"profile:{current_user.user_id}")
         cache.delete(f"user_session:{current_user.email}")  # 사용자 세션 캐시도 무효화
-        
+
         # 변경된 여행 취향 정보 로그 출력
         logger.info(f"여행 취향 업데이트 성공: {{user_id: '{current_user.user_id}', email: '{current_user.email}', name: '{current_user.name}', persona: '{user_preference.persona}', priority: '{user_preference.priority}', accommodation: '{user_preference.accommodation}', exploration: '{user_preference.exploration}', updated_at: '{user_preference.updated_at}'}}")
-        
+
         # 캐시 무효화 - 사용자 취향 변경 시 추천 캐시 삭제
         user_id = str(current_user.user_id)
-        
+
         # 개인화 추천 캐시 삭제 (다양한 파라미터 조합)
         cache_patterns = [
             f"personalized:{user_id}:*",
             f"recommendations:{user_id}",
             f"user:{user_id}"
         ]
-        
+
         # Redis SCAN을 사용하여 패턴 매칭 키들 삭제
         try:
             import redis
             redis_client = cache.redis
-            
+
             for pattern in cache_patterns:
                 for key in redis_client.scan_iter(match=pattern):
                     redis_client.delete(key)
                     logger.info(f"Deleted cache key: {key}")
-                    
+
             logger.info(f"Cache invalidated for user preferences update: {user_id}")
         except Exception as cache_error:
             logger.warning(f"Cache invalidation failed: {cache_error}")
-        
+
         logger.info(f"Profile preferences updated for user: {current_user.user_id}")
         return user
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(

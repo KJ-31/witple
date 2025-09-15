@@ -12,7 +12,6 @@ interface SavedPlace {
   address?: string
   image?: string
   category?: string
-  rating?: number
   saved_at: string
 }
 
@@ -186,16 +185,7 @@ export default function SavedPage() {
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              {place.rating && (
-                <div className="flex items-center">
-                  <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                  </svg>
-                  <span className="text-[#94A9C9] text-sm">{place.rating}</span>
-                </div>
-              )}
-              
+            <div className="flex items-center justify-end">
               <span className="text-[#6FA0E6] text-xs">
                 {formatTimeAgo(place.saved_at)}에 저장됨
               </span>
