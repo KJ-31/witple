@@ -184,25 +184,40 @@ export default function RecommendationsPage() {
           headers['Authorization'] = `Bearer ${(session as any).backendToken}`
         }
         
+        // ❌ v1 API 주석처리 - v2 API로 대체
         // 로그인 상태에 따라 다른 API 엔드포인트 사용
-        let apiUrl = `${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`
-        if (session && (session as any).backendToken) {
-          // 로그인 상태: 개인화 추천 API 사용
-          apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=15`
-        }
+        // let apiUrl = `${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`
+        // if (session && (session as any).backendToken) {
+        //   // 로그인 상태: 개인화 추천 API 사용
+        //   apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=15`
+        // }
+
+        // ✅ v2 추천 시스템 API 사용
+        let apiUrl = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?limit=15`
         
         const response = await fetch(apiUrl, { headers })
         if (response.ok) {
           const data = await response.json()
           
-          // API 응답 형식에 따라 데이터 추출
+          // v2 API 응답 형식 처리 { featured, feed, total_count }
           let attractions = []
-          if (session && (session as any).backendToken) {
-            // 개인화 추천 API 응답 (배열 형식)
-            attractions = Array.isArray(data) ? data : []
+          if (data && typeof data === 'object') {
+            if (data.featured || data.feed) {
+              // v2 personalized feed 응답 처리
+              const allItems = []
+              if (data.featured) allItems.push(data.featured)
+              if (data.feed && Array.isArray(data.feed)) {
+                allItems.push(...data.feed)
+              }
+              attractions = allItems
+              console.log('v2 추천 시스템 응답 아이템 수:', attractions.length)
+            } else {
+              console.warn('예상치 못한 v2 API 응답 형식:', Object.keys(data))
+              attractions = []
+            }
           } else {
-            // 일반 검색 API 응답 (results 필드 있음)
-            attractions = data.results || []
+            console.warn('v2 API 응답이 객체가 아님:', typeof data)
+            attractions = []
           }
 
           const formattedItems = attractions.map((attraction: any, index: number) => ({
@@ -210,7 +225,7 @@ export default function RecommendationsPage() {
             title: attraction.name || attraction.title,
             author: attraction.city?.name || attraction.region || '여행지',
             genre: selectedCategory,
-            views: attraction.views || Math.floor(Math.random() * 5000) + 1000,
+            views: attraction.views || attraction.bookmark_cnt || Math.floor(Math.random() * 5000) + 1000, // v2에서 bookmark_cnt 사용
             imageUrl: attraction.imageUrl || getImageUrl(attraction.image_urls) || `https://picsum.photos/100/100?random=${Date.now() + index}`
           }))
 
@@ -276,11 +291,28 @@ export default function RecommendationsPage() {
       try {
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
+        // ❌ v1 API 주석처리
         // "오늘의 발견" 섹션 데이터 (다양한 카테고리에서 인기 장소들)
-        const discoveryResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=4`)
+        // const discoveryResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=4`)
+
+        // ✅ v2 탐색 피드 API 사용
+        const discoveryResponse = await fetch(`${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`)
+        let discoveryData: any = null
         if (discoveryResponse.ok) {
-          const discoveryData = await discoveryResponse.json()
-          const discoveryAttractions = discoveryData.results || []
+          discoveryData = await discoveryResponse.json()
+          // v2 탐색 피드 응답 처리
+          let discoveryAttractions: any[] = []
+          if (discoveryData && discoveryData.data) {
+            // { data: { region: { category: [items] } } } 형식에서 아이템 추출
+            Object.values(discoveryData.data).forEach((regionData: any) => {
+              Object.values(regionData).forEach((categoryItems: any) => {
+                if (Array.isArray(categoryItems)) {
+                  discoveryAttractions.push(...categoryItems)
+                }
+              })
+            })
+            discoveryAttractions = discoveryAttractions.slice(0, 4) // 4개만 선택
+          }
 
           const formattedDiscoveryItems = discoveryAttractions.map((attraction: any) => ({
             id: attraction.id,
@@ -295,11 +327,24 @@ export default function RecommendationsPage() {
           setDiscoveryItems(formattedDiscoveryItems)
         }
 
+        // ❌ v1 API 주석처리 - v2 탐색 피드 재사용
         // "새로 나온 코스" 섹션 데이터 (최근 추가된 장소들)
-        const newResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=3`)
-        if (newResponse.ok) {
-          const newData = await newResponse.json()
-          const newAttractions = newData.results || []
+        // const newResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=3`)
+
+        // v2 탐색 피드에서 다른 아이템들 사용
+        let newAttractions: any[] = []
+        if (discoveryData && discoveryData.data) {
+          Object.values(discoveryData.data).forEach((regionData: any) => {
+            Object.values(regionData).forEach((categoryItems: any) => {
+              if (Array.isArray(categoryItems)) {
+                newAttractions.push(...categoryItems)
+              }
+            })
+          })
+          newAttractions = newAttractions.slice(4, 7) // 4-6 인덱스 3개 선택
+        }
+        // v2 데이터를 이미 추출했으므로 조건문 수정
+        if (newAttractions.length > 0) {
 
           const formattedNewItems = newAttractions.map((attraction: any) => ({
             id: attraction.id,
@@ -313,13 +358,26 @@ export default function RecommendationsPage() {
           setNewItems(formattedNewItems)
         }
 
+        // ❌ v1 API 주석처리 - v2 탐색 피드 재사용
         // "인기 여행지" 섹션 데이터 (높은 평점 위주)
-        const popularResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=5`)
-        if (popularResponse.ok) {
-          const popularData = await popularResponse.json()
-          const popularAttractions = popularData.results || []
+        // const popularResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=5`)
+
+        // v2 탐색 피드에서 다른 아이템들 사용
+        let popularAttractions: any[] = []
+        if (discoveryData && discoveryData.data) {
+          Object.values(discoveryData.data).forEach((regionData: any) => {
+            Object.values(regionData).forEach((categoryItems: any) => {
+              if (Array.isArray(categoryItems)) {
+                popularAttractions.push(...categoryItems)
+              }
+            })
+          })
+          popularAttractions = popularAttractions.slice(7, 12) // 7-11 인덱스 5개 선택
+        }
+        // v2 데이터를 이미 추출했으므로 조건문 수정
+        if (popularAttractions.length > 0) {
           
-          const formattedPopularItems = popularAttractions.slice(0, 5).map((attraction: any) => ({
+          const formattedPopularItems = popularAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '인기 여행지',
@@ -331,11 +389,22 @@ export default function RecommendationsPage() {
           setPopularItems(formattedPopularItems)
         }
 
+        // ❌ v1 API 주석처리 - v2 탐색 피드 재사용
         // "숨은 명소" 섹션 데이터 (자연/인문 카테고리 위주)
-        const hiddenResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=nature&limit=4`)
-        if (hiddenResponse.ok) {
-          const hiddenData = await hiddenResponse.json()
-          const hiddenAttractions = hiddenData.results || []
+        // const hiddenResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=nature&limit=4`)
+
+        // v2 탐색 피드에서 nature 카테고리 아이템들 사용
+        let hiddenAttractions: any[] = []
+        if (discoveryData && discoveryData.data) {
+          Object.values(discoveryData.data).forEach((regionData: any) => {
+            if (regionData.nature && Array.isArray(regionData.nature)) {
+              hiddenAttractions.push(...regionData.nature)
+            }
+          })
+          hiddenAttractions = hiddenAttractions.slice(0, 4) // 4개만 선택
+        }
+        // v2 데이터를 이미 추출했으므로 조건문 수정
+        if (hiddenAttractions.length > 0) {
           
           const formattedHiddenItems = hiddenAttractions.map((attraction: any) => ({
             id: attraction.id,
@@ -349,13 +418,26 @@ export default function RecommendationsPage() {
           setHiddenItems(formattedHiddenItems)
         }
 
+        // ❌ v1 API 주석처리 - v2 탐색 피드 재사용
         // "테마별 여행" 섹션 데이터 (다양한 카테고리 혼합)
-        const themeResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=6`)
-        if (themeResponse.ok) {
-          const themeData = await themeResponse.json()
-          const themeAttractions = themeData.results || []
+        // const themeResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&limit=6`)
+
+        // v2 탐색 피드에서 다양한 카테고리 아이템들 사용
+        let themeAttractions: any[] = []
+        if (discoveryData && discoveryData.data) {
+          Object.values(discoveryData.data).forEach((regionData: any) => {
+            Object.values(regionData).forEach((categoryItems: any) => {
+              if (Array.isArray(categoryItems)) {
+                themeAttractions.push(...categoryItems)
+              }
+            })
+          })
+          themeAttractions = themeAttractions.slice(12, 18) // 12-17 인덱스 6개 선택
+        }
+        // v2 데이터를 이미 추출했으므로 조건문 수정
+        if (themeAttractions.length > 0) {
           
-          const formattedThemeItems = themeAttractions.slice(0, 6).map((attraction: any) => ({
+          const formattedThemeItems = themeAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
             author: attraction.city?.name || attraction.region || '테마 여행',
@@ -367,11 +449,22 @@ export default function RecommendationsPage() {
           setThemeItems(formattedThemeItems)
         }
 
+        // ❌ v1 API 주석처리 - v2 탐색 피드 재사용
         // "계절 추천" 섹션 데이터 (레저/자연 카테고리 위주)
-        const seasonalResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=leisure_sports&limit=4`)
-        if (seasonalResponse.ok) {
-          const seasonalData = await seasonalResponse.json()
-          const seasonalAttractions = seasonalData.results || []
+        // const seasonalResponse = await fetch(`${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=leisure_sports&limit=4`)
+
+        // v2 탐색 피드에서 leisure_sports 카테고리 아이템들 사용
+        let seasonalAttractions: any[] = []
+        if (discoveryData && discoveryData.data) {
+          Object.values(discoveryData.data).forEach((regionData: any) => {
+            if (regionData.activity && Array.isArray(regionData.activity)) {
+              seasonalAttractions.push(...regionData.activity)
+            }
+          })
+          seasonalAttractions = seasonalAttractions.slice(0, 4) // 4개만 선택
+        }
+        // v2 데이터를 이미 추출했으므로 조건문 수정
+        if (seasonalAttractions.length > 0) {
           
           const formattedSeasonalItems = seasonalAttractions.map((attraction: any) => ({
             id: attraction.id,

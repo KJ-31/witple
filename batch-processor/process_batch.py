@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AWS Batch 메인 처리 스크립트
-S3에서 사용자 행동 데이터를 읽어서 BERT 벡터로 변환하고 PostgreSQL에 저장
+S3에서 사용자 행동 데이터를 읽어서 OpenCLIP 벡터로 변환하고 PostgreSQL에 저장
 """
 import os
 import sys
@@ -16,7 +16,7 @@ from pathlib import Path
 import boto3
 import pandas as pd
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from langchain_experimental.open_clip import OpenCLIPEmbeddings
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import requests
@@ -61,9 +61,9 @@ print(f"  WEBHOOK_URL: {WEBHOOK_URL}")
 print(f"  AWS_ACCESS_KEY_ID: {'***' if os.getenv('AWS_ACCESS_KEY_ID') else 'NOT SET'}")
 print(f"  TIME_DECAY_LAMBDA: {TIME_DECAY_LAMBDA} (30-day decay: {np.exp(-TIME_DECAY_LAMBDA * 30):.2f})")
 
-# BERT 모델 설정
-BERT_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
-VECTOR_DIMENSION = 384
+# OpenCLIP 모델 설정
+OPENCLIP_MODEL_NAME = "ViT-B-32"
+OPENCLIP_CHECKPOINT = "laion2b_s34b_b79k"
 
 # 시간 가중치 설정 (외부화)
 TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
@@ -75,10 +75,26 @@ class BatchProcessor:
         # AWS 클라이언트 초기화
         self.s3_client = boto3.client('s3', region_name=AWS_REGION)
         
-        # BERT 모델 로드 (컨테이너 시작 시 다운로드됨)
-        logger.info(f"📥 Loading BERT model: {BERT_MODEL_NAME}")
-        self.bert_model = SentenceTransformer(BERT_MODEL_NAME)
-        logger.info("✅ BERT model loaded successfully")
+        # OpenCLIP 모델 로드
+        logger.info(f"📥 Loading OpenCLIP model: {OPENCLIP_MODEL_NAME}")
+        self.embedding_model = OpenCLIPEmbeddings(
+            model_name=OPENCLIP_MODEL_NAME,
+            checkpoint=OPENCLIP_CHECKPOINT
+        )
+
+        # 동적 벡터 차원 감지
+        logger.info("🔍 Detecting vector dimensions...")
+        test_vector = self.embedding_model.embed_query("test")
+        self.vector_dimension = len(test_vector)
+        logger.info(f"✅ OpenCLIP model loaded successfully. Vector dimension: {self.vector_dimension}")
+
+        # 차원 검증
+        if self.vector_dimension not in [384, 512, 768, 1024]:
+            logger.warning(f"⚠️ Unexpected vector dimension: {self.vector_dimension}")
+        elif self.vector_dimension == 512:
+            logger.info("🎯 Using 512-dimensional OpenCLIP vectors (ViT-B-32)")
+        else:
+            logger.info(f"🎯 Using {self.vector_dimension}-dimensional vectors")
         
         # 데이터베이스 연결
         if DATABASE_URL:
@@ -93,7 +109,7 @@ class BatchProcessor:
         # NEW: DB 조회 결과를 캐싱하여 성능 향상
         self.place_overview_cache = {}
 
-        # NEW: BERT 인코딩 결과 캐싱하여 중복 연산 방지
+        # NEW: OpenCLIP 인코딩 결과 캐싱하여 중복 연산 방지
         self.bert_encoding_cache = {}
         self._cache_hits = 0
         self._cache_attempts = 0
@@ -141,7 +157,7 @@ class BatchProcessor:
             db.close()
 
     def _encode_text_with_cache(self, text: str) -> List[float]:
-        """텍스트를 BERT로 인코딩하되 캐시를 활용하여 중복 연산 방지"""
+        """텍스트를 OpenCLIP으로 인코딩하되 캐시를 활용하여 중복 연산 방지"""
         # 통계 업데이트
         self._cache_attempts += 1
 
@@ -153,8 +169,8 @@ class BatchProcessor:
             logger.debug(f"🔥 Cache hit for text encoding: {cache_key[:50]}...")
             return self.bert_encoding_cache[cache_key]
 
-        # 캐시 미스 시 BERT 인코딩 수행
-        vector = self.bert_model.encode(text).tolist()
+        # 캐시 미스 시 OpenCLIP 인코딩 수행
+        vector = self.embedding_model.embed_query(text)
         self.bert_encoding_cache[cache_key] = vector
         logger.debug(f"🧠 Generated new encoding for: {cache_key[:50]}...")
 
@@ -390,7 +406,7 @@ class BatchProcessor:
                 else:
                     place_text = f"Place category: {place_category} with {len(data['unique_users'])} visitors"
 
-                # BERT 벡터 생성 (캐시 활용하여 중복 연산 방지)
+                # OpenCLIP 벡터 생성 (캐시 활용하여 중복 연산 방지)
                 vector = self._encode_text_with_cache(place_text)
                 
                 # 인기도 점수 계산
@@ -499,7 +515,7 @@ class BatchProcessor:
             cache_hit_ratio = (self._cache_hits / max(self._cache_attempts, 1)) * 100
 
         logger.info(f"✅ Generated vectors for {len(user_vectors)} users and {len(place_vectors)} places")
-        logger.info(f"🔥 BERT encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
+        logger.info(f"🔥 OpenCLIP encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
         logger.info(f"⏰ Time-weighted vectors: {self.stats['time_weighted_users']} users, Fallback: {self.stats['fallback_users']} users")
 
         self.stats['processed_users'] = len(user_vectors)
@@ -511,7 +527,7 @@ class BatchProcessor:
         }
     
     def create_user_behavior_text(self, user_data: Dict[str, Any]) -> str:
-        """사용자 행동 데이터를 BERT 입력용 텍스트로 변환"""
+        """사용자 행동 데이터를 OpenCLIP 입력용 텍스트로 변환"""
         categories = list(user_data['categories_visited'])
         total_actions = len(user_data['actions'])
         
@@ -529,7 +545,7 @@ class BatchProcessor:
                        f"performed {total_actions} actions: " + \
                        ', '.join(behavior_parts)
         
-        return behavior_text[:512]  # BERT 입력 길이 제한
+        return behavior_text[:512]  # OpenCLIP 텍스트 입력 길이 제한
     
     def save_to_database(self, vectors_data: Dict[str, Dict[str, Any]]) -> bool:
         """벡터 데이터를 데이터베이스에 저장"""
