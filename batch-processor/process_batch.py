@@ -8,7 +8,7 @@ import sys
 import json
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import gzip
 from pathlib import Path
@@ -59,10 +59,14 @@ print(f"  S3_PREFIX: {S3_PREFIX}")
 print(f"  DATABASE_URL: {'***' if DATABASE_URL else 'NOT SET'}")
 print(f"  WEBHOOK_URL: {WEBHOOK_URL}")
 print(f"  AWS_ACCESS_KEY_ID: {'***' if os.getenv('AWS_ACCESS_KEY_ID') else 'NOT SET'}")
+print(f"  TIME_DECAY_LAMBDA: {TIME_DECAY_LAMBDA} (30-day decay: {np.exp(-TIME_DECAY_LAMBDA * 30):.2f})")
 
 # BERT 모델 설정
 BERT_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
 VECTOR_DIMENSION = 384
+
+# 시간 가중치 설정 (외부화)
+TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
 
 class BatchProcessor:
     def __init__(self):
@@ -86,6 +90,14 @@ class BatchProcessor:
             self.engine = None
             self.SessionLocal = None
         
+        # NEW: DB 조회 결과를 캐싱하여 성능 향상
+        self.place_overview_cache = {}
+
+        # NEW: BERT 인코딩 결과 캐싱하여 중복 연산 방지
+        self.bert_encoding_cache = {}
+        self._cache_hits = 0
+        self._cache_attempts = 0
+
         # 통계 정보 초기화
         self.stats = {
             'processed_files': 0,
@@ -93,10 +105,137 @@ class BatchProcessor:
             'processed_users': 0,
             'processed_places': 0,
             'errors': 0,
+            'time_weighted_users': 0,  # 시간 가중치 적용된 사용자 수
+            'fallback_users': 0,       # 텍스트 기반 fallback 사용자 수
             'start_time': datetime.now(),
             'end_time': None
         }
-        
+
+    # NEW: place_id와 category로 DB에서 overview를 조회하는 함수
+    def _get_overview_from_db(self, numeric_id: int, category: str) -> Optional[str]:
+        """주어진 숫자 ID와 카테고리로 DB에서 overview를 조회하고 캐시에 저장합니다."""
+        cache_key = f"{numeric_id}:{category}"
+        if cache_key in self.place_overview_cache:
+            return self.place_overview_cache[cache_key]
+
+        if not self.SessionLocal:
+            return None
+
+        db = self.SessionLocal()
+        try:
+            # place_recommendations 테이블을 조회한다고 가정
+            query = text("""
+                SELECT overview FROM place_recommendations
+                WHERE place_id = :numeric_id AND table_name = :category
+                LIMIT 1
+            """)
+            result = db.execute(query, {'numeric_id': numeric_id, 'category': category}).scalar_one_or_none()
+            
+            self.place_overview_cache[cache_key] = result
+            return result
+        except Exception as e:
+            logger.error(f"❌ DB lookup failed for ID={numeric_id}, Category={category}: {e}")
+            self.place_overview_cache[cache_key] = None  # 실패한 조회도 캐싱하여 반복 방지
+            return None
+        finally:
+            db.close()
+
+    def _encode_text_with_cache(self, text: str) -> List[float]:
+        """텍스트를 BERT로 인코딩하되 캐시를 활용하여 중복 연산 방지"""
+        # 통계 업데이트
+        self._cache_attempts += 1
+
+        # 텍스트를 정규화하여 캐시 키로 사용
+        cache_key = text.strip()[:500]  # 너무 긴 텍스트는 잘라서 사용
+
+        if cache_key in self.bert_encoding_cache:
+            self._cache_hits += 1
+            logger.debug(f"🔥 Cache hit for text encoding: {cache_key[:50]}...")
+            return self.bert_encoding_cache[cache_key]
+
+        # 캐시 미스 시 BERT 인코딩 수행
+        vector = self.bert_model.encode(text).tolist()
+        self.bert_encoding_cache[cache_key] = vector
+        logger.debug(f"🧠 Generated new encoding for: {cache_key[:50]}...")
+
+        return vector
+
+    def _generate_time_weighted_user_vector(self, user_id: str, data: Dict[str, Any], place_vectors: Dict[str, Any]) -> List[float]:
+        """시간 가중치를 적용한 사용자 벡터 생성 (안전성 강화)"""
+        try:
+            positive_actions_info = []
+            current_time_utc = datetime.now(timezone.utc)
+
+            # 1. 긍정적 행동(좋아요/북마크)에서 시간 정보와 벡터 수집
+            for action in data['actions']:
+                if action.get('action_type') in ['like', 'bookmark']:
+                    place_key = f"{action.get('place_category')}:{action.get('place_id')}"
+                    action_time = action.get('action_time')
+
+                    # 시간 정보와 장소 벡터가 모두 있는 경우만 처리
+                    if action_time and place_key in place_vectors:
+                        try:
+                            # 안전한 시간 파싱 (다양한 형식 지원)
+                            timestamp_str = str(action_time)
+                            if timestamp_str.endswith('Z'):
+                                timestamp_str = timestamp_str.replace('Z', '+00:00')
+
+                            timestamp = datetime.fromisoformat(timestamp_str)
+
+                            # naive datetime을 UTC로 처리
+                            if timestamp.tzinfo is None:
+                                timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+                            vector = place_vectors[place_key]['behavior_vector']
+                            positive_actions_info.append({
+                                'vector': vector,
+                                'timestamp': timestamp,
+                                'action_type': action.get('action_type')
+                            })
+
+                        except (ValueError, TypeError, AttributeError) as e:
+                            logger.debug(f"Failed to parse timestamp '{action_time}' for user {user_id}: {e}")
+                            continue
+
+            # 2. 시간 가중치 적용한 벡터 평균 계산
+            if positive_actions_info:
+                vectors = np.array([item['vector'] for item in positive_actions_info])
+
+                # 시간 가중치 계산 (지수 감쇠 모델)
+                weights = []
+                total_weight = 0
+
+                for item in positive_actions_info:
+                    time_diff_days = (current_time_utc - item['timestamp']).total_seconds() / 86400
+                    time_weight = np.exp(-TIME_DECAY_LAMBDA * max(0, time_diff_days))  # 음수 방지
+
+                    # 행동 유형별 추가 가중치 (북마크 > 좋아요)
+                    action_weight = 1.5 if item['action_type'] == 'bookmark' else 1.0
+
+                    final_weight = time_weight * action_weight
+                    weights.append(final_weight)
+                    total_weight += final_weight
+
+                if total_weight > 0:
+                    # 가중 평균 계산
+                    vector = np.average(vectors, axis=0, weights=weights).tolist()
+                    logger.info(f"Generated time-weighted vector for user {user_id} from {len(vectors)} actions (total_weight: {total_weight:.3f})")
+                    self.stats['time_weighted_users'] += 1
+                    return vector
+
+            # 3. Fallback: 시간 정보가 없거나 긍정적 행동이 없는 경우
+            logger.info(f"User {user_id}: No time-weighted actions available, using behavior text fallback")
+            behavior_text = self.create_user_behavior_text(data)
+            self.stats['fallback_users'] += 1
+            return self._encode_text_with_cache(behavior_text)
+
+        except Exception as e:
+            # 4. 완전한 예외 처리: 모든 실패 시 기본 텍스트 기반 벡터 사용
+            logger.error(f"Time-weighted vector generation failed for user {user_id}: {e}")
+            behavior_text = self.create_user_behavior_text(data)
+            self.stats['fallback_users'] += 1
+            return self._encode_text_with_cache(behavior_text)
+
     def list_s3_files(self, max_files: int = 100) -> List[Dict[str, Any]]:
         """S3에서 처리할 파일 목록 조회"""
         logger.info(f"🔍 Searching for files in s3://{S3_BUCKET}/{S3_PREFIX}")
@@ -226,53 +365,33 @@ class BatchProcessor:
             elif action_type == 'click':
                 place_data[place_key]['total_clicks'] += 1
         
-        # 2. 사용자별 벡터 생성
-        user_vectors = {}
-        for user_id, data in user_data.items():
-            try:
-                # 사용자 행동 패턴을 텍스트로 변환
-                behavior_text = self.create_user_behavior_text(data)
-                
-                # BERT 벡터 생성
-                vector = self.bert_model.encode(behavior_text).tolist()
-                
-                # 행동 점수 계산 (0-100 스케일)
-                total_actions = len(data['actions'])
-                like_score = min((data['total_likes'] / max(total_actions, 1)) * 100, 100)
-                bookmark_score = min((data['total_bookmarks'] / max(total_actions, 1)) * 100, 100)
-                click_score = min((data['total_clicks'] / max(total_actions, 1)) * 100, 100)
-                
-                # 다양성 점수 (방문한 카테고리 수 기반)
-                diversity_score = min(len(data['categories_visited']) * 10, 100)
-                
-                user_vectors[user_id] = {
-                    'user_id': user_id,
-                    'behavior_vector': vector,
-                    'like_score': round(like_score, 2),
-                    'bookmark_score': round(bookmark_score, 2),
-                    'click_score': round(click_score, 2),
-                    'dwell_time_score': 0.0,  # 기본값 설정
-                    'total_actions': total_actions,
-                    'total_likes': data['total_likes'],
-                    'total_bookmarks': data['total_bookmarks'],
-                    'total_clicks': data['total_clicks'],
-                    'last_action_date': datetime.now()
-                }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to process user {user_id}: {str(e)}")
-                self.stats['errors'] += 1
-                continue
-        
-        # 3. 장소별 벡터 생성
+        # 2. 장소별 벡터 생성 (완전히 먼저 생성하여 사용자 벡터에서 참조)
         place_vectors = {}
+        logger.info(f"🏢 Generating vectors for {len(place_data)} places")
+
         for place_key, data in place_data.items():
             try:
-                # 장소 정보를 텍스트로 변환
-                place_text = f"Place category: {data['place_category']} with {len(data['unique_users'])} visitors"
-                
-                # BERT 벡터 생성 (behavior_vector로 사용)
-                vector = self.bert_model.encode(place_text).tolist()
+                # MODIFIED START
+                place_full_id = data['place_id']
+                place_category = data['place_category']
+
+                try:
+                    numeric_id = int(place_full_id.split('_')[1])
+                except (IndexError, ValueError):
+                    logger.warning(f"Could not parse numeric ID from {place_full_id}. Skipping overview lookup.")
+                    numeric_id = None
+
+                overview = None
+                if numeric_id and self.SessionLocal:
+                    overview = self._get_overview_from_db(numeric_id, place_category)
+
+                if overview:
+                    place_text = overview
+                else:
+                    place_text = f"Place category: {place_category} with {len(data['unique_users'])} visitors"
+
+                # BERT 벡터 생성 (캐시 활용하여 중복 연산 방지)
+                vector = self._encode_text_with_cache(place_text)
                 
                 # 인기도 점수 계산
                 total_interactions = data['total_likes'] + data['total_bookmarks'] + data['total_clicks']
@@ -334,9 +453,55 @@ class BatchProcessor:
                 logger.error(f"❌ Failed to process place {place_key}: {str(e)}")
                 self.stats['errors'] += 1
                 continue
-        
+
+        logger.info(f"✅ Completed place vector generation for {len(place_vectors)} places")
+
+        # 3. 사용자별 벡터 생성 (장소 벡터 완성 후)
+        user_vectors = {}
+        logger.info(f"👤 Generating vectors for {len(user_data)} users")
+        for user_id, data in user_data.items():
+            try:
+                # 개선된 시간 가중치 벡터 생성
+                vector = self._generate_time_weighted_user_vector(user_id, data, place_vectors)
+
+                # 행동 점수 계산 (0-100 스케일)
+                total_actions = len(data['actions'])
+                like_score = min((data['total_likes'] / max(total_actions, 1)) * 100, 100)
+                bookmark_score = min((data['total_bookmarks'] / max(total_actions, 1)) * 100, 100)
+                click_score = min((data['total_clicks'] / max(total_actions, 1)) * 100, 100)
+
+                # 다양성 점수 (방문한 카테고리 수 기반)
+                diversity_score = min(len(data['categories_visited']) * 10, 100)
+
+                user_vectors[user_id] = {
+                    'user_id': user_id,
+                    'behavior_vector': vector,
+                    'like_score': round(like_score, 2),
+                    'bookmark_score': round(bookmark_score, 2),
+                    'click_score': round(click_score, 2),
+                    'dwell_time_score': 0.0,  # 기본값 설정
+                    'total_actions': total_actions,
+                    'total_likes': data['total_likes'],
+                    'total_bookmarks': data['total_bookmarks'],
+                    'total_clicks': data['total_clicks'],
+                    'last_action_date': datetime.now()
+                }
+
+            except Exception as e:
+                logger.error(f"❌ Failed to process user {user_id}: {str(e)}")
+                self.stats['errors'] += 1
+                continue
+
+        # 캐시 효율성 통계
+        total_cache_entries = len(self.bert_encoding_cache)
+        cache_hit_ratio = 0
+        if hasattr(self, '_cache_hits') and hasattr(self, '_cache_attempts'):
+            cache_hit_ratio = (self._cache_hits / max(self._cache_attempts, 1)) * 100
+
         logger.info(f"✅ Generated vectors for {len(user_vectors)} users and {len(place_vectors)} places")
-        
+        logger.info(f"🔥 BERT encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
+        logger.info(f"⏰ Time-weighted vectors: {self.stats['time_weighted_users']} users, Fallback: {self.stats['fallback_users']} users")
+
         self.stats['processed_users'] = len(user_vectors)
         self.stats['processed_places'] = len(place_vectors)
         
