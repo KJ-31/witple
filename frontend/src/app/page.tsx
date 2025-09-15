@@ -1,9 +1,9 @@
 'use client'
 
-import React, { useState, FormEvent, useEffect, useCallback, useRef } from 'react'
-import Link from 'next/link'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
+import BubbleAnimation from '../components/BubbleAnimation'
 import { BottomNavigation } from '../components'
 import { trackClick } from '../utils/actionTracker'
 import { useActionTrackerSession } from '../hooks/useActionTrackerSession'
@@ -14,196 +14,162 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [loading, setLoading] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
-  const [page, setPage] = useState(0)
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const loadingRef = useRef(false)
+  const [userInfo, setUserInfo] = useState<{ name: string, preferences: any } | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
-  // 필터링 상태
-  const [selectedRegion, setSelectedRegion] = useState<string>('')
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
-  const [regions, setRegions] = useState<string[]>([])
-  const [categories, setCategories] = useState<Array<{ id: string, name: string, description: string }>>([])
-  const [showFilters, setShowFilters] = useState(false)
+  // 사용자 정보 및 여행 취향 로드 함수
+  const loadUserInfo = useCallback(async () => {
+    if (!session || !(session as any).backendToken) {
+      setUserInfo(null)
+      return
+    }
 
-  // 검색 결과 상태
-  const [searchResults, setSearchResults] = useState<any[]>([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [showSearchResults, setShowSearchResults] = useState(false)
-  const [searchError, setSearchError] = useState<string | null>(null)
+    // 기본 사용자 정보 설정 (세션 기반)
+    const defaultUserInfo = {
+      name: session.user?.name || '사용자',
+      preferences: null
+    }
+    setUserInfo(defaultUserInfo)
 
-
-  // 추천 도시 데이터 로드 함수 (로그인 상태에 따라 다른 데이터 로드)
-  const loadRecommendedCities = useCallback(async (pageNum: number, forceSession?: any) => {
-    if (loadingRef.current) return
-
-    loadingRef.current = true
-    setLoading(true)
     try {
-      let data: CitySection[], hasMore: boolean
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
-      // 세션 상태를 명시적으로 전달받거나 현재 세션 사용
-      const currentSession = forceSession !== undefined ? forceSession : session
+      // 2초 타임아웃으로 빠른 실패 처리
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('API 요청 타임아웃')), 2000)
+      )
 
-      // 로그인 상태에 따라 다른 API 사용
-      if (currentSession) {
-        const result = await fetchPersonalizedRegionCategories(5) // 5개 지역
-        data = result.data
-        hasMore = result.hasMore
+      // 사용자 기본 정보 가져오기
+      const userResponsePromise = fetch(`${API_BASE_URL}/api/v1/profile/me`, {
+        headers: {
+          'Authorization': `Bearer ${(session as any).backendToken}`
+        }
+      })
+
+      const userResponse = await Promise.race([userResponsePromise, timeoutPromise]) as Response
+
+      if (userResponse.ok) {
+        try {
+          const userData = await userResponse.json()
+
+          // Profile API에서 이미 preferences 정보를 포함하므로 별도 호출 불필요
+          // userData에 이미 persona, priority, accommodation, exploration이 포함되어 있음
+          const preferences = {
+            persona: userData.persona,
+            priority: userData.priority,
+            accommodation: userData.accommodation,
+            exploration: userData.exploration
+          }
+
+          const newUserInfo = {
+            name: userData.name || defaultUserInfo.name,
+            preferences: preferences
+          }
+
+          setUserInfo(newUserInfo)
+
+          // 사용자 정보 설정 후 바로 선호도 체크 (추가 렌더링 방지)
+          setTimeout(() => checkUserPreferences(preferences), 0)
+        } catch (jsonError) {
+          console.warn('사용자 프로필 JSON 파싱 오류:', jsonError)
+          // JSON 파싱 실패 시 기본 정보 유지
+        }
       } else {
-        const result = await fetchCitiesByCategory(pageNum, 5) // 기존 고정 데이터
-        data = result.data
-        hasMore = result.hasMore
+        console.warn(`사용자 프로필 정보 로드 실패 (${userResponse.status}): API 서버 오류 또는 권한 없음`)
+        // API 오류 시에도 기본 정보는 유지됨 (이미 설정함)
       }
-
-      if (pageNum === 0) {
-        setCitySections(data)
-      } else {
-        setCitySections(prev => [...prev, ...data])
-      }
-
-      setHasMore(hasMore)
-      setPage(pageNum)
     } catch (error) {
-      console.error('데이터 로드 오류:', error)
-    } finally {
-      setLoading(false)
-      loadingRef.current = false
+      console.warn('사용자 정보 로드 전체 오류:', error instanceof Error ? error.message : String(error))
+      // 전체 오류 시에도 기본 정보는 유지됨 (이미 설정함)
     }
   }, [session])
 
-  // 필터 데이터 로드 함수
-  const loadFilterData = useCallback(async () => {
-    try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-
-      // 지역 목록 로드
-      const regionsResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/regions`)
-      if (regionsResponse.ok) {
-        const regionsData = await regionsResponse.json()
-        setRegions(regionsData.regions)
-      }
-
-      // 카테고리 목록 로드
-      const categoriesResponse = await fetch(`${API_BASE_URL}/api/v1/attractions/categories`)
-      if (categoriesResponse.ok) {
-        const categoriesData = await categoriesResponse.json()
-        setCategories(categoriesData.categories)
-      }
-    } catch (error) {
-      console.error('필터 데이터 로드 오류:', error)
+  // 추천 도시 데이터 로드 함수 (단순화 + 타임아웃)
+  const loadRecommendedCities = useCallback(async (currentUserInfo?: { name: string, preferences: any } | null) => {
+    if (loading) {
+      console.log('이미 로딩 중이므로 중복 요청 방지')
+      return
     }
-  }, [])
 
-  // 필터링된 관광지 로드 함수
-  const loadFilteredAttractions = useCallback(async (pageNum: number) => {
-    if (loadingRef.current) return
-
-    loadingRef.current = true
+    console.log('추천 데이터 로드 시작 - 세션:', !!session)
     setLoading(true)
+
+    // 10초 타임아웃 설정 (개인화 추천 벡터 계산 시간 고려)
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('API 요청 타임아웃')), 10000)
+    )
+
     try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const dataPromise = session
+        ? fetchPersonalizedRegionCategories(2)
+        : fetchCitiesByCategory(0, 2)
 
-      let filteredCitySections: CitySection[] = []
+      const result = await Promise.race([dataPromise, timeoutPromise]) as { data: CitySection[] }
 
-      // 지역만 선택된 경우: 카테고리별로 구분된 섹션 표시
-      if (selectedRegion && !selectedCategory) {
-        const params = new URLSearchParams({
-          region: selectedRegion,
-          page: pageNum.toString(),
-          limit: '8'
-        })
+      // 데이터 처리 개선 - categorySections 그대로 사용
+      const processedData = result.data.map(section => {
+        // categorySections가 있으면 그대로 사용 (백엔드에서 이미 처리됨)
+        if (section.categorySections && section.categorySections.length > 0) {
+          console.log(`섹션 ${section.cityName}: 카테고리별 ${section.categorySections.length}개 카테고리`)
 
-        const url = `${API_BASE_URL}/api/v1/attractions/filtered-by-category?${params}`
-        console.log('Filtered by category URL:', url)
-
-        const response = await fetch(url)
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-
-        const result = await response.json()
-
-        // 카테고리별 섹션을 CitySection 형식으로 변환
-        result.categorySections.forEach((categorySection: any, index: number) => {
-          filteredCitySections.push({
-            id: `category-${selectedRegion}-${categorySection.category}-${index}`,
-            cityName: selectedRegion,
-            description: `${selectedRegion}의 ${categorySection.categoryName}`,
-            region: selectedRegion,
-            attractions: categorySection.attractions,
-            recommendationScore: 90 - index * 5
+          // 각 카테고리의 attractions 수 로깅
+          section.categorySections.forEach(cat => {
+            console.log(`  - ${cat.categoryName}: ${cat.attractions?.length || 0}개`)
           })
-        })
 
-        setHasMore(result.hasMore)
-      }
-      // 지역과 카테고리 모두 선택된 경우: 기존 방식 사용
-      else if (selectedRegion && selectedCategory) {
-        const params = new URLSearchParams({
-          page: pageNum.toString(),
-          limit: '3'
-        })
-
-        params.append('region', selectedRegion)
-        params.append('category', selectedCategory)
-
-        const url = `${API_BASE_URL}/api/v1/attractions/filtered?${params}`
-        console.log('Filtered attractions URL:', url)
-
-        const response = await fetch(url)
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-
-        const result = await response.json()
-
-        // 지역별로 그룹화
-        const groupedByRegion: { [key: string]: any[] } = {}
-
-        result.attractions.forEach((attraction: any) => {
-          const region = attraction.region || '기타'
-          if (!groupedByRegion[region]) {
-            groupedByRegion[region] = []
+          return {
+            ...section,
+            attractions: [], // categorySections를 사용하므로 비워둠
+            categorySections: section.categorySections
           }
-          groupedByRegion[region].push(attraction)
-        })
+        }
 
-        // 각 지역별로 CitySection 생성
-        Object.entries(groupedByRegion).forEach(([region, attractions], index) => {
-          const cityName = attractions[0]?.city?.name || region
-          filteredCitySections.push({
-            id: `filtered-${region}-${index}`,
-            cityName: cityName,
-            description: `${region}의 ${categories.find(c => c.id === selectedCategory)?.name || selectedCategory}`,
-            region: region,
-            attractions: attractions.slice(0, 8),
-            recommendationScore: 85 - index * 5
-          })
-        })
+        // attractions만 있는 경우의 fallback 처리
+        let attractions = section.attractions || []
 
-        setHasMore(result.hasMore)
-      }
+        // 별점 필터링 제거 - 모든 데이터 표시
+        let filteredAttractions = attractions.slice(0, 8) // 상위 8개만 표시
 
-      if (pageNum === 0) {
-        setCitySections(filteredCitySections)
+        console.log(`섹션 ${section.cityName}: 일반 형태 ${attractions.length}개 → 필터링 후 ${filteredAttractions.length}개`)
+
+        return {
+          ...section,
+          attractions: filteredAttractions,
+          categorySections: undefined
+        }
+      })
+
+      console.log('추천 데이터 로드 완료:', processedData.length, '개 섹션')
+
+      // 모든 섹션이 비어있는지 체크 (categorySections 포함)
+      const totalAttractions = processedData.reduce((sum, section) => {
+        if (section.categorySections && section.categorySections.length > 0) {
+          // categorySections가 있으면 해당 attractions 수 계산
+          return sum + section.categorySections.reduce((catSum, cat) =>
+            catSum + (cat.attractions?.length || 0), 0)
+        }
+        return sum + (section.attractions?.length || 0)
+      }, 0)
+
+      console.log('총 추천 장소 수:', totalAttractions)
+
+      if (totalAttractions === 0) {
+        console.warn('필터링 후 모든 데이터가 사라짐, 원본 데이터로 대체')
+        // 원본 데이터를 그대로 사용 (백엔드에서 이미 처리됨)
+        setCitySections(result.data)
       } else {
-        setCitySections(prev => [...prev, ...filteredCitySections])
+        setCitySections(processedData)
       }
-
-      setPage(pageNum)
     } catch (error) {
-      console.error('필터링된 데이터 로드 오류:', error)
+      console.warn('데이터 로드 오류:', error instanceof Error ? error.message : String(error))
+      setCitySections([])
     } finally {
       setLoading(false)
-      loadingRef.current = false
     }
-  }, [selectedRegion, selectedCategory, categories])
+  }, [session]) // userInfo 의존성 제거
 
-  // 구글 로그인 후 선호도 체크
-  const checkUserPreferences = useCallback(async () => {
+  // 사용자 선호도 체크 (profile API 데이터 기반)
+  const checkUserPreferences = useCallback(async (userPreferences?: any) => {
     if (!session || !(session as any).backendToken) {
       return
     }
@@ -214,383 +180,140 @@ export default function Home() {
         localStorage.removeItem('preferences_completed')
       }
 
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      
-      const response = await fetch(`${API_BASE_URL}/api/v1/users/preferences/check`, {
-        headers: {
-          'Authorization': `Bearer ${(session as any).backendToken}`
-        }
-      })
+      // profile API에서 받은 preferences 데이터로 확인
+      const hasPreferences = userPreferences && (
+        userPreferences.persona ||
+        userPreferences.priority ||
+        userPreferences.accommodation ||
+        userPreferences.exploration
+      )
 
-      if (response.ok) {
-        const data = await response.json()
-        
-        if (!data.has_preferences) {
-          // 선호도가 없으면 설정 페이지로 이동
-          router.push('/preferences')
-          return
-        } else {
-          // 선호도가 있으면 완료 플래그 저장
-          localStorage.setItem('preferences_completed', 'true')
-        }
+      if (!hasPreferences) {
+        // 선호도가 없으면 설정 페이지로 이동
+        console.log('사용자 선호도 설정 필요, 설정 페이지로 이동')
+        router.push('/preferences')
+        return
+      } else {
+        // 선호도가 있으면 완료 플래그 저장
+        localStorage.setItem('preferences_completed', 'true')
+        console.log('사용자 선호도 설정 완료 확인')
       }
     } catch (error) {
-      console.error('선호도 체크 오류:', error)
+      console.warn('선호도 체크 오류:', error instanceof Error ? error.message : String(error))
+      // 에러 시에도 메인 페이지는 정상 작동
     }
   }, [session, router])
 
-  // 필터 데이터만 초기 로드
+  // 세션 상태 변경 시 초기화 플래그 리셋 (실제 사용자 변경시에만)
   useEffect(() => {
-    loadFilterData()
-  }, [loadFilterData])
-
-  // 세션 상태가 완전히 확정된 후에만 추천 데이터 로드
-  useEffect(() => {
-    // 세션이 로딩 중이 아닐 때만 데이터 로드
+    // 로그인/로그아웃 시에만 리셋 (이메일이 실제로 변경되는 경우만)
     if (status !== 'loading') {
-      loadRecommendedCities(0, session)
-    }
-  }, [status, session, loadRecommendedCities])
+      const currentEmail = session?.user?.email
+      const previousEmail = sessionStorage.getItem('previous_user_email')
 
-  // 세션 상태가 변경될 때마다 선호도 체크
-  useEffect(() => {
-    if (status === 'authenticated' && session) {
-      checkUserPreferences()
-    }
-  }, [status, session, checkUserPreferences])
-
-  // 필터 변경 시 데이터 다시 로드
-  useEffect(() => {
-    if (selectedRegion || selectedCategory) {
-      loadFilteredAttractions(0)
-    } else {
-      // 필터가 없을 때는 세션 상태가 확정된 후에만 추천 데이터 로드
-      if (status !== 'loading') {
-        loadRecommendedCities(0, session)
+      if (previousEmail && previousEmail !== currentEmail) {
+        // 실제로 다른 사용자로 로그인한 경우에만 리셋
+        setIsInitialized(false)
+        sessionStorage.setItem('previous_user_email', currentEmail || '')
+      } else if (!previousEmail && currentEmail) {
+        // 첫 로그인인 경우 이메일만 저장하고 리셋하지 않음
+        sessionStorage.setItem('previous_user_email', currentEmail)
+      } else if (!currentEmail) {
+        // 로그아웃한 경우
+        sessionStorage.removeItem('previous_user_email')
+        setIsInitialized(false)
       }
     }
-  }, [selectedRegion, selectedCategory, status, session, loadFilteredAttractions, loadRecommendedCities])
+  }, [session?.user?.email, status])
 
-  // 필터 패널 외부 클릭 시 닫기
+  // 사용자 정보 로드 및 추천 데이터 로드 (순차 처리) - 한 번만 실행
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Element
-      if (showFilters &&
-        !target.closest('.filter-panel') &&
-        !target.closest('input[placeholder="어디로 떠나볼까요?"]')) {
-        setShowFilters(false)
-      }
-    }
+    if (status !== 'loading' && !isInitialized) {
+      setIsInitialized(true)
+      console.log('초기화 시작 - 세션:', !!session)
 
-    if (showFilters) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
+      if (session) {
+        // 로그인 상태: 사용자 정보 먼저 로드 후 추천 데이터 로드
+        const initializeUser = async () => {
+          try {
+            // 먼저 사용자 정보를 로드하고, 그 정보를 기반으로 선호도 체크
+            await loadUserInfo()
 
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showFilters])
+            // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
+            await loadRecommendedCities()
 
-  // 무한 스크롤 감지
-  const lastElementRef = useCallback((node: HTMLDivElement | null) => {
-    if (loadingRef.current) return
-    if (observerRef.current) observerRef.current.disconnect()
-
-    observerRef.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
-        // 필터가 적용된 상태가 아닐 때만 무한 스크롤 동작
-        if (!selectedRegion && !selectedCategory) {
-          loadRecommendedCities(page + 1)
+            console.log('로그인 사용자 초기화 완료')
+          } catch (error) {
+            console.warn('로그인 사용자 초기화 오류:', error)
+          }
         }
+
+        initializeUser()
+      } else {
+        // 비로그인 상태: 추천 데이터만 로드
+        loadRecommendedCities().then(() => {
+          console.log('비로그인 사용자 초기화 완료')
+        }).catch(error => {
+          console.warn('비로그인 사용자 초기화 오류:', error)
+        })
       }
-    })
-
-    if (node) observerRef.current.observe(node)
-  }, [hasMore, page, selectedRegion, selectedCategory, loadRecommendedCities])
-
-  const handleSearch = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!searchQuery.trim()) return
-
-    setIsSearching(true)
-    setSearchError(null)
-
-    try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const response = await fetch(`${API_BASE_URL}/api/v1/attractions/search?q=${encodeURIComponent(searchQuery)}`)
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const results = await response.json()
-
-      // 중복 제거: 같은 이름과 주소를 가진 항목들을 제거
-      const uniqueResults = (results.results || []).filter((item: any, index: number, array: any[]) => {
-        return array.findIndex((other: any) =>
-          other.name === item.name &&
-          other.address === item.address
-        ) === index
-      })
-
-      setSearchResults(uniqueResults)
-      setShowSearchResults(true)
-
-    } catch (error) {
-      console.error('검색 오류:', error)
-      setSearchError('검색 중 오류가 발생했습니다. 다시 시도해주세요.')
-    } finally {
-      setIsSearching(false)
     }
-  }
-
-  // 검색 결과 숨기기 함수
-  const handleClearSearch = () => {
-    setSearchQuery('')
-    setSearchResults([])
-    setShowSearchResults(false)
-    setSearchError(null)
-  }
+  }, [status, isInitialized])
 
 
   return (
-    <div className="min-h-screen bg-[#0B1220] text-slate-200 overflow-y-auto no-scrollbar pb-20">
-      {/* Logo */}
-      <div className="text-center mt-20 mb-8">
-        <h1 className="text-5xl font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
-      </div>
-
-      {/* Search Bar */}
-      <div className="px-4 mb-16 mt-20">
-        <form onSubmit={handleSearch} className="relative w-[90%] mx-auto">
-          <input
-            type="text"
-            placeholder="어디로 떠나볼까요?"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setShowFilters(true)}
-            className="
-              w-full px-6 pr-12 py-[1.14rem] text-lg
-              rounded-3xl
-              bg-[#12345D]/70
-              text-slate-200 placeholder-[#6FA0E6]
-              ring-1 ring-[#1F3C7A] shadow-xl
-              focus:outline-none focus:ring-2 focus:ring-[#3E68FF]/60
-            "
+    <div className="min-h-screen bg-[#0B1220] text-slate-200 pb-20">
+      {/* Header with Logo and Chatbot */}
+      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between pr-4 pl-6 py-4 mb-10">
+        <h1 className="text-[2.75rem] font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
+        {/* <button
+          onClick={() => {
+            const chatbotEvent = new CustomEvent('openChatbot');
+            window.dispatchEvent(chatbotEvent);
+          }}
+          className="w-12 h-12 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+        >
+          <img
+            src="/images/chat_icon.svg"
+            alt="챗봇"
+            className="w-8 h-8"
           />
-          <button
-            type="submit"
-            disabled={isSearching}
-            className="absolute right-5 top-1/2 -translate-y-1/2 p-1 text-[#6FA0E6] hover:text-white transition disabled:opacity-50"
-            aria-label="검색"
-          >
-            {isSearching ? (
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#6FA0E6]"></div>
-            ) : (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            )}
-          </button>
-        </form>
+        </button> */}
       </div>
 
-      {/* Search Results */}
-      {showSearchResults && (
-        <div className="px-4 mb-8">
-          <div className="w-[90%] mx-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white">
-                &apos;{searchQuery}&apos; 검색 결과 ({searchResults.length}개)
-              </h2>
-              <button
-                onClick={handleClearSearch}
-                className="text-[#6FA0E6] hover:text-white transition-colors text-sm"
-              >
-                ✕ 닫기
-              </button>
-            </div>
-
-            {/* 스크롤 가능한 검색 결과 컨테이너 - 화면의 절반 높이로 제한 */}
-            <div
-              className="overflow-y-auto bg-[#0F1A31]/30 rounded-2xl p-4 scrollbar-thin scrollbar-thumb-[#3E68FF] scrollbar-track-transparent"
-              style={{
-                height: '50vh',
-                maxHeight: '400px',
-                scrollbarWidth: 'thin',
-                scrollbarColor: '#3E68FF transparent'
-              }}
-            >
-              {searchError && (
-                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-4">
-                  <p className="text-red-300">{searchError}</p>
-                </div>
-              )}
-
-              {searchResults.length === 0 && !isSearching && !searchError ? (
-                <div className="text-center py-8">
-                  <div className="text-6xl mb-4">🔍</div>
-                  <p className="text-gray-400 text-lg mb-2">검색 결과가 없습니다</p>
-                  <p className="text-gray-500 text-sm">다른 키워드로 검색해보세요</p>
-                </div>
-              ) : (
-                <div className="space-y-4 pr-2">
-                  {searchResults.map((result, index) => (
-                    <div
-                      key={`${result.name}-${result.address}-${index}`}
-                      onClick={() => router.push(`/attraction/${result.id}`)}
-                      className="bg-gray-800/50 hover:bg-gray-700/50 p-4 rounded-2xl cursor-pointer transition-colors border border-gray-700/50"
-                    >
-                      <div className="flex items-start space-x-4">
-                        {/* 카테고리 아이콘 */}
-                        <div className="flex-shrink-0 w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                          <span className="text-2xl">
-                            {result.category === 'nature' && '🌲'}
-                            {result.category === 'restaurants' && '🍽️'}
-                            {result.category === 'shopping' && '🛍️'}
-                            {result.category === 'accommodation' && '🏨'}
-                            {result.category === 'humanities' && '🏛️'}
-                            {result.category === 'leisure_sports' && '⚽'}
-                          </span>
-                        </div>
-
-                        {/* 정보 */}
-                        <div className="flex-1 min-w-0">
-                          <h3 className="text-white font-semibold text-lg mb-1 truncate">
-                            {result.name}
-                          </h3>
-                          <p className="text-gray-300 text-sm mb-2 line-clamp-2">
-                            {result.overview}
-                          </p>
-                          <div className="flex items-center space-x-4 text-xs text-gray-400">
-                            <div className="flex items-center space-x-1">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
-                              <span>{result.address}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                              </svg>
-                              <span className="capitalize">{result.category}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+      {/* Main Card 섹션 */}
+      {citySections.length > 0 && (
+        <div className="px-5 mb-12">
+          <MainCard
+            attraction={citySections[0]?.categorySections?.[0]?.attractions?.[0] || citySections[0]?.attractions?.[0]}
+            onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
+          />
         </div>
       )}
 
-      {/* Filter Section - 검색창 포커스 시에만 표시 */}
-      {showFilters && !showSearchResults && (
-        <div className="px-4 mb-16">
-          <div className="w-[90%] mx-auto">
-            {/* Filter Panel */}
-            <div className="bg-[#0F1A31]/50 rounded-2xl p-4 space-y-4 filter-panel">
-              {/* Clear Filters Button */}
-              {(selectedRegion || selectedCategory) && (
-                <div className="flex justify-end mb-2">
-                  <button
-                    onClick={() => {
-                      setSelectedRegion('')
-                      setSelectedCategory('')
-                      // 필터 초기화 후 로그인 상태에 따라 적절한 데이터 로드
-                      setTimeout(() => {
-                        loadRecommendedCities(0)
-                      }, 100)
-                    }}
-                    className="text-[#6FA0E6] hover:text-white text-sm transition-colors"
-                  >
-                    필터 초기화
-                  </button>
-                </div>
-              )}
-              {/* Region Filter */}
-              <div>
-                <label className="block text-[#94A9C9] text-sm font-medium mb-2">지역</label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setSelectedRegion('')}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${!selectedRegion
-                      ? 'bg-[#3E68FF] text-white'
-                      : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                      }`}
-                  >
-                    전체
-                  </button>
-                  {regions.map((region) => (
-                    <button
-                      key={region}
-                      onClick={() => setSelectedRegion(region)}
-                      className={`px-3 py-1 rounded-full text-sm transition-colors ${selectedRegion === region
-                        ? 'bg-[#3E68FF] text-white'
-                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                        }`}
-                    >
-                      {region}
-                    </button>
-                  ))}
-                </div>
-              </div>
+      {/* 추천 도시별 명소 섹션 (2개 고정) */}
+      <main className="pl-[20px] pr-0 pb-24 space-y-12">
+        {citySections.map((citySection, index) => {
+          // 사용자 이름 기반 제목 생성
+          let personalizedTitle = citySection.description
+          if (session) {
+            const userName = userInfo?.name || (session.user?.name) || '사용자'
+            personalizedTitle = `${userName}님을 위한 장소를 추천드려요.`
+          }
 
-              {/* Category Filter */}
-              <div>
-                <label className="block text-[#94A9C9] text-sm font-medium mb-2">카테고리</label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setSelectedCategory('')}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${!selectedCategory
-                      ? 'bg-[#3E68FF] text-white'
-                      : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                      }`}
-                  >
-                    전체
-                  </button>
-                  {categories.map((category) => (
-                    <button
-                      key={category.id}
-                      onClick={() => setSelectedCategory(category.id)}
-                      className={`px-3 py-1 rounded-full text-sm transition-colors ${selectedCategory === category.id
-                        ? 'bg-[#3E68FF] text-white'
-                        : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
-                        }`}
-                    >
-                      {category.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 추천 도시별 명소 섹션 (무한 스크롤) - 검색 결과가 표시될 때는 숨김 */}
-      {!showSearchResults && (
-        <main className="px-4 pb-24 space-y-12">
-          {citySections.map((citySection, index) => (
-            <div
-              key={`${citySection.id}-${index}`}
-              ref={index === citySections.length - 1 ? lastElementRef : null}
-            >
+          return (
+            <div key={`${citySection.id}-${index}`}>
               <SectionCarousel
-                title={`${citySection.description}`}
+                title={personalizedTitle}
                 cityName={citySection.cityName}
                 attractions={citySection.attractions}
                 categorySections={citySection.categorySections}
                 onAttractionClick={(attractionId) => {
                   // 🎯 추천 카드 클릭 추적
                   const attraction = citySection.attractions?.find(a => a.id === attractionId) ||
-                                    citySection.categorySections?.flatMap(cs => cs.attractions || [])
-                                      .find(a => a.id === attractionId)
-                  
+                    citySection.categorySections?.flatMap(cs => cs.attractions || [])
+                      .find(a => a.id === attractionId)
+
                   trackClick(attractionId, {
                     attraction_name: attraction?.name || 'Unknown',
                     category: attraction?.category || citySection.cityName,
@@ -603,42 +326,36 @@ export default function Home() {
                 }}
               />
             </div>
-          ))}
+          )
+        })}
 
-          {/* 로딩 인디케이터 */}
-          {loading && (
-            <div className="flex justify-center items-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
-              <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
-            </div>
-          )}
+        {/* 로딩 인디케이터 */}
+        {loading && (
+          <div className="flex justify-center items-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+            <span className="ml-2 text-[#94A9C9]">추천 여행지를 불러오는 중...</span>
+          </div>
+        )}
 
-          {/* 더 이상 데이터가 없을 때 */}
-          {!hasMore && citySections.length > 0 && (
-            <div className="text-center py-8">
-              <p className="text-[#6FA0E6] text-lg">모든 추천 여행지를 확인했습니다 ✨</p>
-              <p className="text-[#94A9C9] text-sm mt-2">새로운 여행지가 추가되면 알려드릴게요!</p>
-            </div>
-          )}
-
-          {/* 데이터가 없을 때 */}
-          {!loading && citySections.length === 0 && (
-            <div className="text-center py-16">
-              {session ? (
-                <>
-                  <p className="text-[#94A9C9] text-lg mb-4">맞춤 추천을 준비하고 있어요!</p>
-                  <p className="text-[#6FA0E6] text-sm">선호도 설정이나 여행지 탐색 후 다시 확인해보세요 ✨</p>
-                </>
-              ) : (
-                <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
-              )}
-            </div>
-          )}
-        </main>
-      )}
-
+        {/* 데이터가 없을 때 */}
+        {!loading && citySections.length === 0 && (
+          <div className="text-center py-16">
+            {session ? (
+              <>
+                <p className="text-[#94A9C9] text-lg mb-4">
+                  {userInfo?.name ? `${userInfo.name}님을 위한 맞춤 추천을 준비하고 있어요!` : '맞춤 추천을 준비하고 있어요!'}
+                </p>
+                <p className="text-[#6FA0E6] text-sm">선호도 설정이나 여행지 탐색 후 다시 확인해보세요 ✨</p>
+              </>
+            ) : (
+              <p className="text-[#94A9C9] text-lg">추천할 여행지를 준비 중입니다...</p>
+            )}
+          </div>
+        )}
+      </main>
 
       <BottomNavigation />
+      <BubbleAnimation />
     </div>
   )
 }
@@ -653,7 +370,7 @@ function SectionCarousel({
 }: {
   title: string
   cityName: string
-  attractions: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }[]
+  attractions: { id: string; name: string; description: string; imageUrl: string; category: string }[]
   categorySections?: Array<{ category: string; categoryName: string; attractions: any[]; total: number }>
   onAttractionClick: (attractionId: string) => void
 }) {
@@ -662,7 +379,7 @@ function SectionCarousel({
       {/* 도시 제목과 추천 점수 */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-2xl md:text-3xl font-semibold text-[#94A9C9]">
+          <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
             {title}
           </h2>
           {/* <div className="flex items-center mt-2 space-x-2">
@@ -677,17 +394,17 @@ function SectionCarousel({
           {categorySections.map((categorySection, categoryIndex) => (
             <div key={`${categorySection.category}-${categoryIndex}`}>
               {/* 카테고리 제목 */}
-              <div className="flex items-center justify-between mb-4">
+              {/* <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-semibold text-[#3E68FF]">
                   {categorySection.categoryName}
                 </h3>
                 <span className="text-sm text-[#6FA0E6]">
                   {categorySection.total}개 장소
                 </span>
-              </div>
+              </div> */}
 
               {/* 카테고리별 장소 캐러셀 */}
-              <div className="relative -mx-4 px-4">
+              <div className="relative -ml-[21px] pl-[21px] pr-0">
                 <div
                   className="
                     flex items-stretch gap-4
@@ -706,16 +423,15 @@ function SectionCarousel({
                   ))}
                 </div>
 
-                {/* 좌/우 가장자리 페이드 */}
+                {/* 좌쪽 가장자리 페이드 */}
                 <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#0B1220] to-transparent" />
               </div>
             </div>
           ))}
         </div>
       ) : (
         /* 기존 방식: 모든 장소를 하나의 캐러셀로 표시 */
-        <div className="relative -mx-4 px-4">
+        <div className="relative -ml-[21px] pl-[21px] pr-0">
           <div
             className="
               flex items-stretch gap-4
@@ -734,9 +450,8 @@ function SectionCarousel({
             ))}
           </div>
 
-          {/* 좌/우 가장자리 페이드 */}
+          {/* 좌쪽 가장자리 페이드 */}
           <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#0B1220] to-transparent" />
         </div>
       )}
     </section>
@@ -748,27 +463,34 @@ function AttractionCard({
   attraction,
   onAttractionClick,
 }: {
-  attraction: { id: string; name: string; description: string; imageUrl: string; rating: number; category: string }
+  attraction: { id: string; name: string; description: string; imageUrl: string; category: string }
   onAttractionClick: (attractionId: string) => void
 }) {
+  const categoryColor = getCategoryColor(attraction.category?.trim())
+
+  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
+  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
+    ? '#E8EAFF'
+    : '#0D121C'
+
   return (
     <figure
       className="
         snap-start shrink-0
-        rounded-[28px] overflow-hidden
-        bg-[#0F1A31] ring-1 ring-white/5
-        w-[78%] xs:w-[70%] sm:w-[320px]
-        cursor-pointer hover:ring-[#3E68FF]/50 transition-all duration-300
-        group
+        rounded-lg overflow-hidden
+        shadow-lg
+        w-[200px] h-[200px]
+        cursor-pointer transition-all duration-300
+        group relative
       "
       onClick={() => onAttractionClick(attraction.id)}
     >
       {/* 이미지 영역 */}
-      <div className="aspect-[4/3] relative overflow-hidden">
+      <div className="relative w-full h-full overflow-hidden">
         {attraction.imageUrl && attraction.imageUrl !== "/images/default.jpg" && attraction.imageUrl !== null ? (
           <>
             {/* 이미지 로딩 인디케이터 */}
-            <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+            <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
             </div>
 
@@ -794,48 +516,50 @@ function AttractionCard({
 
             {/* 이미지 로드 실패 시 대체 UI */}
             <div
-              className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center"
+              className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center"
               style={{ display: 'none' }}
             >
-              <span className="text-white text-lg opacity-70 text-center px-2">
+              <span className="text-gray-600 text-lg text-center px-2">
                 {attraction.name}
               </span>
             </div>
           </>
         ) : (
           /* 이미지가 없는 경우 기본 UI */
-          <div className="w-full h-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-            <span className="text-white text-lg opacity-70 text-center px-2">
+          <div className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center">
+            <span className="text-gray-600 text-lg text-center px-2">
               {attraction.name}
             </span>
           </div>
         )}
-        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300"></div>
 
-        {/* 카테고리 배지 */}
+        {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
-          <span className="px-2 py-1 text-xs bg-black/50 text-white rounded-full backdrop-blur-sm">
+          <span
+            className="px-3 py-1 text-xs rounded-full font-medium"
+            style={{
+              backgroundColor: categoryColor,
+              color: textColor
+            }}
+          >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
           </span>
         </div>
 
-        {/* 평점 */}
-        <div className="absolute top-3 right-3 flex items-center bg-black/50 rounded-full px-2 py-1 backdrop-blur-sm">
-          <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-          </svg>
-          <span className="text-white text-xs font-medium">{attraction.rating}</span>
-        </div>
       </div>
 
-      {/* 명소 정보 */}
-      <div className="p-4">
-        <h3 className="font-semibold text-white text-lg mb-2 group-hover:text-[#3E68FF] transition-colors">
-          {attraction.name}
-        </h3>
-        <p className="text-[#94A9C9] text-sm line-clamp-2">
-          {attraction.description}
-        </p>
+      {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
+      <div className="absolute bottom-4 left-4 right-4">
+        <div
+          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          style={{
+            backgroundColor: categoryColor
+          }}
+        >
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+            {attraction.name}
+          </h3>
+        </div>
       </div>
     </figure>
   )
@@ -852,4 +576,125 @@ function getCategoryName(category: string): string {
     leisure_sports: '레저'
   }
   return categoryMap[category] || category
+}
+
+// 카테고리별 색상 반환 함수
+function getCategoryColor(category: string): string {
+  const colorMap: { [key: string]: string } = {
+    nature: '#3FC9FF',
+    humanities: '#3FC9FF',
+    leisure_sports: '#3FC9FF',
+    restaurants: '#FF3D00',
+    shopping: '#753FFF',
+    accommodation: '#FFD53F'
+  }
+  return colorMap[category] || '#3E68FF'
+}
+
+/** 메인 카드 컴포넌트 */
+function MainCard({
+  attraction,
+  onAttractionClick,
+}: {
+  attraction: { id: string; name: string; description: string; imageUrl: string; category: string }
+  onAttractionClick: (attractionId: string) => void
+}) {
+  if (!attraction) return null
+
+  const categoryColor = getCategoryColor(attraction.category?.trim())
+
+  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
+  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
+    ? '#E8EAFF'
+    : '#0D121C'
+  return (
+    <figure
+      className="
+        snap-start shrink-0
+        rounded-lg overflow-hidden
+        shadow-lg
+        w-full max-w-lg h-[200px]
+        cursor-pointer transition-all duration-300
+        group relative
+      "
+      onClick={() => onAttractionClick(attraction.id)}
+    >
+      {/* 이미지 영역 */}
+      <div className="relative w-full h-full overflow-hidden">
+        {attraction.imageUrl && attraction.imageUrl !== "/images/default.jpg" && attraction.imageUrl !== null ? (
+          <>
+            {/* 이미지 로딩 인디케이터 */}
+            <div className="absolute inset-0 bg-gray-200 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3E68FF]"></div>
+            </div>
+
+            <img
+              src={attraction.imageUrl}
+              alt={attraction.name}
+              className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
+              onLoad={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.opacity = '1';
+                const loadingIndicator = target.previousElementSibling as HTMLElement;
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+              }}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+                const loadingIndicator = target.previousElementSibling as HTMLElement;
+                if (loadingIndicator) loadingIndicator.style.display = 'none';
+                const fallback = target.nextElementSibling as HTMLElement;
+                if (fallback) fallback.style.display = 'flex';
+              }}
+            />
+
+            {/* 이미지 로드 실패 시 대체 UI */}
+            <div
+              className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center"
+              style={{ display: 'none' }}
+            >
+              <span className="text-gray-600 text-lg text-center px-2">
+                {attraction.name}
+              </span>
+            </div>
+          </>
+        ) : (
+          /* 이미지가 없는 경우 기본 UI */
+          <div className="w-full h-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center">
+            <span className="text-gray-600 text-lg text-center px-2">
+              {attraction.name}
+            </span>
+          </div>
+        )}
+
+        {/* 카테고리 배지 - 좌상단 */}
+        <div className="absolute top-3 left-3">
+          <span
+            className="px-3 py-1 text-xs rounded-full font-medium"
+            style={{
+              backgroundColor: categoryColor,
+              color: textColor
+            }}
+          >
+            {getCategoryName(attraction.category?.trim()) || attraction.category}
+          </span>
+        </div>
+
+      </div>
+
+      {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
+      <div className="absolute bottom-4 left-4 right-4">
+        <div
+          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          style={{
+            backgroundColor: categoryColor
+          }}
+        >
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+            {attraction.name}
+          </h3>
+        </div>
+      </div>
+    </figure>
+  )
 }

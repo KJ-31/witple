@@ -47,7 +47,31 @@ const getAuthToken = async (): Promise<string | null> => {
   }
 }
 
-// 실제 백엔드 추천 API에서 데이터 가져오기
+// 401 Unauthorized 에러 시 자동 로그아웃 처리
+const handleAuthError = async (response: Response) => {
+  if (response.status === 401) {
+    console.warn('토큰 만료 또는 인증 실패, 자동 로그아웃 처리')
+    
+    try {
+      // Next-auth 로그아웃
+      const { signOut } = await import('next-auth/react')
+      await signOut({ redirect: false })
+      
+      // 로컬 스토리지 클리어
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('preferences_completed')
+      
+      // 로그인 페이지로 리다이렉트
+      if (typeof window !== 'undefined') {
+        window.location.href = '/auth/signin'
+      }
+    } catch (error) {
+      console.error('로그아웃 처리 중 오류:', error)
+    }
+  }
+}
+
+// 실제 백엔드 추천 API에서 데이터 가져오기 (강화된 에러 처리)
 export const fetchRecommendations = async (
   limit: number = 60  // 더 많은 데이터로 안정적인 섹션 생성
 ): Promise<{ data: any[], hasMore: boolean }> => {
@@ -71,20 +95,38 @@ export const fetchRecommendations = async (
     
     const url = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?limit=${limit}`
     
-    const response = await fetch(url, {
+    // 3초 타임아웃으로 빠른 실패 처리
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('추천 API 요청 타임아웃')), 3000)
+    )
+
+    const fetchPromise = fetch(url, {
       method: 'GET',
       headers
     })
     
+    const response = await Promise.race([fetchPromise, timeoutPromise]) as Response
+    
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`)
+      let errorMessage = ''
+      try {
+        const errorText = await response.text()
+        errorMessage = errorText
+      } catch (textError) {
+        errorMessage = `HTTP ${response.status} 오류`
+      }
+      
+      console.warn(`추천 API HTTP 오류 (${response.status}):`, errorMessage)
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorMessage}`)
     }
     
-    const recommendations = await response.json()
-    
-    // 디버깅: 백엔드에서 받은 데이터 확인 (제거)
-    // console.log('백엔드 추천 데이터 샘플:', recommendations.slice(0, 3))
+    let recommendations
+    try {
+      recommendations = await response.json()
+    } catch (jsonError) {
+      console.error('추천 API 응답 JSON 파싱 오류:', jsonError)
+      throw new Error('API 응답 데이터 형식 오류')
+    }
     
     // 추천 데이터를 CitySection 형태로 변환
     const transformedData = transformRecommendationsToSections(recommendations)
@@ -94,9 +136,15 @@ export const fetchRecommendations = async (
       hasMore: false // 현재는 페이지네이션 없음
     }
   } catch (error) {
-    console.error('추천 API 호출 오류:', error)
+    console.warn('추천 API 호출 전체 오류:', error instanceof Error ? error.message : String(error))
     // API 오류 시 fallback으로 기존 API 시도
-    return await fetchRecommendedCitiesFallback()
+    try {
+      return await fetchRecommendedCitiesFallback()
+    } catch (fallbackError) {
+      console.warn('Fallback API도 실패:', fallbackError)
+      // 모든 API가 실패한 경우 빈 배열 반환
+      return { data: [], hasMore: false }
+    }
   }
 }
 
@@ -224,32 +272,53 @@ const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanit
   return categoryMap[tableName] || 'nature'
 }
 
-// 기존 API (fallback용)
+// 기존 API (fallback용) - 강화된 에러 처리
 const fetchRecommendedCitiesFallback = async (
   page: number = 0,
   limit: number = 3
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-    const response = await fetch(`${API_BASE_URL}/api/v1/attractions/cities?page=${page}&limit=${limit}`)
+    
+    // 2초 타임아웃 설정
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Fallback API 타임아웃')), 2000)
+    )
+
+    const fetchPromise = fetch(`${API_BASE_URL}/api/v1/attractions/cities?page=${page}&limit=${limit}`)
+    const response = await Promise.race([fetchPromise, timeoutPromise]) as Response
     
     if (!response.ok) {
+      let errorMessage = ''
+      try {
+        const errorText = await response.text()
+        errorMessage = errorText
+      } catch (textError) {
+        errorMessage = `HTTP ${response.status} 오류`
+      }
+      console.warn(`Fallback API HTTP 오류 (${response.status}):`, errorMessage)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
-    const result = await response.json()
+    let result
+    try {
+      result = await response.json()
+    } catch (jsonError) {
+      console.error('Fallback API 응답 JSON 파싱 오류:', jsonError)
+      throw new Error('Fallback API 응답 데이터 형식 오류')
+    }
     
     return {
-      data: result.data,
-      hasMore: result.hasMore
+      data: result.data || [],
+      hasMore: result.hasMore || false
     }
   } catch (error) {
-    console.error('Fallback API 호출 오류:', error)
+    console.warn('Fallback API 호출 오류:', error instanceof Error ? error.message : String(error))
     return { data: [], hasMore: false }
   }
 }
 
-// 개인화된 지역별 카테고리 추천 데이터 가져오기
+// 개인화된 지역별 카테고리 추천 데이터 가져오기 (강화된 에러 처리)
 export const fetchPersonalizedRegionCategories = async (
   limit: number = 5
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
@@ -273,55 +342,117 @@ export const fetchPersonalizedRegionCategories = async (
     
     const url = `${API_BASE_URL}/api/v1/recommendations/personalized-regions?limit=${limit}`
     
-    const response = await fetch(url, {
+    console.log('개인화 추천 API 호출:', url)
+    
+    // 10초 타임아웃으로 충분한 시간 제공 (벡터 계산 시간 고려)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('개인화 추천 API 타임아웃')), 10000)
+    )
+
+    const fetchPromise = fetch(url, {
       method: 'GET',
       headers
     })
     
+    const response = await Promise.race([fetchPromise, timeoutPromise]) as Response
+    console.log('개인화 추천 API 응답 상태:', response.status)
+    
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`)
+      // 401 에러 시 자동 로그아웃 처리
+      await handleAuthError(response)
+      
+      let errorMessage = ''
+      try {
+        const errorText = await response.text()
+        errorMessage = errorText
+      } catch (textError) {
+        errorMessage = `HTTP ${response.status} 오류`
+      }
+      
+      console.warn(`개인화 추천 API 오류 (${response.status}): 백엔드 서버 문제`, errorMessage)
+      console.log('개인화 추천 실패, 기본 추천으로 fallback')
+      return await fetchCitiesByCategory(0, limit)
     }
     
-    const result = await response.json()
+    let result
+    try {
+      result = await response.json()
+      console.log('개인화 추천 결과:', result)
+    } catch (jsonError) {
+      console.warn('개인화 추천 API 응답 JSON 파싱 오류:', jsonError)
+      console.log('JSON 파싱 실패, 기본 추천으로 fallback')
+      return await fetchCitiesByCategory(0, limit)
+    }
+    
+    // 데이터가 비어있거나 잘못된 형식이면 fallback
+    if (!result || !result.data || !Array.isArray(result.data) || result.data.length === 0) {
+      console.log('개인화 추천 데이터가 비어있음, 기본 추천으로 fallback')
+      return await fetchCitiesByCategory(0, limit)
+    }
     
     return {
       data: result.data,
       hasMore: result.hasMore || false
     }
   } catch (error) {
-    console.error('개인화 지역별 카테고리 추천 API 호출 오류:', error)
-    console.error('Error details:', error)
+    console.warn('개인화 지역별 카테고리 추천 API 호출 전체 오류:', error instanceof Error ? error.message : String(error))
     
-    // 빈 데이터 반환 대신 기존 API fallback 제거
-    return {
-      data: [],
-      hasMore: false
+    // 에러 시 fallback으로 기본 추천 사용
+    try {
+      console.log('에러 fallback으로 기본 추천 API 시도')
+      return await fetchCitiesByCategory(0, limit)
+    } catch (fallbackError) {
+      console.warn('Fallback API도 실패:', fallbackError)
+      return {
+        data: [],
+        hasMore: false
+      }
     }
   }
 }
 
-// 지역별 카테고리별 구분된 데이터 가져오기
+// 지역별 카테고리별 구분된 데이터 가져오기 (강화된 에러 처리)
 export const fetchCitiesByCategory = async (
   page: number = 0,
   limit: number = 3
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-    const response = await fetch(`${API_BASE_URL}/api/v1/attractions/cities-by-category?page=${page}&limit=${limit}`)
+    
+    // 2초 타임아웃 설정
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('기본 추천 API 타임아웃')), 2000)
+    )
+
+    const fetchPromise = fetch(`${API_BASE_URL}/api/v1/attractions/cities-by-category?page=${page}&limit=${limit}`)
+    const response = await Promise.race([fetchPromise, timeoutPromise]) as Response
     
     if (!response.ok) {
+      let errorMessage = ''
+      try {
+        const errorText = await response.text()
+        errorMessage = errorText
+      } catch (textError) {
+        errorMessage = `HTTP ${response.status} 오류`
+      }
+      console.warn(`기본 추천 API HTTP 오류 (${response.status}):`, errorMessage)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
-    const result = await response.json()
+    let result
+    try {
+      result = await response.json()
+    } catch (jsonError) {
+      console.error('기본 추천 API 응답 JSON 파싱 오류:', jsonError)
+      throw new Error('기본 추천 API 응답 데이터 형식 오류')
+    }
     
     return {
-      data: result.data,
-      hasMore: result.hasMore
+      data: result.data || [],
+      hasMore: result.hasMore || false
     }
   } catch (error) {
-    console.error('API 호출 오류:', error)
+    console.warn('기본 추천 API 호출 오류:', error instanceof Error ? error.message : String(error))
     return { data: [], hasMore: false }
   }
 }

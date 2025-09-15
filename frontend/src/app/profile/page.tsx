@@ -5,6 +5,22 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 
+// 여행 상태를 날짜 기준으로 계산하는 함수
+const getTripStatus = (startDate: string, endDate: string): 'planned' | 'active' | 'completed' => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // 시간 부분을 00:00:00으로 설정
+
+  const start = new Date(startDate)
+  start.setHours(0, 0, 0, 0)
+
+  const end = new Date(endDate)
+  end.setHours(23, 59, 59, 999) // 끝나는 날의 마지막 시간으로 설정
+
+  if (today < start) return 'planned'      // 준비중
+  if (today >= start && today <= end) return 'active'  // 여행중
+  return 'completed'                       // 발자취
+}
+
 
 interface TripPlace {
   table_name: string
@@ -13,7 +29,6 @@ interface TripPlace {
   order: number
   name?: string
   category?: string
-  rating?: number
   description?: string
   latitude?: string | number
   longitude?: string | number
@@ -67,7 +82,6 @@ interface SavedLocation {
   imageUrl?: string
   description?: string
   category?: string
-  rating?: number
   created_at: string
   updated_at?: string
 }
@@ -313,7 +327,6 @@ export default function ProfilePage() {
                     imageUrl: attractionData.imageUrl || attractionData.image,
                     description: attractionData.description || attractionData.address,
                     category: attractionData.category,
-                    rating: attractionData.rating,
                     latitude: attractionData.latitude,
                     longitude: attractionData.longitude,
                     created_at: savedLocation.created_at
@@ -1042,7 +1055,25 @@ export default function ProfilePage() {
         
         return (
           <div className="space-y-4">
-            {trips.map((trip) => (
+            {trips
+              .sort((a, b) => {
+                const statusA = getTripStatus(a.start_date, a.end_date)
+                const statusB = getTripStatus(b.start_date, b.end_date)
+
+                // 상태별 우선순위: active(1) > planned(2) > completed(3)
+                const statusOrder = { active: 1, planned: 2, completed: 3 }
+
+                const orderA = statusOrder[statusA]
+                const orderB = statusOrder[statusB]
+
+                if (orderA !== orderB) {
+                  return orderA - orderB
+                }
+
+                // 같은 상태일 때는 시작 날짜 기준으로 정렬
+                return new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+              })
+              .map((trip) => (
               <div 
                 key={trip.id} 
                 className="bg-gray-800 p-4 rounded-2xl relative cursor-pointer hover:bg-gray-750 transition-colors"
@@ -1051,13 +1082,13 @@ export default function ProfilePage() {
                 {/* 상태 표시와 버튼들 - 오른쪽 상단 */}
                 <div className="absolute top-4 right-4 flex items-center space-x-2">
                   <span className={`px-2 py-1 rounded-full text-xs flex items-center text-white ${
-                    trip.status === 'active' ? 'bg-red-500' : 
-                    trip.status === 'completed' ? 'bg-gray-500' : 
+                    getTripStatus(trip.start_date, trip.end_date) === 'active' ? 'bg-red-500' :
+                    getTripStatus(trip.start_date, trip.end_date) === 'completed' ? 'bg-gray-500' :
                     'bg-green-500'
                   }`}>
-                    {trip.status === 'active' && '🚩 진행중'}
-                    {trip.status === 'completed' && '✓ 완료됨'}
-                    {trip.status === 'planned' && '📋 예정됨'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'planned' && '📋 준비중'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'active' && '🗺️ 여행중'}
+                    {getTripStatus(trip.start_date, trip.end_date) === 'completed' && '👣 발자취'}
                   </span>
                   
                   {/* 휴지통 버튼 */}
@@ -1273,14 +1304,6 @@ export default function ProfilePage() {
                               <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full">
                                 {getCategoryName(location.category)}
                               </span>
-                            )}
-                            {location.rating && (
-                              <div className="flex items-center">
-                                <svg className="w-3 h-3 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                                <span className="text-yellow-400 text-xs font-medium">{location.rating}</span>
-                              </div>
                             )}
                           </div>
                           
