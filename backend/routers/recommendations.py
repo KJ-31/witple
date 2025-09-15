@@ -203,17 +203,31 @@ async def get_personalized_recommendations(
             logger.info(f"Cache hit for personalized recommendations: {cache_key}")
             return cached_result
         
-        # 캐시에 없으면 추천 엔진에서 조회
+        # 캐시에 없으면 추천 엔진에서 조회 (5초 타임아웃)
         logger.info(f"Cache miss for personalized recommendations: {cache_key}")
-        personalized_places = await recommendation_engine.get_personalized_recommendations(
-            user_id=user_id,
-            region=region,
-            category=category,
-            limit=limit
-        )
+        try:
+            # 개인화 추천에 타임아웃 적용
+            import asyncio
+            personalized_places = await asyncio.wait_for(
+                recommendation_engine.get_personalized_recommendations(
+                    user_id=user_id,
+                    region=region,
+                    category=category,
+                    limit=limit
+                ),
+                timeout=5.0  # 5초 타임아웃
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Personalized recommendation timeout for user {user_id}, falling back to popular places")
+            # 타임아웃 시 인기 추천으로 대체
+            personalized_places = await recommendation_engine.get_popular_places(
+                region=region,
+                category=category,
+                limit=limit
+            )
         
-        # 결과를 캐시에 저장 (30분)
-        cache.set(cache_key, personalized_places, expire=1800)
+        # 결과를 캐시에 저장 (2시간) - 개인화 추천은 더 오래 캐시
+        cache.set(cache_key, personalized_places, expire=7200)
         
         return personalized_places
         
@@ -394,13 +408,23 @@ async def get_personalized_region_categories(
             # 로그인 상태: 개인화 추천 기반
             user_id = str(current_user.user_id)
             
-            # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴
+            # 1. 개인화 추천으로 사용자에게 적합한 장소들을 가져옴 (타임아웃 적용)
             logger.info(f"Getting personalized recommendations for user: {user_id}")
-            personalized_places = await recommendation_engine.get_personalized_recommendations(
-                user_id=user_id,
-                limit=500  # 충분한 데이터를 가져와서 카테고리별 분석
-            )
-            logger.info(f"Retrieved {len(personalized_places)} personalized places")
+            try:
+                import asyncio
+                personalized_places = await asyncio.wait_for(
+                    recommendation_engine.get_personalized_recommendations(
+                        user_id=user_id,
+                        limit=500  # 충분한 데이터를 가져와서 카테고리별 분석
+                    ),
+                    timeout=8.0  # 8초 타임아웃 (더 많은 데이터 처리 시간 고려)
+                )
+                logger.info(f"Retrieved {len(personalized_places)} personalized places")
+            except asyncio.TimeoutError:
+                logger.warning(f"Personalized recommendation timeout for user {user_id}, using fallback places")
+                # 타임아웃 시 fallback 데이터 사용
+                personalized_places = await recommendation_engine.get_fallback_places(limit=100)
+                logger.info(f"Retrieved {len(personalized_places)} fallback places")
             
             # 2. 지역별로 그룹핑하여 상위 지역들 선별
             region_scores = {}
@@ -546,7 +570,6 @@ async def get_personalized_region_categories(
                                     'name': place.get('name', '이름 없음'),
                                     'description': place.get('description', '설명 없음'),
                                     'imageUrl': image_url,
-                                    'rating': round((place.get('similarity_score', 0.5) + 0.3) * 5 * 10) / 10,
                                     'category': category
                                 })
                         
@@ -669,7 +692,6 @@ async def get_personalized_region_categories(
                                     'name': place.get('name', '이름 없음'),
                                     'description': place.get('description', '설명 없음'),
                                     'imageUrl': image_url,
-                                    'rating': round((place.get('similarity_score', 0.7) + 0.3) * 5 * 10) / 10,
                                     'category': category
                                 })
                         

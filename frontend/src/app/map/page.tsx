@@ -10,7 +10,6 @@ interface SelectedPlace {
   id: string
   name: string
   category: string
-  rating: number
   description: string
   dayNumber?: number
   address?: string
@@ -36,7 +35,6 @@ interface AttractionData {
   name: string
   description: string
   imageUrl: string
-  rating: number
   category: string
   address: string
   region: string
@@ -321,7 +319,6 @@ export default function MapPage() {
       id: `place_${Date.now()}`, // 임시 디스플레이용 ID
       name: place.name || '',
       category: place.category || 'attraction',
-      rating: 0,
       description: place.overview || place.description || '',
       dayNumber: targetDay,
       address: place.address,
@@ -2807,8 +2804,7 @@ export default function MapPage() {
                     name: itineraryPlace.name,
                     description: itineraryPlace.description,
                     imageUrl: '',
-                    rating: 0,
-                    category: itineraryPlace.category,
+                                  category: itineraryPlace.category,
                     address: itineraryPlace.address || '',
                     region: '',
                     city: { id: '', name: '', region: '' },
@@ -2936,15 +2932,8 @@ export default function MapPage() {
                     )}
                   </div>
 
-                  {/* Rating and category */}
+                  {/* Category */}
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="flex items-center bg-[#12345D]/50 rounded-full px-3 py-1">
-                      <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                      </svg>
-                      <span className="text-white font-medium">{selectedPlaceDetail.rating}</span>
-                    </div>
-                    
                     <div className="bg-[#1F3C7A]/30 rounded-full px-3 py-1">
                       <span className="text-[#6FA0E6] text-sm font-medium">
                         {getCategoryName(selectedPlaceDetail.category)}
@@ -3372,8 +3361,7 @@ export default function MapPage() {
                                       name: place.name,
                                       description: place.description,
                                       imageUrl: '',
-                                      rating: 0,
-                                      category: place.category,
+                                                                      category: place.category,
                                       address: place.address || '',
                                       region: '',
                                       city: { id: '', name: '', region: '' },
@@ -3807,10 +3795,6 @@ export default function MapPage() {
                             <span className="text-[#6FA0E6] text-[10px] bg-[#1F3C7A]/50 px-2 py-0.5 rounded-full mr-2">
                               {getCategoryName(place.category)}
                             </span>
-                            <svg className="w-4 h-4 text-yellow-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                            <span className="text-[#6FA0E6] text-sm font-medium">{place.rating}</span>
                           </div>
                         </div>
                         <button 

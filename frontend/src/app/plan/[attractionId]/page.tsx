@@ -8,7 +8,6 @@ interface AttractionData {
   name: string
   description: string
   imageUrl: string
-  rating: number
   category: string
   address: string
   region: string
