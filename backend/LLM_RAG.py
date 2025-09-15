@@ -21,6 +21,8 @@ import sys
 import os
 import json
 import re
+import requests
+import datetime
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
@@ -469,10 +471,405 @@ def get_travel_recommendation_stream(query):
         print("✅ 여행 추천 완료!")
         
         return full_response
-        
+
     except Exception as e:
         print(f"❌ 스트림 추천 생성 오류: {e}")
         return "죄송합니다. 여행 추천을 생성하는 중 오류가 발생했습니다."
+
+# =============================================================================
+# 기상청 API 관련 함수들
+# =============================================================================
+
+# 기상청 API 키 (환경변수에서 가져오기)
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')
+
+def get_coordinates_for_region(region_name):
+    """지역명을 기상청 API용 격자 좌표로 변환 (DB 기반 + 매핑)"""
+
+    # 지역별 대표 좌표 매핑 (기상청 격자 좌표)
+    region_coordinates = {
+        # === 특별시/광역시/도 대표 좌표 ===
+        '서울특별시': {'nx': 60, 'ny': 127},
+        '서울': {'nx': 60, 'ny': 127},
+
+        '부산광역시': {'nx': 98, 'ny': 76},
+        '부산': {'nx': 98, 'ny': 76},
+
+        '대구광역시': {'nx': 89, 'ny': 90},
+        '대구': {'nx': 89, 'ny': 90},
+
+        '인천광역시': {'nx': 55, 'ny': 124},
+        '인천': {'nx': 55, 'ny': 124},
+
+        '광주광역시': {'nx': 58, 'ny': 74},
+        '광주': {'nx': 58, 'ny': 74},
+
+        '대전광역시': {'nx': 67, 'ny': 100},
+        '대전': {'nx': 67, 'ny': 100},
+
+        '울산광역시': {'nx': 102, 'ny': 84},
+        '울산': {'nx': 102, 'ny': 84},
+
+        '세종특별자치시': {'nx': 66, 'ny': 103},
+        '세종시': {'nx': 66, 'ny': 103},
+        '세종': {'nx': 66, 'ny': 103},
+
+        '경기도': {'nx': 60, 'ny': 121},  # 수원 기준
+        '강원특별자치도': {'nx': 73, 'ny': 134},  # 춘천 기준
+        '강원도': {'nx': 73, 'ny': 134},
+        '충청북도': {'nx': 69, 'ny': 106},  # 청주 기준
+        '충청남도': {'nx': 63, 'ny': 110},  # 천안 기준
+        '전북특별자치도': {'nx': 63, 'ny': 89},  # 전주 기준
+        '전라북도': {'nx': 63, 'ny': 89},
+        '전라남도': {'nx': 58, 'ny': 74},  # 광주 기준
+        '경상북도': {'nx': 89, 'ny': 90},  # 대구 기준
+        '경상남도': {'nx': 90, 'ny': 77},  # 창원 기준
+        '제주특별자치도': {'nx': 52, 'ny': 38},
+        '제주도': {'nx': 52, 'ny': 38},
+        '제주': {'nx': 52, 'ny': 38},
+
+        # === 주요 도시 세부 좌표 ===
+        # 서울 주요 구
+        '강남구': {'nx': 61, 'ny': 126},
+        '강남': {'nx': 61, 'ny': 126},
+        '종로구': {'nx': 60, 'ny': 127},
+        '종로': {'nx': 60, 'ny': 127},
+        '마포구': {'nx': 59, 'ny': 126},
+        '강북구': {'nx': 60, 'ny': 128},
+        '강북': {'nx': 60, 'ny': 128},
+        '송파구': {'nx': 62, 'ny': 126},
+        '구로구': {'nx': 58, 'ny': 125},
+
+        # 부산 주요 구
+        '해운대구': {'nx': 99, 'ny': 75},
+        '해운대': {'nx': 99, 'ny': 75},
+        '사하구': {'nx': 96, 'ny': 76},
+        '사하': {'nx': 96, 'ny': 76},
+        '기장군': {'nx': 100, 'ny': 77},
+
+        # 경기도 주요 도시
+        '수원시': {'nx': 60, 'ny': 121},
+        '수원': {'nx': 60, 'ny': 121},
+        '성남시': {'nx': 63, 'ny': 124},
+        '성남': {'nx': 63, 'ny': 124},
+        '고양시': {'nx': 57, 'ny': 128},
+        '고양': {'nx': 57, 'ny': 128},
+        '용인시': {'nx': 64, 'ny': 119},
+        '용인': {'nx': 64, 'ny': 119},
+        '안양시': {'nx': 59, 'ny': 123},
+        '안양': {'nx': 59, 'ny': 123},
+        '파주시': {'nx': 56, 'ny': 131},
+        '파주': {'nx': 56, 'ny': 131},
+        '가평군': {'nx': 61, 'ny': 133},
+        '가평': {'nx': 61, 'ny': 133},
+
+        # 강원도 주요 도시
+        '춘천시': {'nx': 73, 'ny': 134},
+        '춘천': {'nx': 73, 'ny': 134},
+        '강릉시': {'nx': 92, 'ny': 131},
+        '강릉': {'nx': 92, 'ny': 131},
+        '평창군': {'nx': 84, 'ny': 123},
+        '평창': {'nx': 84, 'ny': 123},
+
+        # 기타 주요 도시
+        '경주시': {'nx': 100, 'ny': 91},
+        '경주': {'nx': 100, 'ny': 91},
+        '전주시': {'nx': 63, 'ny': 89},
+        '전주': {'nx': 63, 'ny': 89},
+        '여수시': {'nx': 73, 'ny': 66},
+        '여수': {'nx': 73, 'ny': 66},
+        '창원시': {'nx': 90, 'ny': 77},
+        '창원': {'nx': 90, 'ny': 77},
+        '제주시': {'nx': 53, 'ny': 38},
+        '서귀포시': {'nx': 52, 'ny': 33},
+        '서귀포': {'nx': 52, 'ny': 33},
+
+        # 구 이름들 (중복 처리)
+        '중구': {'nx': 60, 'ny': 127},  # 서울 기준
+        '동구': {'nx': 68, 'ny': 100},  # 대전 기준
+        '서구': {'nx': 67, 'ny': 100},  # 대전 기준
+        '남구': {'nx': 58, 'ny': 74},   # 광주 기준
+        '북구': {'nx': 59, 'ny': 75},   # 광주 기준
+    }
+
+    # 정확한 매치 시도
+    if region_name in region_coordinates:
+        return region_coordinates[region_name]
+
+    # 부분 매치 시도 (지역명이 포함된 경우)
+    for key, coords in region_coordinates.items():
+        if region_name in key or key in region_name:
+            return coords
+
+    # 기본값 (서울)
+    return {'nx': 60, 'ny': 127}
+
+def get_db_regions_and_cities():
+    """DB에서 실제 region과 city 데이터 추출"""
+    try:
+        from sqlalchemy import create_engine, text
+        CONNECTION_STRING = "postgresql+psycopg://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db"
+
+        engine = create_engine(CONNECTION_STRING)
+        with engine.connect() as conn:
+            # Region 데이터 추출
+            regions = []
+            result = conn.execute(text("SELECT DISTINCT cmetadata->>'region' as region FROM langchain_pg_embedding WHERE cmetadata->>'region' IS NOT NULL AND cmetadata->>'region' != ''"))
+            for row in result:
+                if row[0]:  # 빈 문자열 제외
+                    regions.append(row[0])
+
+            # City 데이터 추출 (상위 100개)
+            cities = []
+            result = conn.execute(text("SELECT DISTINCT cmetadata->>'city' as city FROM langchain_pg_embedding WHERE cmetadata->>'city' IS NOT NULL AND cmetadata->>'city' != '' ORDER BY city LIMIT 100"))
+            for row in result:
+                if row[0]:  # 빈 문자열 제외
+                    cities.append(row[0])
+
+            return regions, cities
+    except Exception as e:
+        print(f"DB 연결 오류: {e}")
+        # 기본값 반환
+        return ['서울특별시', '부산광역시', '대구광역시'], ['서울', '부산', '대구']
+
+def extract_region_from_query(query):
+    """사용자 쿼리에서 지역명 추출 (DB 기반)"""
+    # DB에서 실제 region과 city 데이터 가져오기
+    db_regions, db_cities = get_db_regions_and_cities()
+
+    # 전체 지역 키워드 = DB regions + DB cities + 추가 별칭
+    region_keywords = []
+
+    # DB에서 가져온 region들
+    region_keywords.extend(db_regions)
+
+    # DB에서 가져온 city들
+    region_keywords.extend(db_cities)
+
+    # 추가 별칭들 (줄임말, 다른 표기)
+    aliases = [
+        '서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
+        '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주',
+        '해운대', '강남', '강북', '종로', '명동', '홍대', '이태원', '인사동',
+        '광안리', '남포동', '서면'
+    ]
+    region_keywords.extend(aliases)
+
+    # 중복 제거
+    region_keywords = list(set(region_keywords))
+
+    # 긴 키워드부터 매칭 (더 구체적인 지역명 우선)
+    region_keywords.sort(key=len, reverse=True)
+
+    # 쿼리에서 지역명 찾기
+    for region in region_keywords:
+        if region in query:
+            return region
+
+    return None
+
+def get_weather_info(region_name):
+    """기상청 API로 날씨 정보 가져오기"""
+    if not WEATHER_API_KEY:
+        return "❌ 기상청 API 키가 설정되지 않았습니다. .env 파일에 WEATHER_API_KEY를 추가해주세요."
+
+    try:
+        # 지역 좌표 가져오기
+        coords = get_coordinates_for_region(region_name)
+
+        # 현재 날짜와 시간
+        now = datetime.datetime.now()
+        base_date = now.strftime('%Y%m%d')
+
+        # 기상청 발표시간에 맞춰 base_time 설정 (02, 05, 08, 11, 14, 17, 20, 23시)
+        hour = now.hour
+        if hour < 2:
+            base_time = '2300'
+            base_date = (now - datetime.timedelta(days=1)).strftime('%Y%m%d')
+        elif hour < 5:
+            base_time = '0200'
+        elif hour < 8:
+            base_time = '0500'
+        elif hour < 11:
+            base_time = '0800'
+        elif hour < 14:
+            base_time = '1100'
+        elif hour < 17:
+            base_time = '1400'
+        elif hour < 20:
+            base_time = '1700'
+        elif hour < 23:
+            base_time = '2000'
+        else:
+            base_time = '2300'
+
+        # 기상청 API 요청 URL (HTTP로 시도)
+        url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst'
+
+        params = {
+            'serviceKey': WEATHER_API_KEY,
+            'pageNo': '1',
+            'numOfRows': '1000',
+            'dataType': 'JSON',
+            'base_date': base_date,
+            'base_time': base_time,
+            'nx': coords['nx'],
+            'ny': coords['ny']
+        }
+
+        # 재시도 로직과 함께 HTTP 요청
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Connection': 'keep-alive'
+        }
+
+        # 재시도 로직
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"🌤️ 기상청 API 호출 시도 {attempt + 1}/{max_retries}")
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+                break
+            except requests.exceptions.Timeout:
+                if attempt == max_retries - 1:
+                    return f"❌ 기상청 서버 응답 시간 초과 ({region_name})"
+                print(f"   ⏰ 타임아웃 발생, {attempt + 2}번째 시도...")
+                continue
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    return f"❌ 기상청 API 연결 오류: {e}"
+                print(f"   🔄 연결 오류, {attempt + 2}번째 시도...")
+                continue
+
+        if response.status_code == 200:
+            data = response.json()
+
+            if data['response']['header']['resultCode'] == '00':
+                items = data['response']['body']['items']['item']
+
+                # 오늘과 내일 날씨 정보 추출
+                weather_info = parse_weather_data(items, region_name)
+                return weather_info
+            else:
+                return f"❌ 기상청 API 오류: {data['response']['header']['resultMsg']}"
+        else:
+            return f"❌ API 요청 실패: {response.status_code}"
+
+    except Exception as e:
+        return f"❌ 날씨 정보 조회 오류: {e}"
+
+def parse_weather_data(items, region_name):
+    """기상청 API 응답 데이터 파싱"""
+    try:
+        # 오늘과 내일 날씨 데이터 분류
+        today = datetime.datetime.now().strftime('%Y%m%d')
+        tomorrow = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%Y%m%d')
+
+        today_data = {}
+        tomorrow_data = {}
+
+        for item in items:
+            fcst_date = item['fcstDate']
+            fcst_time = item['fcstTime']
+            category = item['category']
+            fcst_value = item['fcstValue']
+
+            # 오늘 데이터
+            if fcst_date == today:
+                if fcst_time not in today_data:
+                    today_data[fcst_time] = {}
+                today_data[fcst_time][category] = fcst_value
+
+            # 내일 데이터
+            elif fcst_date == tomorrow:
+                if fcst_time not in tomorrow_data:
+                    tomorrow_data[fcst_time] = {}
+                tomorrow_data[fcst_time][category] = fcst_value
+
+        # 날씨 정보 포맷팅
+        weather_text = f"🌤️ **{region_name} 날씨 정보**\n\n"
+
+        # 오늘 날씨 (대표 시간: 12시)
+        if '1200' in today_data:
+            data = today_data['1200']
+            weather_text += "📅 **오늘**\n"
+            weather_text += format_weather_detail(data)
+            weather_text += "\n"
+
+        # 내일 날씨 (대표 시간: 12시)
+        if '1200' in tomorrow_data:
+            data = tomorrow_data['1200']
+            weather_text += "📅 **내일**\n"
+            weather_text += format_weather_detail(data)
+
+        return weather_text
+
+    except Exception as e:
+        return f"❌ 날씨 데이터 파싱 오류: {e}"
+
+def format_weather_detail(data):
+    """날씨 상세 정보 포맷팅"""
+    try:
+        # 기상청 코드 매핑
+        sky_codes = {
+            '1': '맑음 ☀️',
+            '3': '구름많음 ⛅',
+            '4': '흐림 ☁️'
+        }
+
+        pty_codes = {
+            '0': '없음',
+            '1': '비 🌧️',
+            '2': '비/눈 🌨️',
+            '3': '눈 ❄️',
+            '4': '소나기 🌦️'
+        }
+
+        detail = ""
+
+        # 하늘상태
+        if 'SKY' in data:
+            sky = sky_codes.get(data['SKY'], '정보없음')
+            detail += f"• 하늘상태: {sky}\n"
+
+        # 강수형태
+        if 'PTY' in data:
+            pty = pty_codes.get(data['PTY'], '정보없음')
+            if data['PTY'] != '0':
+                detail += f"• 강수형태: {pty}\n"
+
+        # 기온
+        if 'TMP' in data:
+            detail += f"• 기온: {data['TMP']}°C 🌡️\n"
+
+        # 강수확률
+        if 'POP' in data:
+            detail += f"• 강수확률: {data['POP']}% 💧\n"
+
+        # 습도
+        if 'REH' in data:
+            detail += f"• 습도: {data['REH']}% 💨\n"
+
+        # 풍속
+        if 'WSD' in data:
+            detail += f"• 풍속: {data['WSD']}m/s 💨\n"
+
+        return detail
+
+    except Exception as e:
+        return f"상세 정보 처리 오류: {e}\n"
+
+def is_weather_query(query):
+    """쿼리가 날씨 관련 질문인지 판단"""
+    weather_keywords = [
+        '날씨', '기온', '온도', '비', '눈', '바람', '습도', '맑음', '흐림',
+        '강수', '기상', '일기예보', '예보', '우천', '강우', '폭우', '태풍',
+        'weather', '온도가', '덥', '춥', '시원', '따뜻'
+    ]
+
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in weather_keywords)
 
 def interactive_mode():
     """대화형 모드"""
@@ -556,9 +953,12 @@ def classify_query(state: TravelState) -> TravelState:
     strong_confirmation_keywords = ["확정", "결정", "확인", "이걸로", "좋아", "맞아", "그래", "됐어", "완료", "ok", "오케이"]
     weak_confirmation_keywords = ["진행", "해줘", "가자", "이거야", "네", "예"]
     
+    # 날씨 요청인지 먼저 확인
+    is_weather_request = is_weather_query(user_input)
+
     # 복합적 분류 로직
-    need_rag = any(keyword in user_input for keyword in travel_keywords)
-    need_search = any(keyword in user_input for keyword in location_keywords)
+    need_rag = any(keyword in user_input for keyword in travel_keywords) or is_weather_request
+    need_search = any(keyword in user_input for keyword in location_keywords) and not is_weather_request
     need_tool = any(keyword in user_input for keyword in booking_keywords)
     
     # 음식 관련 질의도 RAG로 처리
@@ -601,10 +1001,44 @@ def rag_processing_node(state: TravelState) -> TravelState:
             **state,
             "conversation_context": "처리할 메시지가 없습니다."
         }
-    
+
     user_query = state["messages"][-1]
     print(f"🧠 RAG 처리 시작: '{user_query}'")
-    
+
+    # 날씨 관련 질문인지 확인
+    if is_weather_query(user_query):
+        print("🌤️ 날씨 요청 감지됨")
+
+        # 쿼리에서 지역명 추출
+        region = extract_region_from_query(user_query)
+
+        if region:
+            print(f"📍 감지된 지역: {region}")
+            weather_info = get_weather_info(region)
+
+            return {
+                **state,
+                "conversation_context": weather_info
+            }
+        else:
+            # 지역명이 없으면 이전 대화에서 지역 찾기 시도
+            if state.get("travel_plan") and state["travel_plan"]:
+                # 여행 계획에서 지역 추출
+                for place in state["travel_plan"]:
+                    if "지역" in place or "시" in place or "구" in place:
+                        possible_region = extract_region_from_query(place)
+                        if possible_region:
+                            weather_info = get_weather_info(possible_region)
+                            return {
+                                **state,
+                                "conversation_context": weather_info
+                            }
+
+            return {
+                **state,
+                "conversation_context": "🤔 날씨 정보를 제공하려면 지역명을 함께 말씀해주세요. (예: '서울 날씨', '부산 날씨')"
+            }
+
     try:
         # 하이브리드 검색으로 실제 장소 데이터 가져오기
         docs = retriever._get_relevant_documents(user_query)
@@ -772,8 +1206,13 @@ def search_processing_node(state: TravelState) -> TravelState:
     try:
         # 기존 search_places 함수 사용
         docs = search_places(user_query)
-        search_summary = f"'{user_query}'에 대한 검색 결과 {len(docs)}개를 찾았습니다."
-        
+
+        # 검색 결과를 간단하게 포맷팅
+        if docs:
+            search_summary = ""  # 불필요한 "N개 찾았습니다" 메시지 제거
+        else:
+            search_summary = "검색 결과가 없습니다."
+
         return {
             **state,
             "search_results": docs,

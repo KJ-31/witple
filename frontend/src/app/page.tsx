@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchPersonalizedRegionCategories, fetchCitiesByCategory, type CitySection } from '../lib/dummyData'
+import { fetchPersonalizedRegionCategories, fetchPopularSectionByRegion, getUserType, type CitySection } from '../lib/dummyData'
 import BubbleAnimation from '../components/BubbleAnimation'
 import { BottomNavigation } from '../components'
 import { trackClick } from '../utils/actionTracker'
@@ -13,6 +13,10 @@ export default function Home() {
   const { session, status } = useActionTrackerSession()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
+  const [popularSection, setPopularSection] = useState<CitySection | null>(null)
+  const [availableRegions, setAvailableRegions] = useState<string[]>([])
+  const [selectedRegion, setSelectedRegion] = useState<string>('서울')
+  const [showRegionModal, setShowRegionModal] = useState<boolean>(false)
   const [loading, setLoading] = useState(false)
   const [userInfo, setUserInfo] = useState<{ name: string, preferences: any } | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
@@ -21,13 +25,14 @@ export default function Home() {
   const loadUserInfo = useCallback(async () => {
     if (!session || !(session as any).backendToken) {
       setUserInfo(null)
-      return
+      return null
     }
 
     // 기본 사용자 정보 설정 (세션 기반)
     const defaultUserInfo = {
       name: session.user?.name || '사용자',
-      preferences: null
+      preferences: null,
+      bookmarkCount: 0  // 기본값 0
     }
     setUserInfo(defaultUserInfo)
 
@@ -61,30 +66,54 @@ export default function Home() {
             exploration: userData.exploration
           }
 
+          // 북마크 수를 별도로 가져오기 (프로필 API에 포함되지 않음)
+          let bookmarkCount = 0
+          try {
+            const bookmarkResponse = await fetch(`${API_BASE_URL}/api/v1/saved-locations?page=0&limit=1`, {
+              headers: {
+                'Authorization': `Bearer ${(session as any).backendToken}`
+              }
+            })
+
+            if (bookmarkResponse.ok) {
+              const bookmarkData = await bookmarkResponse.json()
+              bookmarkCount = bookmarkData.total || 0
+              console.log('사용자 북마크 수:', bookmarkCount)
+            }
+          } catch (bookmarkError) {
+            console.warn('북마크 수 확인 오류:', bookmarkError)
+          }
+
           const newUserInfo = {
             name: userData.name || defaultUserInfo.name,
-            preferences: preferences
+            preferences: preferences,
+            bookmarkCount: bookmarkCount  // 북마크 수 추가
           }
 
           setUserInfo(newUserInfo)
 
           // 사용자 정보 설정 후 바로 선호도 체크 (추가 렌더링 방지)
           setTimeout(() => checkUserPreferences(preferences), 0)
+
+          return newUserInfo  // 새로 로드된 사용자 정보 반환
         } catch (jsonError) {
           console.warn('사용자 프로필 JSON 파싱 오류:', jsonError)
           // JSON 파싱 실패 시 기본 정보 유지
+          return defaultUserInfo
         }
       } else {
         console.warn(`사용자 프로필 정보 로드 실패 (${userResponse.status}): API 서버 오류 또는 권한 없음`)
         // API 오류 시에도 기본 정보는 유지됨 (이미 설정함)
+        return defaultUserInfo
       }
     } catch (error) {
       console.warn('사용자 정보 로드 전체 오류:', error instanceof Error ? error.message : String(error))
       // 전체 오류 시에도 기본 정보는 유지됨 (이미 설정함)
+      return defaultUserInfo
     }
   }, [session])
 
-  // 추천 도시 데이터 로드 함수 (단순화 + 타임아웃)
+  // 추천 도시 데이터 로드 함수 (동적 설정 적용)
   const loadRecommendedCities = useCallback(async (currentUserInfo?: { name: string, preferences: any } | null) => {
     if (loading) {
       console.log('이미 로딩 중이므로 중복 요청 방지')
@@ -100,13 +129,12 @@ export default function Home() {
     )
 
     try {
-      const dataPromise = session
-        ? fetchPersonalizedRegionCategories(2)
-        : fetchCitiesByCategory(0, 2)
+      // 백엔드 설정을 사용하여 API 호출 (모든 사용자 v2 API 사용)
+      const dataPromise = fetchPersonalizedRegionCategories(undefined, currentUserInfo || userInfo, session)
 
       const result = await Promise.race([dataPromise, timeoutPromise]) as { data: CitySection[] }
 
-      // 데이터 처리 개선 - categorySections 그대로 사용
+      // 데이터 처리 - 백엔드에서 이미 동적 설정이 적용된 상태
       const processedData = result.data.map(section => {
         // categorySections가 있으면 그대로 사용 (백엔드에서 이미 처리됨)
         if (section.categorySections && section.categorySections.length > 0) {
@@ -127,10 +155,10 @@ export default function Home() {
         // attractions만 있는 경우의 fallback 처리
         let attractions = section.attractions || []
 
-        // 별점 필터링 제거 - 모든 데이터 표시
-        let filteredAttractions = attractions.slice(0, 8) // 상위 8개만 표시
+        // 백엔드에서 이미 제한된 데이터이므로 그대로 사용
+        let filteredAttractions = attractions
 
-        console.log(`섹션 ${section.cityName}: 일반 형태 ${attractions.length}개 → 필터링 후 ${filteredAttractions.length}개`)
+        console.log(`섹션 ${section.cityName}: 일반 형태 ${attractions.length}개 (백엔드에서 이미 제한됨)`)
 
         return {
           ...section,
@@ -167,6 +195,28 @@ export default function Home() {
       setLoading(false)
     }
   }, [session]) // userInfo 의존성 제거
+
+  // 지역별 인기순 섹션 로드 함수 (모든 사용자용)
+  const loadPopularSection = useCallback(async (region: string = selectedRegion) => {
+    console.log(`인기순 섹션 로드 시작: 지역=${region}`)
+
+    try {
+      const result = await fetchPopularSectionByRegion(region, 6, 6)
+      setPopularSection(result.data)
+      setAvailableRegions(result.availableRegions)
+      console.log(`인기순 섹션 로드 완료: ${region}, 카테고리=${result.data?.categorySections?.length || 0}개`)
+    } catch (error) {
+      console.warn('인기순 섹션 로드 오류:', error)
+      setPopularSection(null)
+    }
+  }, [selectedRegion])
+
+  // 지역 변경 핸들러
+  const handleRegionChange = useCallback((region: string) => {
+    setSelectedRegion(region)
+    setShowRegionModal(false) // 모달 닫기
+    loadPopularSection(region)
+  }, [loadPopularSection])
 
   // 사용자 선호도 체크 (profile API 데이터 기반)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
@@ -237,10 +287,13 @@ export default function Home() {
         const initializeUser = async () => {
           try {
             // 먼저 사용자 정보를 로드하고, 그 정보를 기반으로 선호도 체크
-            await loadUserInfo()
+            const loadedUserInfo = await loadUserInfo()
 
             // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
             await loadRecommendedCities()
+
+            // 인기순 섹션 로드 (모든 로그인 사용자)
+            await loadPopularSection()
 
             console.log('로그인 사용자 초기화 완료')
           } catch (error) {
@@ -250,8 +303,11 @@ export default function Home() {
 
         initializeUser()
       } else {
-        // 비로그인 상태: 추천 데이터만 로드
-        loadRecommendedCities().then(() => {
+        // 비로그인 상태: 추천 데이터와 인기순 섹션 로드
+        Promise.all([
+          loadRecommendedCities(),
+          loadPopularSection()
+        ]).then(() => {
           console.log('비로그인 사용자 초기화 완료')
         }).catch(error => {
           console.warn('비로그인 사용자 초기화 오류:', error)
@@ -291,43 +347,139 @@ export default function Home() {
         </div>
       )}
 
-      {/* 추천 도시별 명소 섹션 (2개 고정) */}
+      {/* 추천 명소 섹션 */}
       <main className="pl-[20px] pr-0 pb-24 space-y-12">
-        {citySections.map((citySection, index) => {
-          // 사용자 이름 기반 제목 생성
-          let personalizedTitle = citySection.description
-          if (session) {
-            const userName = userInfo?.name || (session.user?.name) || '사용자'
-            personalizedTitle = `${userName}님을 위한 장소를 추천드려요.`
-          }
+        {session && citySections.length > 0 && (
+          // 로그인 사용자: 통합된 개인화 추천 섹션
+          <div>
+            <UnifiedRecommendationSection
+              citySections={citySections}
+              userName={userInfo?.name || (session.user?.name) || '사용자'}
+              onAttractionClick={(attractionId) => {
+                // 🎯 추천 카드 클릭 추적
+                const attraction = citySections.flatMap(section =>
+                  section.attractions ||
+                  section.categorySections?.flatMap(cs => cs.attractions || []) || []
+                ).find(a => a.id === attractionId)
 
-          return (
-            <div key={`${citySection.id}-${index}`}>
-              <SectionCarousel
-                title={personalizedTitle}
-                cityName={citySection.cityName}
-                attractions={citySection.attractions}
-                categorySections={citySection.categorySections}
-                onAttractionClick={(attractionId) => {
-                  // 🎯 추천 카드 클릭 추적
-                  const attraction = citySection.attractions?.find(a => a.id === attractionId) ||
-                    citySection.categorySections?.flatMap(cs => cs.attractions || [])
-                      .find(a => a.id === attractionId)
+                trackClick(attractionId, {
+                  attraction_name: attraction?.name || 'Unknown',
+                  category: attraction?.category || 'Unknown',
+                  region: 'Unknown',
+                  source: 'home_recommendations_unified',
+                  recommendation_type: 'personalized'
+                })
+                router.push(`/attraction/${attractionId}`)
+              }}
+            />
+          </div>
+        )}
 
-                  trackClick(attractionId, {
-                    attraction_name: attraction?.name || 'Unknown',
-                    category: attraction?.category || citySection.cityName,
-                    region: citySection.region || citySection.cityName,
-                    source: 'home_recommendations',
-                    city_section: citySection.cityName,
-                    recommendation_type: citySection.id?.includes('personalized') ? 'personalized' : 'popular'
-                  })
-                  router.push(`/attraction/${attractionId}`)
-                }}
-              />
+        {/* 지역별 인기순 섹션 (필터 기능 포함) */}
+        {popularSection && (
+          <div className="space-y-6">
+            {/* 제목과 필터 버튼 */}
+            <div className="px-5 flex items-center justify-between">
+              <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
+                {selectedRegion} 인기 추천
+              </h2>
+
+              {/* 필터 버튼 */}
+              <button
+                onClick={() => setShowRegionModal(true)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1A2332] text-[#94A9C9] hover:bg-[#252F42] hover:text-[#9CA8FF] transition-all duration-200"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="text-current"
+                >
+                  <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+                </svg>
+                <span className="text-sm font-medium">필터</span>
+              </button>
             </div>
-          )
-        })}
+
+            {/* 카테고리별 인기순 섹션 */}
+            <SectionCarousel
+              title={popularSection.description}
+              cityName={popularSection.cityName}
+              attractions={popularSection.attractions}
+              categorySections={popularSection.categorySections}
+              onAttractionClick={(attractionId) => {
+                // 🎯 인기순 카드 클릭 추적
+                const attraction = popularSection.attractions?.find(a => a.id === attractionId) ||
+                  popularSection.categorySections?.flatMap(cs => cs.attractions || [])
+                    .find(a => a.id === attractionId)
+
+                trackClick(attractionId, {
+                  attraction_name: attraction?.name || 'Unknown',
+                  category: attraction?.category || popularSection.cityName,
+                  region: popularSection.region || popularSection.cityName,
+                  source: 'home_popular_filtered',
+                  city_section: popularSection.cityName,
+                  recommendation_type: 'popular',
+                  selected_region: selectedRegion
+                })
+                router.push(`/attraction/${attractionId}`)
+              }}
+            />
+          </div>
+        )}
+
+        {/* 지역 선택 모달 */}
+        {showRegionModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-[#0B1220] rounded-2xl max-w-md w-full max-h-[80vh] overflow-hidden">
+              {/* 모달 헤더 */}
+              <div className="px-6 py-4 border-b border-[#1A2332] flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-[#9CA8FF]">지역 선택</h3>
+                <button
+                  onClick={() => setShowRegionModal(false)}
+                  className="p-2 hover:bg-[#1A2332] rounded-full transition-colors"
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="text-[#94A9C9]"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+
+              {/* 지역 목록 */}
+              <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-3">
+                  {availableRegions.map((region) => (
+                    <button
+                      key={region}
+                      onClick={() => handleRegionChange(region)}
+                      className={`
+                        p-4 rounded-xl text-center font-medium transition-all duration-200
+                        ${selectedRegion === region
+                          ? 'bg-[#3E68FF] text-white'
+                          : 'bg-[#1A2332] text-[#94A9C9] hover:bg-[#252F42] hover:text-[#9CA8FF]'
+                        }
+                      `}
+                    >
+                      {region}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 로딩 인디케이터 */}
         {loading && (
@@ -589,6 +741,62 @@ function getCategoryColor(category: string): string {
     accommodation: '#FFD53F'
   }
   return colorMap[category] || '#3E68FF'
+}
+
+/** 통합 추천 섹션 컴포넌트 (로그인 사용자용) */
+function UnifiedRecommendationSection({
+  citySections,
+  userName,
+  onAttractionClick,
+}: {
+  citySections: CitySection[]
+  userName: string
+  onAttractionClick: (attractionId: string) => void
+}) {
+  // 모든 섹션의 attractions를 하나로 통합
+  const allAttractions = citySections.flatMap(section => {
+    if (section.categorySections && section.categorySections.length > 0) {
+      return section.categorySections.flatMap(cs => cs.attractions || [])
+    }
+    return section.attractions || []
+  })
+
+  return (
+    <section aria-label={`${userName}님을 위한 추천`} className="w-full">
+      {/* 제목 */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
+            {userName}님을 위한 장소를 추천드려요.
+          </h2>
+        </div>
+      </div>
+
+      {/* 통합된 추천 캐러셀 */}
+      <div className="relative -ml-[21px] pl-[21px] pr-0">
+        <div
+          className="
+            flex items-stretch gap-4
+            overflow-x-auto no-scrollbar
+            snap-x snap-mandatory scroll-smooth
+            pb-2
+          "
+          style={{ scrollBehavior: 'smooth' }}
+        >
+          {allAttractions.map((attraction) => (
+            <AttractionCard
+              key={attraction.id}
+              attraction={attraction}
+              onAttractionClick={onAttractionClick}
+            />
+          ))}
+        </div>
+
+        {/* 좌쪽 가장자리 페이드 */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
+      </div>
+    </section>
+  )
 }
 
 /** 메인 카드 컴포넌트 */

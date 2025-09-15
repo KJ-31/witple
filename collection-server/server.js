@@ -25,9 +25,7 @@ app.use(compression());
 app.use(cors({
   origin: [
     'http://localhost:3000',           // 개발환경 Frontend
-    'http://localhost:3001',           // 개발환경 추가
-    'https://your-domain.com',         // 운영환경 (실제 도메인으로 변경 필요)
-    'https://witple.com'               // 운영환경 (실제 도메인으로 변경 필요)
+    'https://witple.kro.kr'               // 운영환경 (실제 도메인으로 변경 필요)
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

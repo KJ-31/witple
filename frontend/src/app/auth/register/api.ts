@@ -66,41 +66,19 @@ export const getCurrentUser = async () => {
   return response.data
 }
 
-// 프론트엔드 값을 DB 값으로 매핑하는 함수
+// 프론트엔드 값을 DB 값으로 매핑하는 함수 (모든 값이 백엔드 enum과 정확히 일치)
 const mapPreferencesToDB = (preferences: any) => {
-  const travelStyleMap: Record<string, string> = {
-    luxury: 'luxury',
-    city: 'modern', 
-    nature: 'nature_activity',
-    food: 'foodie'
-  }
-  
-  const investmentMap: Record<string, string> = {
-    accommodation: 'accommodation',
-    food: 'restaurants',
-    experience: 'experience',
-    shopping: 'shopping'
-  }
-  
-  const accommodationMap: Record<string, string> = {
-    hotel: 'comfort',
-    nature: 'healing',
-    traditional: 'traditional',
-    social: 'community'
-  }
-  
-  const destinationMap: Record<string, string> = {
-    famous: 'hot',
-    hidden: 'local',
-    mixed: 'balance',
-    experience: 'authentic_experience'
-  }
-  
+  // 모든 필드가 이제 백엔드 enum과 정확히 일치
+  // PersonaType: luxury, modern, nature_activity, foodie
+  // PriorityType: accommodation, restaurants, experience, shopping
+  // AccommodationType: comfort, healing, traditional, community
+  // ExplorationType: hot, local, balance
+
   return {
-    persona: travelStyleMap[preferences.travelStyle] || preferences.travelStyle,
-    priority: investmentMap[preferences.investment] || preferences.investment,
-    accommodation: accommodationMap[preferences.accommodation] || preferences.accommodation,
-    exploration: destinationMap[preferences.destination] || preferences.destination
+    persona: preferences.travelStyle, // 직접 사용 (이미 enum 값)
+    priority: preferences.investment, // 직접 사용 (이미 enum 값)
+    accommodation: preferences.accommodation, // 직접 사용 (이미 enum 값)
+    exploration: preferences.destination // 직접 사용 (이미 enum 값)
   }
 }
 

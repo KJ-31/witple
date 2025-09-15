@@ -8,7 +8,12 @@ from database import get_db
 from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
-from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+# ❌ v1 추천 시스템 import 주석처리
+# from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+
+# ✅ v2 추천 시스템 import
+from auth_utils import get_current_user_optional  # 인증 함수는 별도 모듈로 이동
+from vectorization2 import get_engine  # v2 추천 엔진 사용
 from cache_utils import cache, cache_attraction_data, get_cached_attraction_data, increment_view_count, get_view_count
 import logging
 
@@ -987,8 +992,6 @@ async def get_filtered_attractions(
             logger.info(f"Cache hit for filtered attractions: {cache_key}")
             return cached_result
         
-        logger.info(f"Cache miss for filtered attractions: {cache_key}")
-        
         results = []
         
         # 로그인 상태에 따른 추천 알고리즘 적용
@@ -1007,15 +1010,19 @@ async def get_filtered_attractions(
                     limit=personalized_limit
                 )
                 
-                # 코사인 유사도 기반 (하단 절반) - 중복 제거
-                used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
-                similarity_limit = limit - len(personalized_places)
-                similarity_places = await get_similarity_based_places(
-                    region=region,
-                    category=category,
-                    limit=similarity_limit,
-                    exclude_ids=used_place_ids
-                )
+                # ❌ v1 주석처리
+                # # 코사인 유사도 기반 (하단 절반) - 중복 제거
+                # used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
+                # similarity_limit = limit - len(personalized_places)
+                # similarity_places = await get_similarity_based_places(
+                #     region=region,
+                #     category=category,
+                #     limit=similarity_limit,
+                #     exclude_ids=used_place_ids
+                # )
+
+                # v2에서는 이미 통합되어 처리되므로 별도 유사도 기반 처리 불필요
+                similarity_places = []
                 
                 # 결과 결합 및 포맷팅
                 all_recommendations = personalized_places + similarity_places
@@ -1045,12 +1052,22 @@ async def get_filtered_attractions(
                 
             except Exception as e:
                 logger.error(f"Personalized recommendations failed: {str(e)}")
-                # 개인화 실패시 유사도 기반으로 fallback
-                similarity_places = await get_similarity_based_places(
+                # ❌ v1 주석처리
+                # # 개인화 실패시 유사도 기반으로 fallback
+                # similarity_places = await get_similarity_based_places(
+                #     region=region,
+                #     category=category,
+                #     limit=limit,
+                #     exclude_ids=set()
+                # )
+
+                # ✅ v2 추천 시스템 사용 (fallback)
+                engine = await get_engine()
+                similarity_places = await engine.get_recommendations(
+                    user_id=None,  # 비로그인 사용자로 처리
                     region=region,
                     category=category,
-                    limit=limit,
-                    exclude_ids=set()
+                    limit=limit
                 )
                 
                 for place in similarity_places:
@@ -1074,13 +1091,24 @@ async def get_filtered_attractions(
                     results.append(formatted_attraction)
         
         else:
-            # 비로그인 시: 코사인 유사도만
-            logger.info("Guest user - similarity based recommendations")
-            similarity_places = await get_similarity_based_places(
+            # ❌ v1 주석처리
+            # # 비로그인 시: 코사인 유사도만
+            # logger.info("Guest user - similarity based recommendations")
+            # similarity_places = await get_similarity_based_places(
+            #     region=region,
+            #     category=category,
+            #     limit=limit,
+            #     exclude_ids=set()
+            # )
+
+            # ✅ v2 추천 시스템 사용 (비로그인)
+            logger.info("Guest user - v2 recommendation system")
+            engine = await get_engine()
+            similarity_places = await engine.get_recommendations(
+                user_id=None,  # 비로그인 사용자로 처리
                 region=region,
                 category=category,
-                limit=limit,
-                exclude_ids=set()
+                limit=limit
             )
             
             for place in similarity_places:
@@ -1103,21 +1131,40 @@ async def get_filtered_attractions(
                 }
                 results.append(formatted_attraction)
         
+        # 전체 결과 수 계산 (페이지네이션 없이)
+        total_available = 0
+        
+        for table_name, table_model in CATEGORY_TABLES.items():
+            query = db.query(table_model)
+            if region and region != '전국':
+                query = query.filter(table_model.region.ilike(f"%{region}%"))
+            if category:
+                table_category = get_category_from_table(table_name)
+                if table_category == category:
+                    count = query.count()
+                    total_available += count
+            else:
+                count = query.count()
+                total_available += count
+        
+        # hasMore 계산
+        has_more = (page + 1) * limit < total_available
+        
         result = {
             "attractions": results,
             "total": len(results),
-            "totalAvailable": len(results),
+            "totalAvailable": total_available,
             "page": page,
             "limit": limit,
-            "hasMore": False,  # 일정 짜기에서는 페이지네이션 없이 한 번에 모든 결과 반환
+            "hasMore": has_more,
             "filters": {
                 "region": region,
                 "category": category
             }
         }
         
-        # 결과를 캐시에 저장 (30분)
-        cache.set(cache_key, result, expire=1800)
+        # 결과를 캐시에 저장 (5분으로 단축 - 테스트용)
+        cache.set(cache_key, result, expire=300)
         
         return result
         
