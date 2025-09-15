@@ -8,7 +8,12 @@ from database import get_db
 from models import User
 from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
 from schemas import UserResponse
-from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+# ❌ v1 추천 시스템 import 주석처리
+# from routers.recommendations import get_current_user_optional, recommendation_engine, get_similarity_based_places
+
+# ✅ v2 추천 시스템 import
+from auth_utils import get_current_user_optional  # 인증 함수는 별도 모듈로 이동
+from vectorization2 import get_engine  # v2 추천 엔진 사용
 from cache_utils import cache, cache_attraction_data, get_cached_attraction_data, increment_view_count, get_view_count
 import logging
 
@@ -1005,15 +1010,19 @@ async def get_filtered_attractions(
                     limit=personalized_limit
                 )
                 
-                # 코사인 유사도 기반 (하단 절반) - 중복 제거
-                used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
-                similarity_limit = limit - len(personalized_places)
-                similarity_places = await get_similarity_based_places(
-                    region=region,
-                    category=category,
-                    limit=similarity_limit,
-                    exclude_ids=used_place_ids
-                )
+                # ❌ v1 주석처리
+                # # 코사인 유사도 기반 (하단 절반) - 중복 제거
+                # used_place_ids = {f"{p['table_name']}_{p['place_id']}" for p in personalized_places}
+                # similarity_limit = limit - len(personalized_places)
+                # similarity_places = await get_similarity_based_places(
+                #     region=region,
+                #     category=category,
+                #     limit=similarity_limit,
+                #     exclude_ids=used_place_ids
+                # )
+
+                # v2에서는 이미 통합되어 처리되므로 별도 유사도 기반 처리 불필요
+                similarity_places = []
                 
                 # 결과 결합 및 포맷팅
                 all_recommendations = personalized_places + similarity_places
@@ -1043,12 +1052,22 @@ async def get_filtered_attractions(
                 
             except Exception as e:
                 logger.error(f"Personalized recommendations failed: {str(e)}")
-                # 개인화 실패시 유사도 기반으로 fallback
-                similarity_places = await get_similarity_based_places(
+                # ❌ v1 주석처리
+                # # 개인화 실패시 유사도 기반으로 fallback
+                # similarity_places = await get_similarity_based_places(
+                #     region=region,
+                #     category=category,
+                #     limit=limit,
+                #     exclude_ids=set()
+                # )
+
+                # ✅ v2 추천 시스템 사용 (fallback)
+                engine = await get_engine()
+                similarity_places = await engine.get_recommendations(
+                    user_id=None,  # 비로그인 사용자로 처리
                     region=region,
                     category=category,
-                    limit=limit,
-                    exclude_ids=set()
+                    limit=limit
                 )
                 
                 for place in similarity_places:
@@ -1072,13 +1091,24 @@ async def get_filtered_attractions(
                     results.append(formatted_attraction)
         
         else:
-            # 비로그인 시: 코사인 유사도만
-            logger.info("Guest user - similarity based recommendations")
-            similarity_places = await get_similarity_based_places(
+            # ❌ v1 주석처리
+            # # 비로그인 시: 코사인 유사도만
+            # logger.info("Guest user - similarity based recommendations")
+            # similarity_places = await get_similarity_based_places(
+            #     region=region,
+            #     category=category,
+            #     limit=limit,
+            #     exclude_ids=set()
+            # )
+
+            # ✅ v2 추천 시스템 사용 (비로그인)
+            logger.info("Guest user - v2 recommendation system")
+            engine = await get_engine()
+            similarity_places = await engine.get_recommendations(
+                user_id=None,  # 비로그인 사용자로 처리
                 region=region,
                 category=category,
-                limit=limit,
-                exclude_ids=set()
+                limit=limit
             )
             
             for place in similarity_places:

@@ -7,7 +7,8 @@ import redis
 import logging
 import os
 from database import engine, Base
-from routers import auth, users, posts, attractions, recommendations, profile, saved_locations, trips, chat, batch_processing
+# ✅ v2 추천 시스템 사용 (v1 완전 제거)
+from routers import auth, users, posts, attractions, recommendations2, profile, saved_locations, trips, chat, batch_processing
 from config import settings
 
 # 로깅 설정
@@ -73,7 +74,11 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(posts.router, prefix="/api/v1", tags=["posts"])
 app.include_router(attractions.router, prefix="/api/v1/attractions", tags=["attractions"])
-app.include_router(recommendations.router, prefix="/api/v1", tags=["recommendations"])
+# ❌ v1 추천 라우터 비활성화 (v2로 완전 대체)
+# app.include_router(recommendations.router, prefix="/api/v1", tags=["recommendations"])
+
+# ✅ v2 추천 라우터 (새로운 시스템)
+app.include_router(recommendations2.router, prefix="/api/v2", tags=["recommendations-v2"])
 app.include_router(profile.router, prefix="/api/v1/profile", tags=["profile"])
 app.include_router(saved_locations.router, prefix="/api/v1/saved-locations", tags=["saved-locations"])
 app.include_router(trips.router, prefix="/api/v1/trips", tags=["trips"])
