@@ -21,6 +21,19 @@ export default function Home() {
   const [userInfo, setUserInfo] = useState<{ name: string, preferences: any } | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
+  // 검색 관련 state
+  const [searchResults, setSearchResults] = useState<Array<{
+    display_name: string
+    lat: string
+    lon: string
+    name?: string
+    type?: string
+    city?: string
+    importance?: number
+  }>>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [showSearchResults, setShowSearchResults] = useState(false)
+
   // 사용자 정보 및 여행 취향 로드 함수
   const loadUserInfo = useCallback(async () => {
     if (!session || !(session as any).backendToken) {
@@ -211,6 +224,53 @@ export default function Home() {
     }
   }, [selectedRegion])
 
+  // 위치 검색 함수
+  const searchLocation = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([])
+      setShowSearchResults(false)
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      const response = await fetch(`/api/places?query=${encodeURIComponent(query)}`)
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      setSearchResults(data)
+      setShowSearchResults(true)
+    } catch (error) {
+      console.error('위치 검색 실패:', error)
+      setSearchResults([])
+      setShowSearchResults(false)
+    } finally {
+      setIsSearching(false)
+    }
+  }, [])
+
+  // 검색 결과 선택 핸들러
+  const handleSearchResultSelect = useCallback((result: typeof searchResults[0]) => {
+    // 위치를 선택하면 해당 위치의 관광지 페이지로 이동
+    const locationName = result.name || result.display_name.split(',')[0]
+    console.log('선택된 위치:', locationName, result)
+
+    // 검색창 닫기
+    setShowSearchResults(false)
+    setSearchQuery('')
+
+    // TODO: 위치별 관광지 페이지로 이동하는 로직 추가
+    // router.push(`/location/${encodeURIComponent(locationName)}`)
+  }, [])
+
   // 지역 변경 핸들러
   const handleRegionChange = useCallback((region: string) => {
     setSelectedRegion(region)
@@ -253,6 +313,33 @@ export default function Home() {
       // 에러 시에도 메인 페이지는 정상 작동
     }
   }, [session, router])
+
+  // 검색 디바운싱을 위한 useEffect
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchQuery.trim()) {
+        searchLocation(searchQuery)
+      } else {
+        setSearchResults([])
+        setShowSearchResults(false)
+      }
+    }, 500)
+
+    return () => clearTimeout(delayedSearch)
+  }, [searchQuery, searchLocation])
+
+  // 외부 클릭시 검색 결과 닫기
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element
+      if (showSearchResults && !target.closest('.search-container')) {
+        setShowSearchResults(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showSearchResults])
 
   // 세션 상태 변경 시 초기화 플래그 리셋 (실제 사용자 변경시에만)
   useEffect(() => {
@@ -319,9 +406,93 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#0B1220] text-slate-200 pb-20">
-      {/* Header with Logo and Chatbot */}
-      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between pr-4 pl-6 py-4 mb-10">
+      {/* Header with Logo and Search */}
+      <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center gap-4 pr-4 pl-6 py-4 mb-10">
         <h1 className="text-[2.75rem] font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
+
+        {/* 검색창 */}
+        <div className="flex-1 max-w-md search-container">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="여행지를 검색해보세요"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchResults.length > 0) {
+                  handleSearchResultSelect(searchResults[0])
+                }
+              }}
+              onFocus={() => {
+                if (searchQuery.trim() && searchResults.length > 0) {
+                  setShowSearchResults(true)
+                }
+              }}
+              className="w-full py-2 pr-8 pl-4 bg-transparent border-0 border-b border-[#252F42] text-slate-200 placeholder-slate-200/20 focus:outline-none focus:border-[#3E68FF] transition-colors"
+            />
+
+            {/* 검색 아이콘 또는 로딩 스피너 */}
+            {isSearching ? (
+              <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#3E68FF]"></div>
+              </div>
+            ) : (
+              <svg
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#94A9C9] cursor-pointer hover:text-[#3E68FF] transition-colors"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                onClick={() => {
+                  if (searchQuery.trim() && searchResults.length > 0) {
+                    handleSearchResultSelect(searchResults[0])
+                  }
+                }}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            )}
+
+            {/* 검색 결과 드롭다운 */}
+            {showSearchResults && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A2332] border border-[#252F42] rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                {searchResults.length > 0 ? (
+                  searchResults.map((result, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleSearchResultSelect(result)}
+                      className="w-full px-4 py-3 text-left hover:bg-[#252F42] transition-colors border-b border-[#252F42] last:border-b-0 flex items-start"
+                    >
+                      <svg className="w-4 h-4 text-[#3E68FF] mt-1 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <div className="flex-1">
+                        <p className="text-slate-200 text-sm font-medium">
+                          {result.name || result.display_name.split(',')[0]}
+                        </p>
+                        <p className="text-[#94A9C9] text-xs mt-1">
+                          {(() => {
+                            const parts = result.display_name.split(',').map((part: string) => part.trim())
+                            return parts.slice(0, 2).join(', ')
+                          })()}
+                        </p>
+                      </div>
+                    </button>
+                  ))
+                ) : searchQuery.trim() ? (
+                  <div className="px-4 py-3 text-[#94A9C9] text-sm text-center">
+                    "{searchQuery}"에 대한 검색 결과가 없습니다
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Main Card 섹션 - 로그인/비로그인 모두 표시 */}
