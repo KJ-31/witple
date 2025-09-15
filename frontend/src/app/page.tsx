@@ -322,19 +322,6 @@ export default function Home() {
       {/* Header with Logo and Chatbot */}
       <div className="sticky top-0 z-40 bg-[#0B1220] flex items-center justify-between pr-4 pl-6 py-4 mb-10">
         <h1 className="text-[2.75rem] font-logo text-[#3E68FF] tracking-wide">WITPLE</h1>
-        {/* <button
-          onClick={() => {
-            const chatbotEvent = new CustomEvent('openChatbot');
-            window.dispatchEvent(chatbotEvent);
-          }}
-          className="w-12 h-12 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
-        >
-          <img
-            src="/images/chat_icon.svg"
-            alt="챗봇"
-            className="w-8 h-8"
-          />
-        </button> */}
       </div>
 
       {/* Main Card 섹션 - 로그인/비로그인 모두 표시 */}
@@ -384,7 +371,7 @@ export default function Home() {
         {popularSection && (
           <div className="space-y-6">
             {/* 제목과 필터 버튼 */}
-            <div className="px-5 flex items-center justify-between">
+            <div className="pl-[10px] pr-5 flex items-center justify-between">
               <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
                 {selectedRegion} 인기 추천
               </h2>
@@ -403,7 +390,7 @@ export default function Home() {
                   strokeWidth="2"
                   className="text-current"
                 >
-                  <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+                  <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
                 </svg>
                 <span className="text-sm font-medium">필터</span>
               </button>
@@ -415,6 +402,7 @@ export default function Home() {
               cityName={popularSection.cityName}
               attractions={popularSection.attractions}
               categorySections={popularSection.categorySections}
+              hideTitle={true}
               onAttractionClick={(attractionId) => {
                 // 🎯 인기순 카드 클릭 추적
                 const attraction = popularSection.attractions?.find(a => a.id === attractionId) ||
@@ -523,27 +511,31 @@ function SectionCarousel({
   cityName,
   attractions,
   categorySections,
+  hideTitle = false,
   onAttractionClick,
 }: {
   title: string
   cityName: string
   attractions: { id: string; name: string; description: string; imageUrl: string; category: string }[]
   categorySections?: Array<{ category: string; categoryName: string; attractions: any[]; total: number }>
+  hideTitle?: boolean
   onAttractionClick: (attractionId: string) => void
 }) {
   return (
     <section aria-label={`${cityName} ${title}`} className="w-full">
       {/* 도시 제목과 추천 점수 */}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
-            {title}
-          </h2>
-          {/* <div className="flex items-center mt-2 space-x-2">
-            <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
-          </div> */}
+      {!hideTitle && (
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
+              {title}
+            </h2>
+            {/* <div className="flex items-center mt-2 space-x-2">
+              <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
+            </div> */}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 카테고리별 섹션이 있는 경우 */}
       {categorySections && categorySections.length > 0 ? (
