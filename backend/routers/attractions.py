@@ -992,8 +992,6 @@ async def get_filtered_attractions(
             logger.info(f"Cache hit for filtered attractions: {cache_key}")
             return cached_result
         
-        logger.info(f"Cache miss for filtered attractions: {cache_key}")
-        
         results = []
         
         # 로그인 상태에 따른 추천 알고리즘 적용
@@ -1133,21 +1131,40 @@ async def get_filtered_attractions(
                 }
                 results.append(formatted_attraction)
         
+        # 전체 결과 수 계산 (페이지네이션 없이)
+        total_available = 0
+        
+        for table_name, table_model in CATEGORY_TABLES.items():
+            query = db.query(table_model)
+            if region and region != '전국':
+                query = query.filter(table_model.region.ilike(f"%{region}%"))
+            if category:
+                table_category = get_category_from_table(table_name)
+                if table_category == category:
+                    count = query.count()
+                    total_available += count
+            else:
+                count = query.count()
+                total_available += count
+        
+        # hasMore 계산
+        has_more = (page + 1) * limit < total_available
+        
         result = {
             "attractions": results,
             "total": len(results),
-            "totalAvailable": len(results),
+            "totalAvailable": total_available,
             "page": page,
             "limit": limit,
-            "hasMore": False,  # 일정 짜기에서는 페이지네이션 없이 한 번에 모든 결과 반환
+            "hasMore": has_more,
             "filters": {
                 "region": region,
                 "category": category
             }
         }
         
-        # 결과를 캐시에 저장 (30분)
-        cache.set(cache_key, result, expire=1800)
+        # 결과를 캐시에 저장 (5분으로 단축 - 테스트용)
+        cache.set(cache_key, result, expire=300)
         
         return result
         

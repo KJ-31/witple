@@ -1707,7 +1707,6 @@ export default function MapPage() {
                 gap: 2px;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 white-space: nowrap;
-                transform: translateX(-10px);
               ">
                 <!-- 색상 동그라미에 이모티콘 -->
                 <div style="
@@ -2775,6 +2774,7 @@ export default function MapPage() {
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
+          source={sourceParam}
           onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
@@ -3253,9 +3253,9 @@ export default function MapPage() {
                             onDragLeave={handleDragLeave}
                             onDrop={(e) => handleDrop(e, index, day)}
                             className={`w-full transition-all duration-200 ${
-                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem 
-                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2' 
-                                : ''
+                              dragOverIndex?.day === day && dragOverIndex?.index === index && draggedItem
+                                ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mb-2 h-4'
+                                : 'h-2'
                             }`}
                           />
                           
@@ -3683,9 +3683,9 @@ export default function MapPage() {
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, (groupedPlaces[day] || []).length, day)}
                         className={`w-full transition-all duration-200 ${
-                          dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem 
-                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2' 
-                            : ''
+                          dragOverIndex?.day === day && dragOverIndex?.index === (groupedPlaces[day] || []).length && draggedItem
+                            ? 'border-t-4 border-[#3E68FF] bg-[#3E68FF]/10 mt-2 h-4'
+                            : 'h-2'
                         }`}
                       />
                     </div>
