@@ -481,8 +481,7 @@ def get_travel_recommendation_stream(query):
 # =============================================================================
 
 # 기상청 API 키 (환경변수에서 가져오기)
-# WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')
-WEATHER_API_KEY = 'fac9890f5f6a030d09d6867e369736ea3ce9f47aff1fe55029f5f94e96e45ea7'
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')
 
 def get_coordinates_for_region(region_name):
     """지역명을 기상청 API용 격자 좌표로 변환"""
