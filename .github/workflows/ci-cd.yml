@@ -350,6 +350,12 @@ jobs:
           --from-literal=NEXT_PUBLIC_API_URL="${{ secrets.NEXT_PUBLIC_API_URL }}" \
           --from-literal=NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}"
         
+        # 기상청 API 키 시크릿 생성
+        kubectl delete secret weather-secret -n ${{ env.EKS_NAMESPACE }} --ignore-not-found=true
+        kubectl create secret generic weather-secret \
+          --namespace=${{ env.EKS_NAMESPACE }} \
+          --from-literal=WEATHER_API_KEY="${{ secrets.WEATHER_API_KEY }}"
+        
         echo "Secrets created successfully"
         
         # ECR Pull Secret 생성 (이미지 Pull을 위해)

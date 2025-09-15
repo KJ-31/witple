@@ -59,6 +59,11 @@ spec:
               key: AWS_SECRET_ACCESS_KEY
         - name: AWS_DEFAULT_REGION
           value: "ap-northeast-2"
+        - name: WEATHER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: weather-secret
+              key: WEATHER_API_KEY
         resources:
           requests:
             memory: "1Gi"
