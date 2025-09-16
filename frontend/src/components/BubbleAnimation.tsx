@@ -93,13 +93,13 @@ export default function BubbleAnimation() {
   // 사용자 취향 정보 가져오기
   useEffect(() => {
     async function loadUserPreferences() {
-      console.log('🔄 BubbleAnimation - 로그인 상태:', !!session?.user?.email)
-      console.log('🔄 BubbleAnimation - 사용자 이메일:', session?.user?.email)
+      // console.log('🔄 BubbleAnimation - 로그인 상태:', !!session?.user?.email)
+      // console.log('🔄 BubbleAnimation - 사용자 이메일:', session?.user?.email)
 
       if (session?.user?.email) {
         try {
           // DB user_preference 테이블에서 사용자 취향 정보 가져오기
-          console.log('🔄 API 호출 시작 - 취향 정보 조회')
+          // console.log('🔄 API 호출 시작 - 취향 정보 조회')
           const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
           const response = await fetch(`${API_BASE_URL}/api/v1/profile/me`, {
             method: 'GET',
@@ -109,13 +109,13 @@ export default function BubbleAnimation() {
             credentials: 'include'
           })
 
-          console.log('🔄 API 응답 상태:', response.status, response.ok)
+          // console.log('🔄 API 응답 상태:', response.status, response.ok)
 
           if (response.ok) {
             const preferences = await response.json()
-            console.log('✅ 취향 정보 로드 성공:', preferences)
-            console.log('✅ Priority 값:', preferences?.priority)
-            console.log('✅ 전체 응답 구조 확인:', JSON.stringify(preferences, null, 2))
+            // console.log('✅ 취향 정보 로드 성공:', preferences)
+            // console.log('✅ Priority 값:', preferences?.priority)
+            // console.log('✅ 전체 응답 구조 확인:', JSON.stringify(preferences, null, 2))
             setUserPreferences(preferences)
 
             // priority 값이 있는지 체크
@@ -136,14 +136,14 @@ export default function BubbleAnimation() {
             }
           } else {
             // 로그인했지만 취향 정보가 없는 경우 기본 로그인 메시지
-            console.log('⚠️ 취향 정보 없음 - 기본 로그인 메시지 사용')
+            // console.log('⚠️ 취향 정보 없음 - 기본 로그인 메시지 사용')
             const defaultMessages = [
               '새로운 여행지를 찾아볼까요?',
               '함께 여행을 계획해볼까요?',
               '맞춤 추천을 받아보세요!',
               '취향 설정하면 더 정확해요!'
             ]
-            console.log('⚠️ 기본 로그인 메시지:', defaultMessages)
+            // console.log('⚠️ 기본 로그인 메시지:', defaultMessages)
             setMessages(defaultMessages)
           }
         } catch (error) {
@@ -159,7 +159,7 @@ export default function BubbleAnimation() {
         }
       } else {
         // 비로그인 상태 - 기본 메시지
-        console.log('👤 비로그인 상태 - 기본 메시지 사용')
+        // console.log('👤 비로그인 상태 - 기본 메시지 사용')
         const guestMessages = [
           '어디로 떠나고 싶으신가요?',
           'hello, World!',
@@ -167,7 +167,7 @@ export default function BubbleAnimation() {
           '한옥 경험은 어떠세요?',
           '인기 여행지가 궁금하세요?'
         ]
-        console.log('👤 비로그인 메시지:', guestMessages)
+        // console.log('👤 비로그인 메시지:', guestMessages)
         setMessages(guestMessages)
       }
     }

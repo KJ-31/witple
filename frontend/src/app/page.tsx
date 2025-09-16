@@ -92,7 +92,7 @@ export default function Home() {
             if (bookmarkResponse.ok) {
               const bookmarkData = await bookmarkResponse.json()
               bookmarkCount = bookmarkData.total || 0
-              console.log('사용자 북마크 수:', bookmarkCount)
+              // console.log('사용자 북마크 수:', bookmarkCount)
             }
           } catch (bookmarkError) {
             console.warn('북마크 수 확인 오류:', bookmarkError)
@@ -153,9 +153,9 @@ export default function Home() {
 
       // 지역 필터가 설정되어 있으면 해당 지역 데이터만 필터링
       if (region && region !== '전체') {
-        console.log('지역 필터링 전 데이터:', result.data.length, '개 섹션')
-        console.log('전체 지역 목록:', result.data.map(s => `${s.cityName}(${s.region})`))
-        console.log('필터 대상 지역:', region)
+        // console.log('지역 필터링 전 데이터:', result.data.length, '개 섹션')
+        // console.log('전체 지역 목록:', result.data.map(s => `${s.cityName}(${s.region})`))
+        // console.log('필터 대상 지역:', region)
 
         filteredData = result.data.filter(section => {
           // 더 유연한 지역 매칭
@@ -166,11 +166,11 @@ export default function Home() {
                                region.includes(section.region || '') ||
                                region.includes(section.cityName || '')
 
-          console.log(`섹션 ${section.cityName}(${section.region}): ${regionMatches ? '포함' : '제외'}`)
+          // console.log(`섹션 ${section.cityName}(${section.region}): ${regionMatches ? '포함' : '제외'}`)
           return regionMatches
         })
 
-        console.log('지역 필터링 후 데이터:', filteredData.length, '개 섹션')
+        // console.log('지역 필터링 후 데이터:', filteredData.length, '개 섹션')
 
         // 필터링 후 데이터가 없으면 전체 데이터 사용 (백엔드가 지역 필터를 지원하지 않을 경우)
         if (filteredData.length === 0) {
@@ -430,7 +430,7 @@ export default function Home() {
   useEffect(() => {
     if (status !== 'loading' && !isInitialized) {
       setIsInitialized(true)
-      console.log('초기화 시작 - 세션:', !!session)
+      // console.log('초기화 시작 - 세션:', !!session)
 
       if (session) {
         // 로그인 상태: 사용자 정보 먼저 로드 후 추천 데이터 로드
