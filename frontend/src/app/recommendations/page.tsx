@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
 import { useDataCache } from '../../contexts/DataCacheContext'
+import { useChatbot } from '../../components/ChatbotProvider'
 
 interface RecommendationItem {
   id: string
@@ -22,6 +23,7 @@ interface RecommendationItem {
 export default function RecommendationsPage() {
   const router = useRouter()
   const { data: session } = useSession()
+  const { setIsAppLoading } = useChatbot()
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState(() => {
     // 초기값을 sessionStorage에서 가져오기
@@ -100,6 +102,11 @@ export default function RecommendationsPage() {
       rightColumnItems: formattedItems.slice(8, 15)
     }
   }
+
+  // 로딩 상태를 전역 상태와 동기화
+  useEffect(() => {
+    setIsAppLoading(loading)
+  }, [loading, setIsAppLoading])
 
   // 페이지 로드/언마운트 시 스크롤 위치 관리
   useEffect(() => {

@@ -3,15 +3,16 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchPersonalizedRegionCategories, fetchPopularSectionByRegion, getUserType, type CitySection } from '../lib/dummyData'
-import BubbleAnimation from '../components/BubbleAnimation'
 import { BottomNavigation } from '../components'
 import { trackClick } from '../utils/actionTracker'
 import { useActionTrackerSession } from '../hooks/useActionTrackerSession'
 import { useDataCache } from '../contexts/DataCacheContext'
+import { useChatbot } from '../components/ChatbotProvider'
 
 export default function Home() {
   const router = useRouter()
   const { session, status } = useActionTrackerSession()
+  const { setIsAppLoading } = useChatbot()
   const { getCachedData, setCachedData, isCacheValid } = useDataCache()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
@@ -445,6 +446,11 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showSearchResults])
 
+  // 로딩 상태를 전역 상태와 동기화
+  useEffect(() => {
+    setIsAppLoading(loading)
+  }, [loading, setIsAppLoading])
+
   // 세션 상태 변경 시 초기화 플래그 리셋 (실제 사용자 변경시에만)
   useEffect(() => {
     // 로그인/로그아웃 시에만 리셋 (이메일이 실제로 변경되는 경우만)
@@ -799,7 +805,6 @@ export default function Home() {
       </main>
 
       <BottomNavigation />
-      <BubbleAnimation />
     </div>
   )
 }

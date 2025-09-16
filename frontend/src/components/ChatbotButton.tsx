@@ -5,19 +5,19 @@ import { usePathname } from 'next/navigation'
 import { useChatbot } from './ChatbotProvider'
 
 export function ChatbotButton() {
-  const { setShowChatbot } = useChatbot()
+  const { setShowChatbot, isAppLoading } = useChatbot()
   const pathname = usePathname()
 
   // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
   const allowedPaths = ['/', '/recommendations']
 
-  // 현재 경로가 허용된 페이지가 아니면 렌더링하지 않음
+  // 현재 경로가 허용된 페이지가 아니거나 로딩 중이면 렌더링하지 않음
   if (!allowedPaths.some(path => {
     if (path === '/') {
       return pathname === '/'  // 메인화면은 정확히 일치해야 함
     }
     return pathname.startsWith(path)  // 추천탭은 startsWith로 체크
-  })) {
+  }) || isAppLoading) {
     return null
   }
 

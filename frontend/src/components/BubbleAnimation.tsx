@@ -6,7 +6,7 @@ import { useChatbot } from './ChatbotProvider'
 import { usePathname } from 'next/navigation'
 
 export default function BubbleAnimation() {
-  const { setShowChatbot, showChatbot } = useChatbot()
+  const { setShowChatbot, showChatbot, isAppLoading } = useChatbot()
   const pathname = usePathname()
 
   // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
@@ -122,8 +122,8 @@ export default function BubbleAnimation() {
     }
   }, [rive, showChatbot, showTrigger, shouldShowBubble, pathname]) // pathname 의존성 추가
 
-  // 허용된 페이지가 아니면 BubbleAnimation 숨김
-  if (!shouldShowBubble) {
+  // 허용된 페이지가 아니거나 로딩 중이면 BubbleAnimation 숨김
+  if (!shouldShowBubble || isAppLoading) {
     return null
   }
 

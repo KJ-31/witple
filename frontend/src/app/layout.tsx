@@ -3,6 +3,7 @@ import './globals.css'
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { PWAInstallPrompt, ChatbotProvider, ChatbotButton, ChatbotModal } from '../components'
+import BubbleAnimation from '../components/BubbleAnimation'
 import NextAuthSessionProvider from '../components/SessionProvider'
 import ActionTrackerProvider from '../components/ActionTrackerProvider'
 import { DataCacheProvider } from '../contexts/DataCacheContext'
@@ -65,6 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </main>
               <ChatbotButton />
               <ChatbotModal />
+              <BubbleAnimation />
               <PWAInstallPrompt />
             </ChatbotProvider>
           </NextAuthSessionProvider>
