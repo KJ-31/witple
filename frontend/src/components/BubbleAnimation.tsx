@@ -13,11 +13,6 @@ export default function BubbleAnimation() {
   const hiddenPaths = ['/feed', '/profile', '/attraction', '/plan', '/itinerary']
   const shouldHideButton = hiddenPaths.some(path => pathname.startsWith(path))
 
-  // ChatbotButton이 숨겨진 페이지에서는 BubbleAnimation도 숨김
-  if (shouldHideButton) {
-    return null
-  }
-
   const { rive, RiveComponent } = useRive({
     src: '/rive/bubble_3.riv',
     stateMachines: 'State Machine 1',
@@ -89,9 +84,9 @@ export default function BubbleAnimation() {
     const samples = [
       '어디로 떠나고 싶으신가요?',
       'hello, World!',
-      '안녕하세요! 쉽지만 간단하게 여행을 짜보세요',
-      'Rive + Data Binding 테스트 중…',
-      '줄바꿈/오토 레이아웃 확인용 문구예요.',
+      '원하는 곳을 말해보세요!',
+      '한옥에서 보내는 특별한 경험은 어떠신가요?',
+      '최근 가장 인기있는 곳이 궁금하신가요?',
     ]
     let idx = 0
     setSpeech(samples[idx])
@@ -110,6 +105,11 @@ export default function BubbleAnimation() {
     }
   }, [rive, showChatbot, showTrigger])
 
+  // ChatbotButton이 숨겨진 페이지에서는 BubbleAnimation도 숨김
+  if (shouldHideButton) {
+    return null
+  }
+
   return (
     <div className="fixed z-[9999] bottom-[136px] sm:bottom-[164px] right-[44px] sm:right-[58px] md:right-[68px] lg:right-[72px]">
       <div
@@ -117,7 +117,7 @@ export default function BubbleAnimation() {
       >
         <div className="relative">
           {/* 반응형 크기 조정 */}
-          <div className="w-[280px] h-[70px] sm:w-[350px] sm:h-[87px] md:w-[400px] md:h-[100px]">
+          <div className="w-[300px] h-[70px] sm:w-[350px] sm:h-[87px] md:w-[400px] md:h-[100px]">
             <RiveComponent className="w-full h-full" />
           </div>
 
