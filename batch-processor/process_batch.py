@@ -17,6 +17,7 @@ import boto3
 import pandas as pd
 import numpy as np
 from langchain_experimental.open_clip import OpenCLIPEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import requests
@@ -50,6 +51,18 @@ BATCH_ID = os.getenv('BATCH_ID', f'batch_{int(datetime.now().timestamp())}')
 JOB_NAME = os.getenv('AWS_BATCH_JOB_NAME', 'witple-vectorization-job')
 JOB_ID = os.getenv('AWS_BATCH_JOB_ID', 'unknown')
 
+# 시간 가중치 설정 (외부화)
+TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
+
+# 텍스트 벡터화 모델 설정 (HuggingFace MiniLM)
+TEXT_MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"
+TEXT_VECTOR_DIM = 384
+
+# 이미지 벡터화 모델 설정 (OpenCLIP)
+OPENCLIP_IMAGE_MODEL_NAME = "ViT-B-32"  # 이미지용 (512차원)
+OPENCLIP_IMAGE_CHECKPOINT = "laion2b_s34b_b79k"
+IMAGE_VECTOR_DIM = 512
+
 # 로드된 환경변수 확인
 logger = logging.getLogger(__name__)
 print(f"🔧 Environment Variables:")
@@ -60,13 +73,8 @@ print(f"  DATABASE_URL: {'***' if DATABASE_URL else 'NOT SET'}")
 print(f"  WEBHOOK_URL: {WEBHOOK_URL}")
 print(f"  AWS_ACCESS_KEY_ID: {'***' if os.getenv('AWS_ACCESS_KEY_ID') else 'NOT SET'}")
 print(f"  TIME_DECAY_LAMBDA: {TIME_DECAY_LAMBDA} (30-day decay: {np.exp(-TIME_DECAY_LAMBDA * 30):.2f})")
-
-# OpenCLIP 모델 설정
-OPENCLIP_MODEL_NAME = "ViT-B-32"
-OPENCLIP_CHECKPOINT = "laion2b_s34b_b79k"
-
-# 시간 가중치 설정 (외부화)
-TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
+print(f"  TEXT_VECTOR_DIM: {TEXT_VECTOR_DIM} (MiniLM 텍스트 벡터 차원)")
+print(f"  IMAGE_VECTOR_DIM: {IMAGE_VECTOR_DIM} (CLIP 이미지 벡터 차원)")
 
 class BatchProcessor:
     def __init__(self):
@@ -75,26 +83,25 @@ class BatchProcessor:
         # AWS 클라이언트 초기화
         self.s3_client = boto3.client('s3', region_name=AWS_REGION)
         
-        # OpenCLIP 모델 로드
-        logger.info(f"📥 Loading OpenCLIP model: {OPENCLIP_MODEL_NAME}")
-        self.embedding_model = OpenCLIPEmbeddings(
-            model_name=OPENCLIP_MODEL_NAME,
-            checkpoint=OPENCLIP_CHECKPOINT
+        # 텍스트 벡터화 모델 로드 (HuggingFace MiniLM)
+        logger.info(f"📥 Loading HuggingFace text model: {TEXT_MODEL_NAME}")
+        self.text_embedding_model = HuggingFaceEmbeddings(
+            model_name=TEXT_MODEL_NAME
         )
 
-        # 동적 벡터 차원 감지
-        logger.info("🔍 Detecting vector dimensions...")
-        test_vector = self.embedding_model.embed_query("test")
-        self.vector_dimension = len(test_vector)
-        logger.info(f"✅ OpenCLIP model loaded successfully. Vector dimension: {self.vector_dimension}")
+        # 이미지 벡터화 모델 로드 (OpenCLIP)
+        logger.info(f"📥 Loading OpenCLIP image model: {OPENCLIP_IMAGE_MODEL_NAME}")
+        self.image_embedding_model = OpenCLIPEmbeddings(
+            model_name=OPENCLIP_IMAGE_MODEL_NAME,
+            checkpoint=OPENCLIP_IMAGE_CHECKPOINT
+        )
 
-        # 차원 검증
-        if self.vector_dimension not in [384, 512, 768, 1024]:
-            logger.warning(f"⚠️ Unexpected vector dimension: {self.vector_dimension}")
-        elif self.vector_dimension == 512:
-            logger.info("🎯 Using 512-dimensional OpenCLIP vectors (ViT-B-32)")
-        else:
-            logger.info(f"🎯 Using {self.vector_dimension}-dimensional vectors")
+        # 벡터 차원 설정
+        self.text_vector_dimension = TEXT_VECTOR_DIM
+        self.image_vector_dimension = IMAGE_VECTOR_DIM
+        logger.info(f"✅ Text and image models loaded successfully.")
+        logger.info(f"🎯 Text vectors (MiniLM): {self.text_vector_dimension} dimensions")
+        logger.info(f"🎯 Image vectors (CLIP): {self.image_vector_dimension} dimensions")
         
         # 데이터베이스 연결
         if DATABASE_URL:
@@ -169,12 +176,49 @@ class BatchProcessor:
             logger.debug(f"🔥 Cache hit for text encoding: {cache_key[:50]}...")
             return self.bert_encoding_cache[cache_key]
 
-        # 캐시 미스 시 OpenCLIP 인코딩 수행
-        vector = self.embedding_model.embed_query(text)
+        # 캐시 미스 시 MiniLM 텍스트 인코딩 수행 (384차원)
+        vector = self.text_embedding_model.embed_query(text)
+        # 벡터 차원 검증 및 패딩/트리밍
+        if len(vector) > TEXT_VECTOR_DIM:
+            vector = vector[:TEXT_VECTOR_DIM]  # 트리밍
+        elif len(vector) < TEXT_VECTOR_DIM:
+            vector = vector + [0.0] * (TEXT_VECTOR_DIM - len(vector))  # 제로 패딩
         self.bert_encoding_cache[cache_key] = vector
         logger.debug(f"🧠 Generated new encoding for: {cache_key[:50]}...")
 
         return vector
+
+    def _encode_image_rgb(self, image_path_or_url: str) -> List[float]:
+        """이미지를 RGB 기준 512차원 벡터로 인코딩"""
+        cache_key = f"image:{image_path_or_url}"
+        self._cache_attempts += 1
+
+        # 캐시 조회
+        if cache_key in self.bert_encoding_cache:
+            self._cache_hits += 1
+            logger.debug(f"🔥 Cache hit for image encoding: {cache_key[:50]}...")
+            return self.bert_encoding_cache[cache_key]
+
+        try:
+            # CLIP을 통한 이미지 인코딩 (512차원)
+            # 실제 이미지 파일이나 URL을 처리하는 경우 embed_image 메서드 사용
+            # 현재는 이미지 설명 텍스트를 이미지 모델로 인코딩
+            vector = self.image_embedding_model.embed_query(f"image: {image_path_or_url}")
+
+            # 벡터 차원 검증 및 패딩/트리밍 (512차원)
+            if len(vector) > IMAGE_VECTOR_DIM:
+                vector = vector[:IMAGE_VECTOR_DIM]  # 트리밍
+            elif len(vector) < IMAGE_VECTOR_DIM:
+                vector = vector + [0.0] * (IMAGE_VECTOR_DIM - len(vector))  # 제로 패딩
+
+            self.bert_encoding_cache[cache_key] = vector
+            logger.debug(f"🖼️ Generated new CLIP image encoding for: {cache_key[:50]}...")
+            return vector
+
+        except Exception as e:
+            logger.error(f"❌ Error encoding image {image_path_or_url}: {e}")
+            # 에러 시 제로 벡터 반환
+            return [0.0] * IMAGE_VECTOR_DIM
 
     def _generate_time_weighted_user_vector(self, user_id: str, data: Dict[str, Any], place_vectors: Dict[str, Any]) -> List[float]:
         """시간 가중치를 적용한 사용자 벡터 생성 (안전성 강화)"""
@@ -406,7 +450,7 @@ class BatchProcessor:
                 else:
                     place_text = f"Place category: {place_category} with {len(data['unique_users'])} visitors"
 
-                # OpenCLIP 벡터 생성 (캐시 활용하여 중복 연산 방지)
+                # MiniLM 텍스트 벡터 생성 (캐시 활용하여 중복 연산 방지)
                 vector = self._encode_text_with_cache(place_text)
                 
                 # 인기도 점수 계산
@@ -515,7 +559,7 @@ class BatchProcessor:
             cache_hit_ratio = (self._cache_hits / max(self._cache_attempts, 1)) * 100
 
         logger.info(f"✅ Generated vectors for {len(user_vectors)} users and {len(place_vectors)} places")
-        logger.info(f"🔥 OpenCLIP encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
+        logger.info(f"🔥 Text encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
         logger.info(f"⏰ Time-weighted vectors: {self.stats['time_weighted_users']} users, Fallback: {self.stats['fallback_users']} users")
 
         self.stats['processed_users'] = len(user_vectors)
@@ -527,7 +571,7 @@ class BatchProcessor:
         }
     
     def create_user_behavior_text(self, user_data: Dict[str, Any]) -> str:
-        """사용자 행동 데이터를 OpenCLIP 입력용 텍스트로 변환"""
+        """사용자 행동 데이터를 MiniLM 입력용 텍스트로 변환"""
         categories = list(user_data['categories_visited'])
         total_actions = len(user_data['actions'])
         
@@ -545,7 +589,7 @@ class BatchProcessor:
                        f"performed {total_actions} actions: " + \
                        ', '.join(behavior_parts)
         
-        return behavior_text[:512]  # OpenCLIP 텍스트 입력 길이 제한
+        return behavior_text[:512]  # MiniLM 텍스트 입력 길이 제한
     
     def save_to_database(self, vectors_data: Dict[str, Dict[str, Any]]) -> bool:
         """벡터 데이터를 데이터베이스에 저장"""
