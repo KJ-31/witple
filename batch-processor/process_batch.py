@@ -50,6 +50,9 @@ BATCH_ID = os.getenv('BATCH_ID', f'batch_{int(datetime.now().timestamp())}')
 JOB_NAME = os.getenv('AWS_BATCH_JOB_NAME', 'witple-vectorization-job')
 JOB_ID = os.getenv('AWS_BATCH_JOB_ID', 'unknown')
 
+# 시간 가중치 설정 (외부화)
+TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
+
 # 로드된 환경변수 확인
 logger = logging.getLogger(__name__)
 print(f"🔧 Environment Variables:")
@@ -64,9 +67,6 @@ print(f"  TIME_DECAY_LAMBDA: {TIME_DECAY_LAMBDA} (30-day decay: {np.exp(-TIME_DE
 # OpenCLIP 모델 설정
 OPENCLIP_MODEL_NAME = "ViT-B-32"
 OPENCLIP_CHECKPOINT = "laion2b_s34b_b79k"
-
-# 시간 가중치 설정 (외부화)
-TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
 
 class BatchProcessor:
     def __init__(self):
@@ -288,7 +288,7 @@ class BatchProcessor:
             raise
             
         logger.info(f"📋 Found {len(files)} files to process")
-        return sorted(files, key=lambda x: x['last_modified'])
+        return sorted(files, key=lambda x: x['last_modified'], reverse=True)
     
     def download_and_parse_s3_file(self, s3_key: str) -> List[Dict[str, Any]]:
         """S3 파일을 다운로드하고 파싱"""
@@ -597,6 +597,7 @@ class BatchProcessor:
                     })
                 except Exception as e:
                     logger.error(f"❌ Failed to save user vector {user_id}: {str(e)}")
+                    db.rollback()  # 트랜잭션 복구
                     continue
             
             # 장소 벡터 업데이트/삽입
@@ -635,6 +636,7 @@ class BatchProcessor:
                     })
                 except Exception as e:
                     logger.error(f"❌ Failed to save place vector {place_key}: {str(e)}")
+                    db.rollback()  # 트랜잭션 복구
                     continue
             
             db.commit()
@@ -695,7 +697,7 @@ class BatchProcessor:
         
         try:
             # 1. S3 파일 목록 조회
-            files = self.list_s3_files(max_files=50)  # 한번에 최대 50개 파일 처리
+            files = self.list_s3_files(max_files=500)  # 한번에 최대 500개 파일 처리
             
             if not files:
                 logger.info("✅ No files to process")

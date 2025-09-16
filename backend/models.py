@@ -64,6 +64,7 @@ class Post(Base):
     user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
     caption = Column(Text, nullable=False)
     image_url = Column(String, nullable=False)  # 이미지 파일 경로 또는 URL
+    image_vector = Column(Text, nullable=True)  # CLIP 이미지 벡터 (512차원, JSON 문자열)
     location = Column(String, nullable=True)
     likes_count = Column(Integer, default=0)
     comments_count = Column(Integer, default=0)
