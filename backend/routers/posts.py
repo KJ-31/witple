@@ -1,11 +1,16 @@
 import os
 import base64
 import uuid
+import json
 from datetime import datetime
 from typing import List
 import boto3
 from botocore.exceptions import ClientError
 import logging
+from PIL import Image
+import io
+import torch
+from transformers import CLIPProcessor, CLIPModel
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -39,6 +44,70 @@ if os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECRET_ACCESS_KEY'):
 #     s3_client_config['endpoint_url'] = os.getenv('AWS_S3_ENDPOINT_URL')
 
 s3_client = boto3.client('s3', **s3_client_config)
+
+# CLIP 모델 설정 (환경변수로 설정 가능)
+CLIP_MODEL_NAME = os.getenv('CLIP_MODEL_NAME', 'ViT-B-32')
+CLIP_CHECKPOINT = os.getenv('CLIP_CHECKPOINT', 'laion2b_s34b_b79k')
+IMAGE_VECTOR_DIM = int(os.getenv('IMAGE_VECTOR_DIM', '512'))
+
+# CLIP 모델 초기화 (이미지 벡터화용)
+clip_model = None
+clip_processor = None
+
+def get_clip_model():
+    """CLIP 모델을 로드합니다 (지연 로딩)"""
+    global clip_model, clip_processor
+    if clip_model is None:
+        logger.info(f"Loading CLIP model: openai/clip-vit-base-patch32")
+        clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        logger.info("CLIP model loaded successfully")
+    return clip_model, clip_processor
+
+def vectorize_image(base64_data: str) -> List[float]:
+    """Base64 이미지 데이터를 CLIP을 사용해 벡터로 변환합니다."""
+    try:
+        # Base64 헤더 제거
+        if ',' in base64_data:
+            base64_data = base64_data.split(',')[1]
+
+        # Base64를 이미지로 디코딩
+        image_bytes = base64.b64decode(base64_data)
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # RGB로 변환 (CLIP은 RGB 이미지를 기대)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # CLIP 모델로 이미지 벡터화
+        model, processor = get_clip_model()
+
+        # 이미지를 CLIP 모델로 처리
+        inputs = processor(images=image, return_tensors="pt")
+
+        # 이미지 특성 추출
+        with torch.no_grad():
+            image_features = model.get_image_features(**inputs)
+            # 벡터를 정규화
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+        # numpy 배열로 변환하고 리스트로 변환
+        vector = image_features.squeeze().cpu().numpy().tolist()
+
+        # 벡터 차원 확인 및 조정
+        if len(vector) > IMAGE_VECTOR_DIM:
+            vector = vector[:IMAGE_VECTOR_DIM]  # 설정된 차원으로 트리밍
+        elif len(vector) < IMAGE_VECTOR_DIM:
+            vector = vector + [0.0] * (IMAGE_VECTOR_DIM - len(vector))  # 제로 패딩
+
+        logger.info(f"Generated image vector with {len(vector)} dimensions (target: {IMAGE_VECTOR_DIM})")
+        return vector
+
+    except Exception as e:
+        logger.error(f"Error vectorizing image: {str(e)}")
+        # 오류 시 제로 벡터 반환 (None보다 나은 처리)
+        logger.warning(f"Returning zero vector due to error: {str(e)}")
+        return [0.0] * IMAGE_VECTOR_DIM
 
 
 def save_image_to_s3(base64_data: str, filename: str) -> str:
@@ -88,18 +157,35 @@ async def create_post(
         user = current_user
         logger.info(f"Creating post for user: {user.user_id} ({user.email})")
         
-        # 고유한 파일명 생성
-        file_extension = "jpg"  # 실제로는 이미지 데이터에서 확장자 추출해야 함
+        # 이미지 형식 감지 및 고유한 파일명 생성
+        image_bytes = base64.b64decode(post_data.image_data.split(',')[1] if ',' in post_data.image_data else post_data.image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        image_format = image.format or 'JPEG'
+        file_extension = 'jpg' if image_format.upper() == 'JPEG' else image_format.lower()
         filename = f"{uuid.uuid4()}.{file_extension}"
-        
+
         # 이미지 저장
         image_url = save_image_to_s3(post_data.image_data, filename)
-        
+
+        # 이미지 벡터화 (CLIP)
+        logger.info(f"Generating image vector using CLIP (target dimension: {IMAGE_VECTOR_DIM})...")
+        image_vector = vectorize_image(post_data.image_data)
+
+        # 벡터화 결과 처리 (이제 항상 벡터가 반환됨)
+        if image_vector is not None:
+            image_vector_json = json.dumps(image_vector)
+            logger.info(f"Image vector generated successfully: {len(image_vector)} dimensions")
+        else:
+            # 이론적으로 도달하지 않음 (vectorize_image가 항상 벡터 반환)
+            logger.error("Unexpected: image_vector is None")
+            image_vector_json = json.dumps([0.0] * IMAGE_VECTOR_DIM)
+
         # 포스트 생성
         db_post = Post(
             user_id=user.user_id,
             caption=post_data.caption,
             image_url=image_url,
+            image_vector=image_vector_json,
             location=post_data.location
         )
         
