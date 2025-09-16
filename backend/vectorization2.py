@@ -717,6 +717,16 @@ class UnifiedRecommendationEngine:
 
         # 북마크 카운트순 정렬 (내림차순)
         places.sort(key=lambda x: x.get('bookmark_cnt', 0), reverse=True)
+        
+        # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
+        for place in places[:limit]:
+            if 'vector' in place and isinstance(place['vector'], np.ndarray):
+                place['vector'] = place['vector'].tolist()
+            if 'text_vector' in place and isinstance(place['text_vector'], np.ndarray):
+                place['text_vector'] = place['text_vector'].tolist()
+            if 'image_vector' in place and isinstance(place['image_vector'], np.ndarray):
+                place['image_vector'] = place['image_vector'].tolist()
+        
         return places[:limit]
 
     async def _get_multi_vector_recommendations(
@@ -820,6 +830,15 @@ class UnifiedRecommendationEngine:
             # 카테고리 균형 조정 적용
             balanced_results = self._apply_category_quotas(results, bookmark_preferences, limit)
             final_results = self._apply_category_shuffling(balanced_results)
+            
+            # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
+            for result in final_results:
+                if 'vector' in result and isinstance(result['vector'], np.ndarray):
+                    result['vector'] = result['vector'].tolist()
+                if 'text_vector' in result and isinstance(result['text_vector'], np.ndarray):
+                    result['text_vector'] = result['text_vector'].tolist()
+                if 'image_vector' in result and isinstance(result['image_vector'], np.ndarray):
+                    result['image_vector'] = result['image_vector'].tolist()
 
             return final_results
 
@@ -997,6 +1016,16 @@ class UnifiedRecommendationEngine:
             results.sort(key=lambda x: x['final_score'], reverse=True)
 
             logger.info(f"🎯 Generated {len(results)} personalized recommendations")
+            
+            # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
+            for result in results[:limit]:
+                if 'vector' in result and isinstance(result['vector'], np.ndarray):
+                    result['vector'] = result['vector'].tolist()
+                if 'text_vector' in result and isinstance(result['text_vector'], np.ndarray):
+                    result['text_vector'] = result['text_vector'].tolist()
+                if 'image_vector' in result and isinstance(result['image_vector'], np.ndarray):
+                    result['image_vector'] = result['image_vector'].tolist()
+            
             return results[:limit]
 
         except Exception as e:
@@ -1238,6 +1267,16 @@ class UnifiedRecommendationEngine:
                     scored_places.append(place_dict)
 
             scored_places.sort(key=lambda x: x['final_score'], reverse=True)
+            
+            # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
+            for place in scored_places[:limit]:
+                if 'vector' in place and isinstance(place['vector'], np.ndarray):
+                    place['vector'] = place['vector'].tolist()
+                if 'text_vector' in place and isinstance(place['text_vector'], np.ndarray):
+                    place['text_vector'] = place['text_vector'].tolist()
+                if 'image_vector' in place and isinstance(place['image_vector'], np.ndarray):
+                    place['image_vector'] = place['image_vector'].tolist()
+            
             return scored_places[:limit]
 
         except Exception as e:
