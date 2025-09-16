@@ -3,7 +3,7 @@ import base64
 import uuid
 import json
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 import boto3
 from botocore.exceptions import ClientError
 import logging
@@ -15,9 +15,10 @@ from transformers import CLIPProcessor, CLIPModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
+from pydantic import BaseModel
 
 from database import get_db
-from models import Post, User, OAuthAccount
+from models import Post, User, OAuthAccount, PostLike
 from schemas import PostCreate, PostResponse, PostListResponse
 from config import settings
 from auth_utils import get_current_user
@@ -218,17 +219,6 @@ async def get_posts(
 ):
     """포스트 목록을 가져옵니다."""
     try:
-        # 캐시 키 생성
-        cache_key = f"posts:list:{skip}:{limit}"
-        
-        # 캐시에서 조회 시도
-        cached_result = cache.get(cache_key)
-        if cached_result is not None:
-            logger.info(f"Cache hit for posts list: {cache_key}")
-            return PostListResponse(**cached_result)
-        
-        logger.info(f"Cache miss for posts list: {cache_key}")
-        
         # 최신 순으로 포스트 조회 (OAuth 계정 정보도 함께 로드)
         posts = (
             db.query(Post)
@@ -240,32 +230,41 @@ async def get_posts(
             .limit(limit)
             .all()
         )
-        
+
         total = db.query(Post).count()
-        
-        # 디버깅: OAuth 계정 정보 로깅
-        if posts:
-            logger.info(f"=== 포스트 조회 디버깅 ===")
-            logger.info(f"전체 포스트 수: {len(posts)}")
-            first_post = posts[0]
-            logger.info(f"첫 번째 포스트 ID: {first_post.id}")
-            logger.info(f"첫 번째 포스트 사용자: {first_post.user.email}")
-            logger.info(f"OAuth 계정 수: {len(first_post.user.oauth_accounts)}")
-            for oauth_account in first_post.user.oauth_accounts:
-                logger.info(f"OAuth 계정: provider={oauth_account.provider}, profile_picture={oauth_account.profile_picture}")
-            logger.info(f"========================")
-        
+
+        # 각 포스트에 기본 좋아요 상태 추가
+        for post in posts:
+            post.is_liked = False
+
         result = PostListResponse(posts=posts, total=total)
-        
-        # 결과를 캐시에 저장 (5분)
-        cache.set(cache_key, result.dict(), expire=300)
-        
         return result
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"포스트 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@router.get("/user/{user_id}/likes")
+async def get_user_likes(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """사용자가 좋아요를 누른 포스트 ID 목록을 가져옵니다."""
+    try:
+        likes = db.query(PostLike.post_id).filter(
+            PostLike.user_id == user_id
+        ).all()
+
+        post_ids = [like.post_id for like in likes]
+        return {"liked_post_ids": post_ids}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"좋아요 목록 조회 중 오류 발생: {str(e)}"
         )
 
 
@@ -325,50 +324,77 @@ async def get_post(
     return post
 
 
+class LikeRequest(BaseModel):
+    user_id: str
+
 @router.post("/{post_id}/like")
 async def like_post(
     post_id: int,
+    request: LikeRequest,
     db: Session = Depends(get_db)
 ):
     """포스트에 좋아요를 추가합니다."""
     post = db.query(Post).filter(Post.id == post_id).first()
-    
+
     if not post:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="포스트를 찾을 수 없습니다."
         )
-    
+
+    # 중복 체크
+    existing = db.query(PostLike).filter(
+        PostLike.post_id == post_id,
+        PostLike.user_id == request.user_id
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 좋아요를 누른 포스트입니다."
+        )
+
+    # 좋아요 추가
+    new_like = PostLike(post_id=post_id, user_id=request.user_id)
+    db.add(new_like)
     post.likes_count += 1
     db.commit()
-    
-    # 캐시 무효화
-    cache.delete(f"post:detail:{post_id}")
-    
+
     return {"message": "좋아요가 추가되었습니다.", "likes_count": post.likes_count}
 
 
 @router.delete("/{post_id}/like")
 async def unlike_post(
     post_id: int,
+    user_id: str,
     db: Session = Depends(get_db)
 ):
     """포스트에서 좋아요를 제거합니다."""
     post = db.query(Post).filter(Post.id == post_id).first()
-    
+
     if not post:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="포스트를 찾을 수 없습니다."
         )
-    
+
+    # 좋아요 레코드 찾아서 삭제
+    existing = db.query(PostLike).filter(
+        PostLike.post_id == post_id,
+        PostLike.user_id == user_id
+    ).first()
+
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="좋아요를 누르지 않은 포스트입니다."
+        )
+
+    db.delete(existing)
     if post.likes_count > 0:
         post.likes_count -= 1
-        db.commit()
-    
-    # 캐시 무효화
-    cache.delete(f"post:detail:{post_id}")
-    
+    db.commit()
+
     return {"message": "좋아요가 제거되었습니다.", "likes_count": post.likes_count}
 
 
