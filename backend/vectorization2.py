@@ -3,8 +3,7 @@
 import numpy as np
 import asyncpg
 import logging
-import asyncio
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import json
@@ -56,16 +55,22 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def safe_cosine_similarity(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-    """안전한 코사인 유사도 계산 (0 벡터 및 차원 불일치 처리)"""
+    """안전한 코사인 유사도 계산 (모든 에지 케이스 처리)"""
     try:
-        # 입력 검증
+        # None 값 검증
+        if X is None or Y is None:
+            return np.array([0.0])
+
+        # 입력을 numpy 배열로 변환
+        X = np.asarray(X, dtype=np.float32)
+        Y = np.asarray(Y, dtype=np.float32)
+
+        # 빈 배열 검증
         if X.size == 0 or Y.size == 0:
-            return np.array([])
+            return np.array([0.0])
 
         # 차원 맞추기
-        X = np.array(X, dtype=np.float32).reshape(1, -1)
-        Y = np.array(Y, dtype=np.float32)
-
+        X = X.reshape(1, -1)
         if Y.ndim == 1:
             Y = Y.reshape(1, -1)
 
@@ -74,25 +79,39 @@ def safe_cosine_similarity(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
             logger.warning(f"Vector dimension mismatch: X={X.shape[1]}, Y={Y.shape[1]}")
             return np.zeros(Y.shape[0])
 
-        # 정규화
+        # NaN/Inf 값 처리
+        X = np.nan_to_num(X, nan=0.0, posinf=1.0, neginf=-1.0)
+        Y = np.nan_to_num(Y, nan=0.0, posinf=1.0, neginf=-1.0)
+
+        # 정규화 (0으로 나누기 방지)
         X_norm = np.linalg.norm(X, axis=1, keepdims=True)
         Y_norm = np.linalg.norm(Y, axis=1, keepdims=True)
 
         # 0 벡터 처리
-        X_normalized = np.divide(X, X_norm, out=np.zeros_like(X), where=X_norm!=0)
-        Y_normalized = np.divide(Y, Y_norm, out=np.zeros_like(Y), where=Y_norm!=0)
+        if np.any(X_norm == 0) or np.any(Y_norm == 0):
+            return np.zeros(Y.shape[0])
+
+        X_normalized = X / X_norm
+        Y_normalized = Y / Y_norm
 
         # 코사인 유사도 계산
         similarities = np.dot(X_normalized, Y_normalized.T).flatten()
 
-        # NaN/Inf 값 처리
+        # 최종 NaN/Inf 값 처리
         similarities = np.nan_to_num(similarities, nan=0.0, posinf=1.0, neginf=-1.0)
+
+        # 유사도 범위 클리핑 (-1 ~ 1)
+        similarities = np.clip(similarities, -1.0, 1.0)
 
         return similarities
 
     except Exception as e:
         logger.error(f"❌ Cosine similarity calculation failed: {e}")
-        return np.zeros(Y.shape[0] if Y.ndim > 1 else 1)
+        # 안전한 기본값 반환
+        try:
+            return np.zeros(Y.shape[0] if hasattr(Y, 'shape') and Y.ndim > 1 else 1)
+        except:
+            return np.array([0.0])
 
 
 def calculate_weighted_popularity_score(place_data: Dict[str, int]) -> float:
@@ -142,17 +161,38 @@ def calculate_engagement_score(place_data: Dict[str, int]) -> float:
 
 
 def validate_vector_data(vector_data: Any) -> Optional[np.ndarray]:
-    """벡터 데이터 검증 및 변환"""
+    """벡터 데이터 검증 및 변환 (PostgreSQL vector 타입 및 ARRAY 타입 지원)"""
     try:
         if vector_data is None:
             return None
 
-        # JSON 문자열인 경우 파싱
-        if isinstance(vector_data, str):
-            vector_data = json.loads(vector_data)
+        # PostgreSQL ARRAY 타입 처리 (user_behavior_vectors.behavior_vector)
+        if isinstance(vector_data, list):
+            vector = np.array(vector_data, dtype=np.float32)
 
-        # numpy 배열로 변환
-        vector = np.array(vector_data, dtype=np.float32)
+        # PostgreSQL vector 타입 문자열 처리 (place_recommendations.vector, posts.image_vector)
+        elif isinstance(vector_data, str):
+            # vector 타입은 "[1,2,3]" 형태의 문자열
+            if vector_data.startswith('[') and vector_data.endswith(']'):
+                # PostgreSQL vector 타입 파싱
+                vector_str = vector_data.strip('[]')
+                if vector_str:
+                    vector_list = [float(x.strip()) for x in vector_str.split(',')]
+                    vector = np.array(vector_list, dtype=np.float32)
+                else:
+                    return None
+            else:
+                # JSON 문자열 시도
+                vector_data = json.loads(vector_data)
+                vector = np.array(vector_data, dtype=np.float32)
+
+        # 이미 numpy 배열인 경우
+        elif isinstance(vector_data, np.ndarray):
+            vector = vector_data.astype(np.float32)
+
+        # 기타 숫자 타입
+        else:
+            vector = np.array(vector_data, dtype=np.float32)
 
         # 차원 및 유효성 검사
         if vector.size == 0:
@@ -337,8 +377,9 @@ class UnifiedRecommendationEngine:
                 # 북마크 기반 카테고리 선호도 추가 반영
                 bookmark_preferences = await self._get_user_bookmark_preferences(user_id)
 
-                result = await self._get_enhanced_vector_recommendations(
-                    user_vector, bookmark_preferences, region, category, limit
+                # 다중 벡터 기반 추천 (텍스트+이미지 하이브리드)
+                result = await self._get_multi_vector_recommendations(
+                    user_id, user_vector, bookmark_preferences, region, category, limit
                 )
             else:
                 # 신규 가입자를 위한 선호도 기반 추천 시도
@@ -376,7 +417,7 @@ class UnifiedRecommendationEngine:
             return []
 
     async def _get_user_behavior_vector_cached(self, user_id: str) -> Optional[np.ndarray]:
-        """캐시를 활용한 사용자 벡터 조회"""
+        """캐시를 활용한 사용자 벡터 조회 (PostgreSQL ARRAY 타입 지원)"""
         cache_key = f"user_vector:{user_id}"
 
         # 캐시 확인
@@ -387,7 +428,7 @@ class UnifiedRecommendationEngine:
                 return np.array(cached_data, dtype=np.float32)
             return None
 
-        # DB에서 조회
+        # DB에서 조회 (PostgreSQL ARRAY 타입)
         try:
             query = """
                 SELECT behavior_vector
@@ -586,8 +627,7 @@ class UnifiedRecommendationEngine:
     ) -> List[Dict]:
         """추천 후보 장소 조회 (최적화된 쿼리)"""
         try:
-            # place_vectors와 place_recommendations의 데이터 타입이 다르므로
-            # place_recommendations만 사용하고 벡터는 별도 처리
+            # place_recommendations 테이블에서 텍스트 벡터 조회 (PostgreSQL vector 타입)
             query = """
                 SELECT
                     pr.place_id::text as place_id,
@@ -679,6 +719,117 @@ class UnifiedRecommendationEngine:
         places.sort(key=lambda x: x.get('bookmark_cnt', 0), reverse=True)
         return places[:limit]
 
+    async def _get_multi_vector_recommendations(
+        self,
+        user_id: str,
+        user_vector: np.ndarray,
+        bookmark_preferences: Dict[str, float],
+        region: Optional[str],
+        category: Optional[str],
+        limit: int
+    ) -> List[Dict]:
+        """
+        다중 벡터 기반 추천 시스템
+        - 텍스트-텍스트 유사도 (기존 overview 벡터)
+        - 이미지-이미지 유사도 (새로운 image 벡터)
+        - 크로스 모달 유사도 (텍스트-이미지, 이미지-텍스트)
+        - 북마크 기반 선호도 반영
+        """
+        try:
+            # 장소 후보군 조회 (이미지 벡터 포함)
+            places = await self._get_place_candidates_with_images(region, category)
+
+            if not places:
+                return []
+
+            # 사용자 행동 데이터 조회 (북마크된 장소의 이미지 벡터, 좋아요한 포스트의 이미지 벡터)
+            user_image_preferences = await self._get_user_image_preferences(user_id)
+
+            # 독립적인 다중 벡터 유사도 계산
+            multi_scores = await self._calculate_independent_similarities(
+                user_id, user_vector, user_image_preferences, places
+            )
+
+            # 하이브리드 점수 계산 및 결과 생성
+            results = []
+            for i, place in enumerate(places):
+                if i >= len(multi_scores):
+                    logger.warning(f"Missing score for place {i}, using defaults")
+                    scores = {
+                        'behavior_text_similarity': 0.0,
+                        'upload_image_similarity': 0.0,
+                        'bookmark_text_similarity': 0.0,
+                        'bookmark_image_similarity': 0.0,
+                        'liked_post_similarity': 0.0,
+                        'combined_score': 0.0
+                    }
+                else:
+                    scores = multi_scores[i]
+
+                try:
+                    # 인기도 점수
+                    place_data = {
+                        'total_clicks': place.get('total_clicks', 0),
+                        'total_likes': place.get('total_likes', 0),
+                        'total_bookmarks': place.get('total_bookmarks', 0)
+                    }
+                    popularity_score = calculate_weighted_popularity_score(place_data)
+                    engagement_score = calculate_engagement_score(place_data)
+
+                    # 북마크 선호도 보너스
+                    category_preference = bookmark_preferences.get(place['table_name'], 0)
+                    bookmark_bonus = category_preference * 0.5
+
+                    # 다중 벡터 종합 점수 (독립적 벡터 조합)
+                    multi_vector_score = scores.get('combined_score', 0.0)
+
+                    # 최종 하이브리드 점수
+                    final_score = (
+                        multi_vector_score * CONFIG.similarity_weight +
+                        (popularity_score / 100.0) * CONFIG.popularity_weight * 0.7 +
+                        (engagement_score / 100.0) * CONFIG.popularity_weight * 0.3 +
+                        bookmark_bonus
+                    )
+
+                    # 점수가 임계값 이상인 경우만 포함
+                    if multi_vector_score >= CONFIG.min_similarity_threshold:
+                        place['behavior_text_similarity'] = round(scores.get('behavior_text_similarity', 0.0), 4)
+                        place['upload_image_similarity'] = round(scores.get('upload_image_similarity', 0.0), 4)
+                        place['bookmark_text_similarity'] = round(scores.get('bookmark_text_similarity', 0.0), 4)
+                        place['bookmark_image_similarity'] = round(scores.get('bookmark_image_similarity', 0.0), 4)
+                        place['liked_post_similarity'] = round(scores.get('liked_post_similarity', 0.0), 4)
+                        place['combined_score'] = round(scores.get('combined_score', 0.0), 4)
+                        place['multi_vector_score'] = round(multi_vector_score, 4)
+                        place['popularity_score'] = popularity_score
+                        place['engagement_score'] = engagement_score
+                        place['bookmark_bonus'] = round(bookmark_bonus, 4)
+                        place['final_score'] = round(final_score, 4)
+                        place['recommendation_type'] = 'five_channel_system'
+
+                        results.append(place)
+
+                except Exception as e:
+                    logger.error(f"❌ Multi-vector score calculation failed for place {i}: {e}")
+                    continue
+
+            # 점수순 정렬
+            results.sort(key=lambda x: x['final_score'], reverse=True)
+
+            logger.info(f"🎯 Multi-vector recommendations: {len(results)} candidates")
+
+            # 카테고리 균형 조정 적용
+            balanced_results = self._apply_category_quotas(results, bookmark_preferences, limit)
+            final_results = self._apply_category_shuffling(balanced_results)
+
+            return final_results
+
+        except Exception as e:
+            logger.error(f"❌ Multi-vector recommendation failed: {e}")
+            # Fallback to enhanced vector recommendations
+            return await self._get_enhanced_vector_recommendations(
+                user_vector, bookmark_preferences, region, category, limit
+            )
+
     async def _get_enhanced_vector_recommendations(
         self,
         user_vector: np.ndarray,
@@ -687,7 +838,7 @@ class UnifiedRecommendationEngine:
         category: Optional[str],
         limit: int
     ) -> List[Dict]:
-        """북마크 선호도를 반영한 개선된 벡터 기반 추천"""
+        """북마크 선호도를 반영한 개선된 벡터 기반 추천 (기존 방식 유지)"""
         places = await self._get_place_candidates(region, category)
 
         if not places:
@@ -759,38 +910,11 @@ class UnifiedRecommendationEngine:
             # 점수순 정렬
             results.sort(key=lambda x: x['final_score'], reverse=True)
 
-            # 디버깅을 위한 카테고리 분석
-            category_counts = {}
-            for rec in results[:20]:  # 상위 20개 분석
-                cat = rec.get('table_name', 'unknown')
-                category_counts[cat] = category_counts.get(cat, 0) + 1
-            logger.info(f"🔍 Top 20 categories before balancing: {category_counts}")
-            logger.info(f"📊 Bookmark preferences: {bookmark_preferences}")
-
             # 🎯 카테고리별 보장 추천 시스템 적용
             balanced_results = self._apply_category_quotas(results, bookmark_preferences, limit)
 
-            # 균형 조정 후 카테고리 분석
-            balanced_counts = {}
-            for rec in balanced_results:
-                cat = rec.get('table_name', 'unknown')
-                balanced_counts[cat] = balanced_counts.get(cat, 0) + 1
-            logger.info(f"🎯 Categories after quota balancing: {balanced_counts}")
-
             # 🔄 카테고리 분산을 위한 셔플링 적용
             final_results = self._apply_category_shuffling(balanced_results)
-
-            # 최종 결과 분석
-            final_counts = {}
-            final_sequence = []
-            for i, rec in enumerate(final_results[:10]):  # 상위 10개 순서 확인
-                cat = rec.get('table_name', 'unknown')
-                name = rec.get('name', 'unknown')[:10]  # 이름 앞 10글자만
-                final_counts[cat] = final_counts.get(cat, 0) + 1
-                final_sequence.append(f"{i+1}.{cat}({name})")
-
-            logger.info(f"✅ Final categories: {final_counts}")
-            logger.info(f"🔄 Final sequence: {', '.join(final_sequence)}")
 
             return final_results
 
@@ -1190,6 +1314,338 @@ class UnifiedRecommendationEngine:
         except Exception as e:
             logger.error(f"❌ Failed to calculate preference score for place {place.get('place_id')}: {e}")
             return 0.0
+
+    async def _get_place_candidates_with_images(
+        self,
+        region: Optional[str],
+        category: Optional[str]
+    ) -> List[Dict]:
+        """이미지 벡터를 포함한 장소 후보군 조회"""
+        try:
+            query = """
+                SELECT
+                    pr.place_id::text as place_id,
+                    pr.table_name,
+                    pr.vector as text_vector,
+                    pr.image_vector,
+                    COALESCE(pr.bookmark_cnt, 0) as total_likes,
+                    COALESCE(pr.bookmark_cnt, 0) as total_bookmarks,
+                    COALESCE(pr.bookmark_cnt, 0) as total_clicks,
+                    1 as unique_users,
+                    COALESCE(pr.bookmark_cnt, 0)::float as popularity_score,
+                    COALESCE(pr.bookmark_cnt, 0)::float as engagement_score,
+                    pr.name,
+                    pr.region,
+                    pr.city,
+                    pr.latitude,
+                    pr.longitude,
+                    pr.overview as description,
+                    pr.image_urls,
+                    pr.bookmark_cnt
+                FROM place_recommendations pr
+                WHERE
+                    pr.vector IS NOT NULL
+                    AND pr.name IS NOT NULL
+                    AND pr.bookmark_cnt IS NOT NULL
+            """
+
+            params = []
+            param_count = 0
+
+            if region:
+                param_count += 1
+                query += f" AND pr.region = ${param_count}"
+                params.append(region)
+
+            if category:
+                param_count += 1
+                query += f" AND pr.table_name = ${param_count}::text"
+                params.append(category)
+
+            query += " ORDER BY COALESCE(pr.bookmark_cnt, 0) DESC"
+            param_count += 1
+            query += f" LIMIT ${param_count}"
+            params.append(CONFIG.candidate_limit)
+
+            places = await self.db_manager.execute_query(query, *params)
+
+            # 텍스트 벡터는 필수, 이미지 벡터는 선택적
+            valid_places = []
+            for place in places:
+                text_vector = validate_vector_data(place['text_vector'])
+                if text_vector is not None:
+                    place['text_vector'] = text_vector
+
+                    # 이미지 벡터는 있으면 추가, 없으면 None
+                    image_vector = validate_vector_data(place.get('image_vector'))
+                    place['image_vector'] = image_vector
+
+                    valid_places.append(place)
+
+            logger.info(f"📋 Retrieved {len(valid_places)} places with text vectors ({sum(1 for p in valid_places if p['image_vector'] is not None)} with image vectors)")
+            return valid_places
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get place candidates with images: {e}")
+            return []
+
+    async def _get_user_image_preferences(self, user_id: str) -> Dict[str, np.ndarray]:
+        """사용자의 이미지 선호도 벡터 수집 (북마크, 좋아요 기반)"""
+        try:
+
+            # 1. 북마크한 장소들의 이미지 벡터 수집
+            bookmark_query = """
+                SELECT pr.image_vector
+                FROM saved_locations sl
+                JOIN place_recommendations pr ON pr.place_id = CAST(SPLIT_PART(sl.places, ':', 2) AS INTEGER)
+                    AND pr.table_name = SPLIT_PART(sl.places, ':', 1)
+                WHERE sl.user_id = $1
+                    AND pr.image_vector IS NOT NULL
+                LIMIT 20
+            """
+
+            # 2. 좋아요한 포스트들의 이미지 벡터 수집 (posts.image_vector는 PostgreSQL vector 타입)
+            liked_posts_query = """
+                SELECT p.image_vector
+                FROM user_actions ua
+                JOIN posts p ON p.id = CAST(ua.place_id AS INTEGER)
+                WHERE ua.user_id = $1
+                    AND ua.action_type = 'like'
+                    AND ua.place_category = 'posts'
+                    AND p.image_vector IS NOT NULL
+                LIMIT 20
+            """
+
+            # 3. 사용자가 직접 업로드한 포스트들의 이미지 벡터 수집 (자신의 선호도 반영)
+            user_posts_query = """
+                SELECT image_vector
+                FROM posts
+                WHERE user_id = $1
+                    AND image_vector IS NOT NULL
+                LIMIT 30
+            """
+
+            bookmark_vectors = await self.db_manager.execute_query(bookmark_query, user_id)
+            liked_post_vectors = await self.db_manager.execute_query(liked_posts_query, user_id)
+            user_post_vectors = await self.db_manager.execute_query(user_posts_query, user_id)
+
+            # 벡터 수집 및 검증 (분리된 리스트로)
+            bookmark_image_vectors = []
+            liked_post_image_vectors = []
+            user_upload_image_vectors = []
+
+            # 1. 북마크한 장소 이미지 벡터
+            for row in bookmark_vectors:
+                vector = validate_vector_data(row['image_vector'])
+                if vector is not None:
+                    bookmark_image_vectors.append(vector)
+
+            # 2. 좋아요한 포스트 이미지 벡터 (독립적으로 수집)
+            for row in liked_post_vectors:
+                vector = validate_vector_data(row['image_vector'])
+                if vector is not None:
+                    liked_post_image_vectors.append(vector)
+
+            # 3. 사용자가 업로드한 포스트 이미지 벡터 (독립적으로 수집)
+            for row in user_post_vectors:
+                vector = validate_vector_data(row['image_vector'])
+                if vector is not None:
+                    user_upload_image_vectors.append(vector)
+
+            total_vectors = len(bookmark_image_vectors) + len(liked_post_image_vectors) + len(user_upload_image_vectors)
+
+            if total_vectors == 0:
+                logger.info(f"No image preferences found for user {user_id}")
+                return {}
+
+            logger.info(f"📸 User {user_id} image preferences: {total_vectors} total vectors (북마크: {len(bookmark_image_vectors)}, 좋아요: {len(liked_post_image_vectors)}, 업로드: {len(user_upload_image_vectors)})")
+
+            return {
+                'bookmarks': bookmark_image_vectors,       # 북마크 장소 이미지 (채널4 사용)
+                'liked_posts': liked_post_image_vectors,   # 좋아요 포스트 이미지 (채널5 사용)
+                'user_uploads': user_upload_image_vectors, # 업로드 포스트 이미지 (채널2 사용)
+                'source_breakdown': {
+                    'bookmarks': len(bookmark_image_vectors),
+                    'liked_posts': len(liked_post_image_vectors),
+                    'user_posts': len(user_upload_image_vectors)
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get user image preferences for {user_id}: {e}")
+            return {}
+
+    async def _calculate_independent_similarities(
+        self,
+        user_id: str,
+        user_behavior_vector: np.ndarray,
+        user_image_preferences: Dict[str, Any],
+        places: List[Dict]
+    ) -> List[Dict[str, float]]:
+        """
+        독립적인 검색 채널 기반 유사도 계산 (5개 채널)
+        1. 행동벡터(클릭/북마크) → 장소 텍스트
+        2. 사용자 업로드 포스팅 이미지 → 장소 이미지
+        3. 북마크 장소 텍스트 → 다른 장소 텍스트
+        4. 북마크 장소 이미지 → 다른 장소 이미지
+        5. 좋아요한 포스팅 이미지 → 장소 이미지
+        """
+        results = []
+
+        try:
+            # 이미지 선호도 분리 (업로드 vs 좋아요)
+            user_upload_images = user_image_preferences.get('user_uploads', [])
+            liked_post_images = user_image_preferences.get('liked_posts', [])
+
+            # 평균 벡터 계산 (안전한 처리)
+            user_upload_vector = None
+            if user_upload_images and len(user_upload_images) > 0:
+                try:
+                    user_upload_vector = np.mean(user_upload_images, axis=0)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate user upload vector mean: {e}")
+
+            liked_posts_vector = None
+            if liked_post_images and len(liked_post_images) > 0:
+                try:
+                    liked_posts_vector = np.mean(liked_post_images, axis=0)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate liked posts vector mean: {e}")
+
+            # 사용자 북마크 장소 기반 선호도 추출
+            bookmark_preferences = await self._get_detailed_bookmark_preferences(user_id)
+
+            for place in places:
+                scores = {
+                    'behavior_text_similarity': 0.0,     # 행동벡터(클릭/북마크) → 장소텍스트
+                    'upload_image_similarity': 0.0,      # 업로드 포스팅이미지 → 장소이미지
+                    'bookmark_text_similarity': 0.0,     # 북마크장소텍스트 → 장소텍스트
+                    'bookmark_image_similarity': 0.0,    # 북마크장소이미지 → 장소이미지
+                    'liked_post_similarity': 0.0,        # 좋아요 포스팅이미지 → 장소이미지
+                    'combined_score': 0.0
+                }
+
+                # 1. 행동 벡터(클릭/북마크) → 장소 텍스트 (384차원)
+                place_text_vector = place.get('text_vector')
+                if place_text_vector is not None and user_behavior_vector is not None:
+                    text_sim = safe_cosine_similarity(user_behavior_vector, place_text_vector)
+                    scores['behavior_text_similarity'] = float(text_sim[0]) if len(text_sim) > 0 else 0.0
+
+                # 2. 업로드 포스팅 이미지 → 장소 이미지 (512차원)
+                place_image_vector = place.get('image_vector')
+                if user_upload_vector is not None and place_image_vector is not None:
+                    upload_sim = safe_cosine_similarity(user_upload_vector, place_image_vector)
+                    scores['upload_image_similarity'] = float(upload_sim[0]) if len(upload_sim) > 0 else 0.0
+
+                # 3. 북마크 장소 텍스트 → 장소 텍스트 (384차원)
+                if bookmark_preferences.get('avg_text_vector') is not None and place_text_vector is not None:
+                    bookmark_text_sim = safe_cosine_similarity(
+                        bookmark_preferences['avg_text_vector'], place_text_vector
+                    )
+                    scores['bookmark_text_similarity'] = float(bookmark_text_sim[0]) if len(bookmark_text_sim) > 0 else 0.0
+
+                # 4. 북마크 장소 이미지 → 장소 이미지 (512차원)
+                if bookmark_preferences.get('avg_image_vector') is not None and place_image_vector is not None:
+                    bookmark_image_sim = safe_cosine_similarity(
+                        bookmark_preferences['avg_image_vector'], place_image_vector
+                    )
+                    scores['bookmark_image_similarity'] = float(bookmark_image_sim[0]) if len(bookmark_image_sim) > 0 else 0.0
+
+                # 5. 좋아요한 포스팅 이미지 → 장소 이미지 (512차원)
+                if liked_posts_vector is not None and place_image_vector is not None:
+                    liked_sim = safe_cosine_similarity(liked_posts_vector, place_image_vector)
+                    scores['liked_post_similarity'] = float(liked_sim[0]) if len(liked_sim) > 0 else 0.0
+
+                # 6. 5개 독립적 채널들의 조합 점수 계산
+                channel_scores = [
+                    scores['behavior_text_similarity'] * 0.25,     # 행동기반 텍스트
+                    scores['upload_image_similarity'] * 0.25,      # 업로드 포스팅 이미지
+                    scores['bookmark_text_similarity'] * 0.2,      # 북마크 텍스트
+                    scores['bookmark_image_similarity'] * 0.15,    # 북마크 이미지
+                    scores['liked_post_similarity'] * 0.15         # 좋아요 포스팅 이미지
+                ]
+
+                # 유효한 채널들만 조합
+                valid_scores = [score for score in channel_scores if score > 0]
+                if valid_scores:
+                    scores['combined_score'] = sum(valid_scores) / len(valid_scores)
+                    # 다중 채널 보너스
+                    if len(valid_scores) > 1:
+                        scores['combined_score'] += 0.1 * (len(valid_scores) - 1)
+                else:
+                    scores['combined_score'] = 0.0
+
+                results.append(scores)
+
+            logger.info(f"🔄 Calculated independent channel similarities for {len(results)} places")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Independent similarity calculation failed: {e}")
+            # 빈 점수 반환
+            return [{
+                'behavior_text_similarity': 0.0,
+                'upload_image_similarity': 0.0,
+                'bookmark_text_similarity': 0.0,
+                'bookmark_image_similarity': 0.0,
+                'liked_post_similarity': 0.0,
+                'combined_score': 0.0
+            } for _ in places]
+
+    async def _get_detailed_bookmark_preferences(self, user_id: str) -> Dict[str, np.ndarray]:
+        """북마크한 장소들의 상세 벡터 선호도 추출"""
+        try:
+            # 북마크한 장소들의 텍스트 및 이미지 벡터 조회
+            query = """
+                SELECT pr.vector as text_vector, pr.image_vector
+                FROM saved_locations sl
+                JOIN place_recommendations pr ON pr.place_id = CAST(SPLIT_PART(sl.places, ':', 2) AS INTEGER)
+                    AND pr.table_name = SPLIT_PART(sl.places, ':', 1)
+                WHERE sl.user_id = $1
+                    AND (pr.vector IS NOT NULL OR pr.image_vector IS NOT NULL)
+                LIMIT 30
+            """
+
+            bookmark_data = await self.db_manager.execute_query(query, user_id)
+
+            text_vectors = []
+            image_vectors = []
+
+            for row in bookmark_data:
+                # 텍스트 벡터 수집
+                if row['text_vector']:
+                    text_vector = validate_vector_data(row['text_vector'])
+                    if text_vector is not None:
+                        text_vectors.append(text_vector)
+
+                # 이미지 벡터 수집
+                if row['image_vector']:
+                    image_vector = validate_vector_data(row['image_vector'])
+                    if image_vector is not None:
+                        image_vectors.append(image_vector)
+
+            result = {}
+
+            # 평균 텍스트 벡터 계산 (안전한 처리)
+            if text_vectors and len(text_vectors) > 0:
+                try:
+                    result['avg_text_vector'] = np.mean(text_vectors, axis=0)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate avg text vector: {e}")
+
+            # 평균 이미지 벡터 계산 (안전한 처리)
+            if image_vectors and len(image_vectors) > 0:
+                try:
+                    result['avg_image_vector'] = np.mean(image_vectors, axis=0)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate avg image vector: {e}")
+
+            logger.info(f"📚 User {user_id} bookmark preferences: {len(text_vectors)} text, {len(image_vectors)} image vectors")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get detailed bookmark preferences for {user_id}: {e}")
+            return {}
 
 
 # ============================================================================
