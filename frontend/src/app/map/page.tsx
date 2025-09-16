@@ -872,14 +872,20 @@ export default function MapPage() {
       const centerLat = (boundsData.min_lat + boundsData.max_lat) / 2
       const centerLng = (boundsData.min_lng + boundsData.max_lng) / 2
 
-      // bounds 크기에 따른 동적 반경 계산 (대각선 거리의 70%)
+      // 모바일 감지
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+      // bounds 크기에 따른 동적 반경 계산
       const diagonalDistance = calculateDistance(
         boundsData.min_lat, boundsData.min_lng,
         boundsData.max_lat, boundsData.max_lng
       )
-      const searchRadius = Math.min(Math.max(diagonalDistance * 0.7, 1.0), 10.0) // 최소 1km, 최대 10km
 
-      console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km')
+      // 모바일에서는 더 작은 반경 사용 (실제 보이는 영역에 맞춤)
+      const radiusMultiplier = isMobile ? 0.5 : 0.7
+      const searchRadius = Math.min(Math.max(diagonalDistance * radiusMultiplier, 1.0), 10.0) // 최소 1km, 최대 10km
+
+      console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km', isMobile ? '(모바일)' : '(PC)')
 
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500`
