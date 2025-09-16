@@ -13,7 +13,7 @@ const getBackendUrl = () => {
   }
   
   // 개발 환경에서는 기본값 사용
-  return 'http://localhost:8000';
+  return 'http://localhost:8001';
 };
 
 const API_INTERNAL_URL = getBackendUrl();
