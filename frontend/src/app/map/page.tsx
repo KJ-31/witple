@@ -916,7 +916,12 @@ export default function MapPage() {
       }
 
       const data = await response.json()
-      const places = data.attractions || []
+      let places = data.attractions || []
+
+      // 카테고리 필터 적용 (프론트엔드에서)
+      if (categoryFilter) {
+        places = places.filter((place: AttractionData) => place.category === categoryFilter)
+      }
 
       // 검색 결과 로그
       console.log('Bounds 검색 결과:', {
@@ -2991,8 +2996,8 @@ export default function MapPage() {
         <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
           <button
             onClick={() => {
-              // 현재 지도 bounds를 기준으로 전체 카테고리 재검색
-              fetchPlacesInBounds(null);
+              // 현재 지도 bounds를 기준으로 선택된 카테고리 재검색
+              fetchPlacesInBounds(selectedCategory);
               setMapHasMoved(false); // 재검색 후 이동 상태 초기화
             }}
             className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
@@ -3379,8 +3384,8 @@ export default function MapPage() {
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 현재 지도 bounds 기준으로 전체 카테고리 검색
-                        fetchPlacesInBounds(null)
+                        // 현재 지도 bounds 기준으로 선택된 카테고리 검색
+                        fetchPlacesInBounds(selectedCategory)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
