@@ -2920,34 +2920,10 @@ export default function MapPage() {
         </button>
       </div>
 
-      {/* Search Bar - profile에서 온 경우 편집 모드에서만 표시 */}
-      {(!isFromProfile || isEditMode) && (
-        <div className="absolute top-4 left-16 right-4 z-40">
-        <form onSubmit={handleSearch} className="relative">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="장소나 도시를 검색하세요"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-4 pr-12 py-3 text-sm rounded-2xl bg-black/30 backdrop-blur-sm text-white placeholder-gray-300 ring-1 ring-white/20 focus:outline-none focus:ring-2 focus:ring-[#3E68FF]/60"
-            />
-            <button
-              type="submit"
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-300 hover:text-white transition"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </button>
-          </div>
-        </form>
-        </div>
-      )}
 
       {/* Category Filter - profile에서 온 경우 편집 모드에서만 표시 */}
       {(!isFromProfile || isEditMode) && (
-      <div className="absolute top-20 left-4 right-4 z-40">
+      <div className="absolute top-5 left-16 right-4 z-40">
         <div className="flex space-x-2 overflow-x-auto no-scrollbar">
           {categories.map(category => (
             <button
@@ -2986,14 +2962,14 @@ export default function MapPage() {
 
       {/* 현 지도에서 재검색 버튼 - 카테고리 아래 중앙 배치 */}
       {showResearchButton && (
-        <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
+        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-50">
           <button
             onClick={() => {
               // 현재 지도 bounds를 기준으로 선택된 카테고리 재검색
               fetchPlacesInBounds(selectedCategory);
               setMapHasMoved(false); // 재검색 후 이동 상태 초기화
             }}
-            className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
+            className="px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
