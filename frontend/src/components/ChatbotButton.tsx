@@ -16,8 +16,8 @@ export function ChatbotButton() {
     return null
   }
 
-  const buttonClass = "fixed z-50 w-[3.25rem] h-[3.25rem] bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
-  const buttonStyle = { top: '20px', right: '20px' }
+  const buttonClass = "fixed z-50 w-16 h-16 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+  const buttonStyle = { bottom: '100px', right: '20px' }
 
   return (
     <button
@@ -28,7 +28,7 @@ export function ChatbotButton() {
       <img
         src="/images/chat_icon.svg"
         alt="챗봇"
-        className="w-9 h-19"
+        className="w-10 h-24"
       />
     </button>
   )
