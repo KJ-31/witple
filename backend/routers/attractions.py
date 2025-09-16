@@ -171,19 +171,30 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
             search_tables = CATEGORY_TABLES
             logger.info("전체 카테고리에서 검색")
 
+        # 각 경유지마다 균등하게 할당 (최소 10개씩은 보장)
+        places_count = len(selected_places)
+        limit_per_place = max(10, limit // places_count)
+
+        logger.info(f"경유지별 할당: {places_count}개 경유지, 각각 최대 {limit_per_place}개씩")
+
         # 선택한 각 장소를 중심으로 검색
-        for selected_place in selected_places:
+        for place_index, selected_place in enumerate(selected_places):
             if not selected_place.get('latitude') or not selected_place.get('longitude'):
                 continue
-                
+
             center_lat = float(selected_place['latitude'])
             center_lng = float(selected_place['longitude'])
-            
+
             # 검색 범위 계산 (성능 최적화)
             bounds = get_approximate_bounds(center_lat, center_lng, radius_km)
-            
+
+            # 현재 경유지에서 찾은 장소 수 카운트
+            current_place_count = 0
+
             # 선택된 카테고리 테이블에서 검색
             for table_name, table_model in search_tables.items():
+                if current_place_count >= limit_per_place:
+                    break
                 try:
                     # 범위 기반 필터링으로 성능 최적화 - LIMIT 제거로 범위 내 모든 데이터 조회
                     query = db.query(table_model).filter(
@@ -195,38 +206,53 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
                     
                     attractions = query.all()
                     logger.info(f"Table {table_name}: found {len(attractions)} attractions in bounds")
-                    
+
+                    # 거리 계산하고 정렬해서 가까운 장소부터 처리
+                    attractions_with_distance = []
+                    for attraction in attractions:
+                        distance = calculate_distance(
+                            center_lat, center_lng,
+                            float(attraction.latitude), float(attraction.longitude)
+                        )
+                        if distance <= radius_km:
+                            attractions_with_distance.append((attraction, distance))
+
+                    # 거리순으로 정렬
+                    attractions_with_distance.sort(key=lambda x: x[1])
+
                 except Exception as table_error:
                     logger.error(f"Error querying table {table_name}: {str(table_error)}")
                     continue
                 
-                for attraction in attractions:
+                # 거리순으로 정렬된 장소들을 처리
+                for attraction, distance in attractions_with_distance:
+                    # 현재 경유지 할당량 체크
+                    if current_place_count >= limit_per_place:
+                        break
+
                     # 고유 ID 생성
                     unique_id = f"{table_name}_{attraction.id}"
-                    
+
                     # 이미 처리된 장소는 스킵
                     if unique_id in processed_ids:
                         continue
-                    
+
                     # 선택한 장소와 같은 장소는 제외
                     if unique_id == selected_place.get('id'):
                         continue
-                    
-                    # 거리 계산
-                    distance = calculate_distance(
-                        center_lat, center_lng,
-                        float(attraction.latitude), float(attraction.longitude)
-                    )
-                    
-                    # 지정된 반경 내에 있는 장소만 추가
-                    if distance <= radius_km:
-                        category = get_category_from_table(table_name)
-                        formatted_attraction = format_attraction_data(attraction, category, table_name)
-                        formatted_attraction['distance'] = round(distance, 2)  # 거리 정보 추가
-                        formatted_attraction['nearbyTo'] = selected_place.get('name', '선택한 장소')  # 어느 장소 근처인지
-                        
-                        nearby_attractions.append(formatted_attraction)
-                        processed_ids.add(unique_id)
+
+                    category = get_category_from_table(table_name)
+                    formatted_attraction = format_attraction_data(attraction, category, table_name)
+                    formatted_attraction['distance'] = round(distance, 2)  # 거리 정보 추가
+                    formatted_attraction['nearbyTo'] = selected_place.get('name', '선택한 장소')  # 어느 장소 근처인지
+
+                    nearby_attractions.append(formatted_attraction)
+                    processed_ids.add(unique_id)
+                    current_place_count += 1
+
+                    # 현재 경유지에서 할당량 달성시 중단
+                    if current_place_count >= limit_per_place:
+                        break
         
         # 거리 순으로 정렬
         nearby_attractions.sort(key=lambda x: x['distance'])
