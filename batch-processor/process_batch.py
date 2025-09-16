@@ -600,15 +600,22 @@ class BatchProcessor:
         logger.info("💾 Saving vectors to database")
         
         db = self.SessionLocal()
+        user_success_count = 0
+        place_success_count = 0
+        user_failures = []
+        place_failures = []
+        
         try:
             user_vectors = vectors_data['user_vectors']
             place_vectors = vectors_data['place_vectors']
+            
+            logger.info(f"📊 Processing {len(user_vectors)} user vectors and {len(place_vectors)} place vectors")
             
             # 사용자 벡터 업데이트/삽입
             for user_id, data in user_vectors.items():
                 try:
                     # UPSERT 쿼리 실행
-                    db.execute(text("""
+                    result = db.execute(text("""
                         INSERT INTO user_behavior_vectors 
                         (user_id, behavior_vector, like_score, bookmark_score, click_score, dwell_time_score,
                          total_actions, total_likes, total_bookmarks, total_clicks, last_action_date, vector_updated_at)
@@ -639,14 +646,17 @@ class BatchProcessor:
                         'total_clicks': data['total_clicks'],
                         'last_action_date': data['last_action_date']
                     })
+                    user_success_count += 1
+                    logger.debug(f"✅ User vector {user_id} saved successfully")
                 except Exception as e:
+                    user_failures.append(f"{user_id}: {str(e)}")
                     logger.error(f"❌ Failed to save user vector {user_id}: {str(e)}")
                     continue
             
             # 장소 벡터 업데이트/삽입
             for place_key, data in place_vectors.items():
                 try:
-                    db.execute(text("""
+                    result = db.execute(text("""
                         INSERT INTO place_vectors 
                         (place_id, place_category, behavior_vector, combined_vector,
                          total_likes, total_bookmarks, total_clicks, unique_users,
@@ -677,16 +687,49 @@ class BatchProcessor:
                         'popularity_score': data['popularity_score'],
                         'engagement_score': data['engagement_score']
                     })
+                    place_success_count += 1
+                    logger.debug(f"✅ Place vector {place_key} saved successfully")
                 except Exception as e:
+                    place_failures.append(f"{place_key}: {str(e)}")
                     logger.error(f"❌ Failed to save place vector {place_key}: {str(e)}")
                     continue
             
+            # 트랜잭션 커밋
             db.commit()
-            logger.info(f"✅ Saved {len(user_vectors)} user vectors and {len(place_vectors)} place vectors to database")
-            return True
+            
+            # 상세한 결과 로깅
+            logger.info(f"📊 Database save results:")
+            logger.info(f"  - User vectors: {user_success_count}/{len(user_vectors)} saved successfully")
+            logger.info(f"  - Place vectors: {place_success_count}/{len(place_vectors)} saved successfully")
+            
+            if user_failures:
+                logger.warning(f"⚠️ User vector failures: {len(user_failures)}")
+                for failure in user_failures[:5]:  # 최대 5개만 로그
+                    logger.warning(f"  - {failure}")
+                if len(user_failures) > 5:
+                    logger.warning(f"  - ... and {len(user_failures) - 5} more failures")
+            
+            if place_failures:
+                logger.warning(f"⚠️ Place vector failures: {len(place_failures)}")
+                for failure in place_failures[:5]:  # 최대 5개만 로그
+                    logger.warning(f"  - {failure}")
+                if len(place_failures) > 5:
+                    logger.warning(f"  - ... and {len(place_failures) - 5} more failures")
+            
+            # 성공 기준: 전체의 80% 이상이 성공해야 함
+            total_expected = len(user_vectors) + len(place_vectors)
+            total_success = user_success_count + place_success_count
+            success_rate = total_success / total_expected if total_expected > 0 else 0
+            
+            if success_rate >= 0.8:
+                logger.info(f"✅ Database save completed successfully (success rate: {success_rate:.1%})")
+                return True
+            else:
+                logger.error(f"❌ Database save failed (success rate: {success_rate:.1%} < 80%)")
+                return False
             
         except Exception as e:
-            logger.error(f"❌ Database save failed: {str(e)}")
+            logger.error(f"❌ Database save failed with exception: {str(e)}")
             db.rollback()
             return False
         finally:
