@@ -134,7 +134,7 @@ export default function Home() {
       return
     }
 
-    console.log('추천 데이터 로드 시작 - 세션:', !!session, ', 지역:', region)
+      // console.log('추천 데이터 로드 시작 - 세션:', !!session, ', 지역:', region)
     setLoading(true)
 
     // 10초 타임아웃 설정 (개인화 추천 벡터 계산 시간 고려)
@@ -204,7 +204,7 @@ export default function Home() {
         // 백엔드에서 이미 제한된 데이터이므로 그대로 사용
         let filteredAttractions = attractions
 
-        console.log(`섹션 ${section.cityName}: 일반 형태 ${attractions.length}개 (백엔드에서 이미 제한됨)`)
+        // console.log(`섹션 ${section.cityName}: 일반 형태 ${attractions.length}개 (백엔드에서 이미 제한됨)`)
 
         return {
           ...section,
@@ -213,7 +213,7 @@ export default function Home() {
         }
       })
 
-      console.log('추천 데이터 로드 완료:', processedData.length, '개 섹션')
+      // console.log('추천 데이터 로드 완료:', processedData.length, '개 섹션')
 
       // 모든 섹션이 비어있는지 체크 (categorySections 포함)
       const totalAttractions = processedData.reduce((sum, section) => {
@@ -225,15 +225,15 @@ export default function Home() {
         return sum + (section.attractions?.length || 0)
       }, 0)
 
-      console.log('총 추천 장소 수:', totalAttractions)
+      // console.log('총 추천 장소 수:', totalAttractions)
 
       const finalData = totalAttractions === 0 ? result.data : processedData
 
       if (totalAttractions === 0) {
         console.warn('필터링 후 모든 데이터가 사라짐, 원본 데이터로 대체')
-        console.log('🔄 원본 데이터로 setCitySections 호출:', result.data.length, '개 섹션')
+        // console.log('🔄 원본 데이터로 setCitySections 호출:', result.data.length, '개 섹션')
       } else {
-        console.log('🔄 처리된 데이터로 setCitySections 호출:', processedData.length, '개 섹션')
+        // console.log('🔄 처리된 데이터로 setCitySections 호출:', processedData.length, '개 섹션')
       }
 
       setCitySections(finalData)
@@ -255,14 +255,14 @@ export default function Home() {
   // 지역별 인기순 섹션 로드 함수 (모든 사용자용)
   const loadPopularSection = useCallback(async (region: string = selectedRegion) => {
 
-    console.log(`인기순 섹션 로드 시작: 지역=${region}`)
+      // console.log(`인기순 섹션 로드 시작: 지역=${region}`)
 
     try {
       const result = await fetchPopularSectionByRegion(region, 6, 6)
       setPopularSection(result.data)
       setAvailableRegions(result.availableRegions)
 
-      console.log(`인기순 섹션 로드 완료: ${region}, 카테고리=${result.data?.categorySections?.length || 0}개`)
+      // console.log(`인기순 섹션 로드 완료: ${region}, 카테고리=${result.data?.categorySections?.length || 0}개`)
     } catch (error) {
       console.warn('인기순 섹션 로드 오류:', error)
       setPopularSection(null)
@@ -364,7 +364,7 @@ export default function Home() {
       } else {
         // 선호도가 있으면 완료 플래그 저장
         localStorage.setItem('preferences_completed', 'true')
-        console.log('사용자 선호도 설정 완료 확인')
+        // console.log('사용자 선호도 설정 완료 확인')
       }
     } catch (error) {
       console.warn('선호도 체크 오류:', error instanceof Error ? error.message : String(error))
@@ -445,7 +445,7 @@ export default function Home() {
             // 인기순 섹션 로드 (모든 로그인 사용자)
             await loadPopularSection(selectedRegion)
 
-            console.log('로그인 사용자 초기화 완료')
+            // console.log('로그인 사용자 초기화 완료')
           } catch (error) {
             console.warn('로그인 사용자 초기화 오류:', error)
           }
@@ -458,7 +458,7 @@ export default function Home() {
           loadRecommendedCities(null, selectedRegion),
           loadPopularSection(selectedRegion)
         ]).then(() => {
-          console.log('비로그인 사용자 초기화 완료')
+          // console.log('비로그인 사용자 초기화 완료')
         }).catch(error => {
           console.warn('비로그인 사용자 초기화 오류:', error)
         })
