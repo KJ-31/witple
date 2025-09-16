@@ -15,7 +15,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
-from typing import List, Any, Literal, TypedDict, Sequence
+from typing import List, Any, Literal, TypedDict, Sequence, Optional
 from sqlalchemy import create_engine, text
 import sys
 import os
@@ -23,6 +23,9 @@ import json
 import re
 import requests
 import datetime
+import hashlib
+import redis
+from functools import wraps
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
@@ -44,6 +47,168 @@ except Exception as e:
 # 데이터베이스 연결 설정
 CONNECTION_STRING = "postgresql+psycopg://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db"
 
+# Redis 캐싱 설정
+print("🔗 Redis 캐싱 시스템 초기화 중...")
+redis_available = False
+try:
+    # 환경변수 직접 사용 + 오류 처리 강화
+    redis_url = os.getenv('REDIS_URL')
+    redis_client = redis.Redis.from_url(
+        redis_url,
+        decode_responses=True,
+        socket_timeout=5,
+        socket_connect_timeout=5,
+        retry_on_timeout=True
+    )
+    # 연결 테스트
+    redis_client.ping()
+    redis_available = True
+    print("✅ Redis 연결 성공!")
+except Exception as e:
+    print(f"⚠️ Redis 연결 실패: {e}")
+    redis_client = None
+    redis_available = False
+
+class LLMCache:
+    """LLM 응답 전용 캐싱 시스템"""
+
+    def __init__(self, redis_client=None):
+        self.redis = redis_client
+        self.enabled = redis_client is not None
+        print(f"🧠 LLM 캐시 {'활성화' if self.enabled else '비활성화'}")
+
+    def _generate_cache_key(self, query: str, cache_type: str = "response") -> str:
+        """쿼리 기반 캐시 키 생성"""
+        # 쿼리 정규화 (공백, 대소문자, 특수문자 처리)
+        normalized_query = re.sub(r'\s+', ' ', query.strip().lower())
+        normalized_query = re.sub(r'[^\w\s가-힣]', '', normalized_query)
+
+        # 해시 생성
+        query_hash = hashlib.md5(normalized_query.encode('utf-8')).hexdigest()[:12]
+        return f"llm:{cache_type}:{query_hash}"
+
+    def get_cached_response(self, query: str) -> Optional[str]:
+        """캐시된 LLM 응답 조회"""
+        if not self.enabled:
+            return None
+
+        try:
+            cache_key = self._generate_cache_key(query)
+            cached_data = self.redis.get(cache_key)
+
+            if cached_data:
+                print(f"🎯 캐시 히트: {cache_key}")
+                return cached_data
+            else:
+                print(f"❌ 캐시 미스: {cache_key}")
+                return None
+
+        except Exception as e:
+            print(f"⚠️ 캐시 조회 오류: {e}")
+            return None
+
+    def cache_response(self, query: str, response: str, expire: int = 3600) -> bool:
+        """LLM 응답 캐싱 (1시간 기본)"""
+        if not self.enabled or not response:
+            return False
+
+        try:
+            cache_key = self._generate_cache_key(query)
+            success = self.redis.set(cache_key, response, ex=expire)
+
+            if success:
+                print(f"💾 응답 캐시 저장: {cache_key}")
+
+            return success
+
+        except Exception as e:
+            print(f"⚠️ 캐시 저장 오류: {e}")
+            return False
+
+    def cache_search_results(self, query: str, docs: List[Document], expire: int = 1800) -> bool:
+        """검색 결과 캐싱 (30분)"""
+        if not self.enabled:
+            return False
+
+        try:
+            cache_key = self._generate_cache_key(query, "search")
+
+            # Document 객체를 직렬화 가능한 형태로 변환
+            serializable_docs = []
+            for doc in docs:
+                serializable_docs.append({
+                    'page_content': doc.page_content,
+                    'metadata': doc.metadata
+                })
+
+            docs_json = json.dumps(serializable_docs, ensure_ascii=False)
+            success = self.redis.set(cache_key, docs_json, ex=expire)
+
+            if success:
+                print(f"🔍 검색 결과 캐시 저장: {cache_key}")
+
+            return success
+
+        except Exception as e:
+            print(f"⚠️ 검색 캐시 저장 오류: {e}")
+            return False
+
+    def get_cached_search_results(self, query: str) -> Optional[List[Document]]:
+        """캐시된 검색 결과 조회"""
+        if not self.enabled:
+            return None
+
+        try:
+            cache_key = self._generate_cache_key(query, "search")
+            cached_data = self.redis.get(cache_key)
+
+            if cached_data:
+                print(f"🔍 검색 캐시 히트: {cache_key}")
+
+                # JSON을 Document 객체로 복원
+                docs_data = json.loads(cached_data)
+                docs = []
+                for doc_data in docs_data:
+                    doc = Document(
+                        page_content=doc_data['page_content'],
+                        metadata=doc_data['metadata']
+                    )
+                    docs.append(doc)
+
+                return docs
+
+            return None
+
+        except Exception as e:
+            print(f"⚠️ 검색 캐시 조회 오류: {e}")
+            return None
+
+    def get_cache_stats(self) -> dict:
+        """캐시 통계 조회"""
+        if not self.enabled:
+            return {"enabled": False}
+
+        try:
+            # Redis INFO 명령으로 통계 조회
+            info = self.redis.info()
+
+            # LLM 관련 키 개수 조회
+            llm_keys = self.redis.keys("llm:*")
+
+            return {
+                "enabled": True,
+                "total_keys": len(llm_keys),
+                "memory_usage": info.get('used_memory_human', 'N/A'),
+                "connected_clients": info.get('connected_clients', 0),
+                "cache_hit_ratio": "추후 구현"  # 별도 모니터링 필요
+            }
+
+        except Exception as e:
+            return {"enabled": True, "error": str(e)}
+
+# 전역 캐시 인스턴스
+llm_cache = LLMCache(redis_client if redis_available else None)
+
 # LLM 모델 설정 (Amazon Bedrock - Claude)
 print("🤖 Amazon Bedrock Claude 모델 초기화 중...")
 try:
@@ -54,9 +219,9 @@ try:
         region_name=AWS_REGION,
         credentials_profile_name=None,  # 기본 자격증명 사용
         model_kwargs={
-            "temperature": 0.2,         # 낮을수록 일관된 답변 제공
-            "max_tokens": 4000,         # 최대 토큰 수 (더 긴 응답)
-            "top_p": 0.9,               # 상위 P% 토큰만 고려
+            "temperature": 0.3,         # 약간 높여서 빠른 응답 (0.2 → 0.3)
+            "max_tokens": 3000,         # 토큰 수 줄여서 속도 향상 (4000 → 2000)
+            "top_p": 0.8,               # 더 제한적으로 선택해서 속도 향상
         }
     )
 except Exception as e:
@@ -64,18 +229,13 @@ except Exception as e:
     print("환경변수나 AWS CLI 설정을 확인해주세요.")
     sys.exit(1)
 
-# 임베딩 모델 설정 (384차원) - 로컬 HuggingFace 모델 사용
-print("🧠 임베딩 모델 초기화 중...")
+# 임베딩 모델 설정 - 안정적인 sentence-transformers 모델 사용
+print("🧠 Sentence Transformers 임베딩 모델 초기화 중...")
 embeddings = HuggingFaceEmbeddings(
-    model_name='sentence-transformers/all-MiniLM-L12-v2'
+    model_name='sentence-transformers/all-MiniLM-L12-v2',
 )
 
-# Amazon Bedrock Embeddings 사용하려면 아래 코드로 교체:
-# from langchain_aws import BedrockEmbeddings
-# embeddings = BedrockEmbeddings(
-#     model_id="amazon.titan-embed-text-v1",
-#     boto3_session=boto3_session
-# )
+
 
 # # 벡터스토어 연결
 
@@ -339,8 +499,8 @@ class HybridOptimizedRetriever(BaseRetriever):
             print(f"❌ 폴백 벡터 검색 오류: {e}")
             return []
 
-# 하이브리드 최적화 Retriever 생성 (높은 정확도를 위한 엄격한 임계값)
-retriever = HybridOptimizedRetriever(vectorstore, k=32000, score_threshold=0.6, max_sql_results=5000)
+# 하이브리드 최적화 Retriever 생성 (sentence-transformers 모델에 최적화된 임계값)
+retriever = HybridOptimizedRetriever(vectorstore, k=32000, score_threshold=0.5, max_sql_results=5000)
 
 # =============================================================================
 # 프롬프트 템플릿 정의
@@ -411,70 +571,168 @@ rag_chain = (
 # # 주요 기능 함수들
 
 def search_places(query):
-    """여행지 검색 함수 (하이브리드 최적화)"""
+    """여행지 검색 함수 (하이브리드 최적화 + Redis 캐싱)"""
     try:
         print(f"🔍 하이브리드 검색: '{query}'")
-        
+
+        # 캐시된 검색 결과 확인
+        cached_docs = llm_cache.get_cached_search_results(query)
+        if cached_docs:
+            print("⚡ 캐시된 검색 결과 반환!")
+            return cached_docs
+
+        print("🔍 새로운 검색 실행...")
+
         # HybridOptimizedRetriever 직접 사용
         docs = retriever._get_relevant_documents(query)
-        
+
+        # 검색 결과 캐싱 (30분)
+        llm_cache.cache_search_results(query, docs, expire=1800)
+
         return docs
-        
+
     except Exception as e:
         print(f"❌ 검색 오류: {e}")
         return []
 
-def get_travel_recommendation(query, stream=True):
-    """여행 추천 생성 함수 (스트림 지원)"""
+def get_travel_recommendation_optimized(query, stream=True):
+    """최적화된 Redis 캐싱 + 스트림"""
+    def _generate_stream():
+        try:
+            # 검색 단계는 항상 캐싱 활용
+            cached_docs = llm_cache.get_cached_search_results(query)
+            if cached_docs:
+                docs = cached_docs
+            else:
+                docs = retriever._get_relevant_documents(query)
+                llm_cache.cache_search_results(query, docs, expire=1800)
+
+            context = format_docs(docs)
+            prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+            # 스트림 모드: yield로 실시간 응답
+            full_response = ""
+            buffer = ""
+            for chunk in llm.stream(prompt_value):
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+                    if content:
+                        buffer += content
+                        full_response += content
+
+                        # 적절한 청크로 yield
+                        if len(buffer) > 15 or any(c in buffer for c in ['\n', '.']):
+                            yield buffer
+                            buffer = ""
+
+            if buffer:
+                yield buffer
+
+            # 🎯 스트림 완료 후 전체 응답 캐싱
+            if len(full_response) > 50:
+                llm_cache.cache_response(query, full_response, expire=3600)
+
+        except Exception as e:
+            yield f"❌ 추천 생성 오류: {e}"
+
     try:
-        print(f"📍 여행 추천 요청: '{query}'")
-        print("🔍 하이브리드 검색 시작...")
-        
         if stream:
-            return get_travel_recommendation_stream(query)
+            return _generate_stream()
         else:
-            # 기존 방식
-            response = rag_chain.invoke(query)
-            print("✅ 여행 추천 완료!")
-            return response
-        
+            # 비스트림: 캐시 확인 후 일반 처리
+            cached_response = llm_cache.get_cached_response(query)
+            if cached_response:
+                return cached_response
+
+            # 검색 단계는 항상 캐싱 활용
+            cached_docs = llm_cache.get_cached_search_results(query)
+            if cached_docs:
+                docs = cached_docs
+            else:
+                docs = retriever._get_relevant_documents(query)
+                llm_cache.cache_search_results(query, docs, expire=1800)
+
+            context = format_docs(docs)
+            prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+            response = llm.invoke(prompt_value)
+            if hasattr(response, 'content'):
+                response_text = response.content
+            else:
+                response_text = str(response)
+            llm_cache.cache_response(query, response_text, expire=3600)
+            return response_text
+
     except Exception as e:
-        print(f"❌ 추천 생성 오류: {e}")
-        return "죄송합니다. 여행 추천을 생성하는 중 오류가 발생했습니다."
+        return f"❌ 추천 생성 오류: {e}"
+
+def get_travel_recommendation(query, stream=True):
+    """여행 추천 생성 함수 (스트림 지원 + Redis 캐싱)"""
+    if stream:
+        return get_travel_recommendation_optimized(query, stream=True)
+    else:
+        return get_travel_recommendation_optimized(query, stream=False)
 
 def get_travel_recommendation_stream(query):
-    """스트림 방식 여행 추천 생성 (Amazon Bedrock 지원)"""
+    """진짜 스트림 방식 여행 추천 생성 (터미널/웹 용)"""
     try:
-        # 검색 실행
         docs = retriever._get_relevant_documents(query)
         context = format_docs(docs)
-        
-        # 프롬프트 준비
+
         prompt_value = rag_prompt.invoke({"context": context, "question": query})
-        
-        print("🤖 Amazon Bedrock Claude 답변 생성 중...")
-        print("─" * 40)
-        
-        # 스트림으로 답변 생성
+
+        # ▶️ 진짜 yield로 스트리밍
+        buffer = ""
         full_response = ""
         for chunk in llm.stream(prompt_value):
             if hasattr(chunk, 'content'):
                 content = chunk.content
             else:
                 content = str(chunk)
-            
             if content:
-                print(content, end='', flush=True)
+                buffer += content
                 full_response += content
-        
-        print("\n" + "─" * 40)
-        print("✅ 여행 추천 완료!")
-        
-        return full_response
-
+                # 자연스러운 스트리밍: 문장/줄/청크 단위로
+                if len(buffer) > 15 or '\n' in buffer or '.' in buffer:
+                    to_send, buffer = buffer, ""
+                    yield to_send
+        if buffer:
+            yield buffer
     except Exception as e:
-        print(f"❌ 스트림 추천 생성 오류: {e}")
-        return "죄송합니다. 여행 추천을 생성하는 중 오류가 발생했습니다."
+        yield f"❌ 스트림 추천 생성 오류: {e}"
+
+
+async def get_travel_recommendation_stream_async(query):
+    """비동기 스트림 방식 여행 추천 생성 (FastAPI 호환)"""
+    import asyncio
+    try:
+        docs = retriever._get_relevant_documents(query)
+        if len(docs) > 5:
+            docs = docs[:5]
+        context = format_docs(docs)
+        prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+        buffer = ""
+        full_response = ""
+        for chunk in llm.stream(prompt_value):
+            if hasattr(chunk, 'content'):
+                content = chunk.content
+            else:
+                content = str(chunk)
+            if content:
+                buffer += content
+                full_response += content
+                # 빠른 스트림 + 자연스러운 단위
+                if len(buffer) > 15 or '\n' in buffer or '.' in buffer:
+                    to_send, buffer = buffer, ""
+                    yield to_send
+                    await asyncio.sleep(0.02)
+        if buffer:
+            yield buffer
+    except Exception as e:
+        error_msg = f"❌ 비동기 스트림 추천 생성 오류: {e}"
+        yield error_msg
+        await asyncio.sleep(0.01)
 
 # =============================================================================
 # 기상청 API 관련 함수들
@@ -788,19 +1046,19 @@ def parse_weather_data(items, region_name):
                 tomorrow_data[fcst_time][category] = fcst_value
 
         # 날씨 정보 포맷팅
-        weather_text = f"🌤️ **{region_name} 날씨 정보**\n\n"
+        weather_text = f"🌤️ <strong>{region_name} 날씨 정보</strong>\n\n"
 
         # 오늘 날씨 (대표 시간: 12시)
         if '1200' in today_data:
             data = today_data['1200']
-            weather_text += "📅 **오늘**\n"
+            weather_text += "📅 <strong>오늘</strong>\n"
             weather_text += format_weather_detail(data)
             weather_text += "\n"
 
         # 내일 날씨 (대표 시간: 12시)
         if '1200' in tomorrow_data:
             data = tomorrow_data['1200']
-            weather_text += "📅 **내일**\n"
+            weather_text += "📅 <strong>내일</strong>\n"
             weather_text += format_weather_detail(data)
 
         return weather_text
@@ -937,11 +1195,28 @@ def classify_query(state: TravelState) -> TravelState:
     """향상된 쿼리 분류 - 여러 경로 동시 판단 (2단계 플로우 지원)"""
     if not state.get("messages"):
         return state
-    
+
     user_input = state["messages"][-1] if state["messages"] else ""
     user_input_lower = user_input.lower()
-    
+
     print(f"🔍 쿼리 분류 중: '{user_input}'")
+
+    # 새로운 여행 요청 감지 (기존 일정이 있을 때)
+    if state.get("travel_plan"):
+        is_new_travel_request = any(keyword in user_input_lower for keyword in [
+            "새로운", "다른", "새로", "다시", "또 다른", "새롭게", "다음",
+            "박", "일", "여행", "추천", "일정", "계획"
+        ]) and not any(confirm_keyword in user_input_lower for confirm_keyword in [
+            "확정", "결정", "좋아", "마음에", "이걸로"
+        ])
+
+        if is_new_travel_request:
+            print("🔄 새로운 여행 일정 요청 감지 - 기존 상태 초기화")
+            # 기존 여행 계획 초기화
+            state["travel_plan"] = {}
+            state["user_preferences"] = {}
+            state["conversation_context"] = ""
+            state["formatted_ui_response"] = {}
     
     # 여행 일정 추천 관련 키워드
     travel_keywords = ["추천", "여행", "일정", "계획", "코스", "가볼만한", "여행지", "관광"]
@@ -949,10 +1224,13 @@ def classify_query(state: TravelState) -> TravelState:
     food_keywords = ["맛집", "음식", "식당", "먹을", "카페", "레스토랑"]
     booking_keywords = ["예약", "등록", "신청", "결제", "예매"]
     
-    # 확정 키워드 (더 엄격하게)
+    # 확정 키워드 (개선된 패턴 매칭)
     strong_confirmation_keywords = ["확정", "결정", "확인", "이걸로", "좋아", "맞아", "그래", "됐어", "완료", "ok", "오케이"]
-    weak_confirmation_keywords = ["진행", "해줘", "가자", "이거야", "네", "예"]
-    
+    weak_confirmation_keywords = ["진행", "가자", "이거야", "네", "예", "응", "맞네", "좋네"]
+
+    # 단일 확정 키워드 (짧은 답변)
+    single_word_confirmations = ["확정", "결정", "좋아", "ok", "오케이", "네", "예", "응", "그래"]
+
     # 날씨 요청인지 먼저 확인
     is_weather_request = is_weather_query(user_input)
 
@@ -960,25 +1238,41 @@ def classify_query(state: TravelState) -> TravelState:
     need_rag = any(keyword in user_input for keyword in travel_keywords) or is_weather_request
     need_search = any(keyword in user_input for keyword in location_keywords) and not is_weather_request
     need_tool = any(keyword in user_input for keyword in booking_keywords)
-    
+
     # 음식 관련 질의도 RAG로 처리
     if any(keyword in user_input for keyword in food_keywords):
         need_rag = True
-    
-    # 확정 판단 로직 개선 (2단계 플로우)
+
+    # 개선된 확정 판단 로직
     has_strong_confirmation = any(keyword in user_input_lower for keyword in strong_confirmation_keywords)
     has_weak_confirmation = any(keyword in user_input_lower for keyword in weak_confirmation_keywords)
-    
-    # 확정 판단: 강한 확정 키워드가 있거나, 약한 확정 키워드가 있으면서 여행 추천 요청이 아닌 경우
-    need_confirmation = has_strong_confirmation or (has_weak_confirmation and not need_rag)
-    
+
+    # 짧은 단어 확정 (5글자 이하이면서 확정 키워드만 있는 경우)
+    is_short_confirmation = (len(user_input_lower.strip()) <= 5 and
+                            any(keyword == user_input_lower.strip() for keyword in single_word_confirmations))
+
     # 현재 상태에 여행 일정이 있는지 확인
     has_travel_plan = bool(state.get("travel_plan"))
-    
-    # 여행 일정이 없으면 확정 요청을 무시하고 RAG 우선
-    if need_confirmation and not has_travel_plan and need_rag:
-        print(f"   ⚠️ 여행 일정이 없어서 확정 요청을 RAG 요청으로 변경")
-        need_confirmation = False
+
+    print(f"   🔍 확정 분석: 강한확정={has_strong_confirmation}, 약한확정={has_weak_confirmation}, 짧은확정={is_short_confirmation}")
+    print(f"   📋 여행계획존재={has_travel_plan}, RAG필요={need_rag}")
+
+    # 확정 판단 우선순위:
+    # 1. 여행 일정이 있고 강한 확정 키워드 → 확정
+    # 2. 여행 일정이 있고 짧은 확정 응답 → 확정
+    # 3. 여행 일정이 있고 약한 확정 키워드 (RAG가 아닐 때) → 확정
+    need_confirmation = False
+    if has_travel_plan:
+        if has_strong_confirmation or is_short_confirmation:
+            need_confirmation = True
+            print(f"   ✅ 확정 판단: 강한 확정 또는 짧은 확정")
+        elif has_weak_confirmation and not need_rag:
+            need_confirmation = True
+            print(f"   ✅ 확정 판단: 약한 확정 (RAG 아님)")
+        else:
+            print(f"   ❌ 확정 불가: 조건 불충족")
+    else:
+        print(f"   ❌ 확정 불가: 여행 일정 없음")
     
     query_type = "complex" if sum([need_rag, need_search, need_tool]) > 1 else "simple"
     
@@ -1044,7 +1338,6 @@ def rag_processing_node(state: TravelState) -> TravelState:
         docs = retriever._get_relevant_documents(user_query)
         
         # 지역 필터링 강화 - 쿼리에서 지역명 추출하여 해당 지역 결과만 우선
-        import re
         region_keywords = {
             '부산': ['부산', 'busan', '해운대', '광안리', '남포동', '서면', '기장', '동래', '사하', '북구', '동구', '서구', '중구', '영도', '부산진', '연제', '수영', '사상', '금정', '강서', '해운대구', '사하구'],
             '서울': ['서울', 'seoul', '강남', '홍대', '명동', '이태원', '인사동', '종로'],
@@ -1134,18 +1427,18 @@ def rag_processing_node(state: TravelState) -> TravelState:
 
 출력 형식을 다음과 같이 맞춰주세요:
 
-🏝️ **지역명 여행 일정**
+🏝️ <strong>지역명 여행 일정</strong>
 
-**[1일차]**
-• 09:00-12:00 **장소명** - 간단한 설명 (1줄)
-• 12:00-13:00 **식당명** - 음식 종류 점심 
-• 14:00-17:00 **장소명** - 간단한 설명 (1줄)
-• 18:00-19:00 **식당명** - 음식 종류 저녁
+<strong>[1일차]</strong>
+• 09:00-12:00 <strong>장소명</strong> - 간단한 설명 (1줄)
+• 12:00-13:00 <strong>식당명</strong> - 음식 종류 점심
+• 14:00-17:00 <strong>장소명</strong> - 간단한 설명 (1줄)
+• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁
 
-**[2일차]** (기간에 따라 추가)
+<strong>[2일차]</strong> (기간에 따라 추가)
 ...
 
-💡 **여행 팁**: 지역 특색이나 주의사항
+💡 <strong>여행 팁</strong>: 지역 특색이나 주의사항
 
 이 일정으로 확정하시겠어요?
 
@@ -1298,10 +1591,10 @@ def normalize_place_name(place_name: str) -> str:
     name = place_name.strip()
     if name.startswith("이름: "):
         name = name[3:].strip()
-    if name.startswith("**"):
-        name = name[2:].strip()
-    if name.endswith("**"):
-        name = name[:-2].strip()
+    if name.startswith("<strong>"):
+        name = name[8:].strip()
+    if name.endswith("</strong>"):
+        name = name[:-9].strip()
 
     # 공백 정리
     name = ' '.join(name.split())
@@ -1348,13 +1641,26 @@ def extract_places_by_day(itinerary: list) -> dict:
 def confirmation_processing_node(state: TravelState) -> TravelState:
     """일정 확정 처리 노드 (2단계 플로우)"""
     print(f"🎯 확정 처리 요청")
-    
-    # 현재 상태에 여행 일정이 없으면 안내 메시지
-    if not state.get("travel_plan") or not state["travel_plan"]:
-        response = """
-🤔 **확정하고 싶으신 여행 일정이 없는 것 같아요!**
 
-📝 **확정 절차**:
+    # 디버깅 정보
+    current_travel_plan = state.get("travel_plan", {})
+    global_travel_plan = current_travel_state.get("travel_plan", {})
+    print(f"   📋 State travel_plan: {bool(current_travel_plan)}")
+    print(f"   🌐 Global travel_plan: {bool(global_travel_plan)}")
+
+    # 현재 상태에 여행 일정이 없으면 전역 상태 확인
+    if not current_travel_plan:
+        if global_travel_plan:
+            print(f"   🔄 전역 상태에서 여행 계획 복원")
+            state["travel_plan"] = global_travel_plan
+            current_travel_plan = global_travel_plan
+
+    # 여전히 여행 일정이 없으면 안내 메시지
+    if not current_travel_plan:
+        response = """
+🤔 <strong>확정하고 싶으신 여행 일정이 없는 것 같아요!</strong>
+
+📝 <strong>확정 절차</strong>:
 1. 먼저 여행 일정을 요청해주세요
    예: "부산 3박 4일 여행 추천해줘"
 2. 생성된 일정을 확인하신 후
@@ -1427,7 +1733,12 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         for idx, place in enumerate(places_to_process):
             # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
             table_name = place.get("table_name", "nature")
-            place_id = place.get("place_id", "1")
+            place_id = place.get("place_id")
+
+            # place_id가 없거나 "1"이면 스킵 (무등산 주상절리대 방지)
+            if not place_id or place_id == "1":
+                print(f"⚠️ place_id 없음 - 장소 '{place.get('name', 'Unknown')}' 스킵")
+                continue
 
             # 장소 ID 생성 (table_name_place_id 형태)
             place_identifier = f"{table_name}_{place_id}"
@@ -1475,7 +1786,6 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         print(f"   테이블 목록: {source_tables_list[:5]}{'...' if len(source_tables_list) > 5 else ''}")
 
     # 날짜 계산 (duration에서 박수 추출)
-    import re
     from datetime import datetime, timedelta
 
     duration_str = confirmed_plan.get('duration', '2박 3일')
@@ -1496,15 +1806,38 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 
     print(f"🔗 생성된 지도 URL: {map_url[:100]}{'...' if len(map_url) > 100 else ''}")
     
-    # 지도 표시용 장소 정보도 유지 (프론트엔드에서 추가 활용 가능)
+    # 지도 표시용 장소 정보 (DB에서 정확한 정보 조회)
     map_places = []
     if "places" in confirmed_plan and confirmed_plan["places"]:
         for place in confirmed_plan["places"]:
+            place_id = place.get("place_id", place.get("id", ""))
+            table_name = place.get("table_name", "")
+
+            # DB에서 정확한 정보 조회
+            if place_id and table_name and place_id != "unknown":
+                db_place = get_place_from_recommendations(place_id, table_name)
+                if db_place:
+                    place_info = {
+                        "name": db_place.get("name", ""),
+                        "category": db_place.get("category", ""),
+                        "table_name": db_place.get("table_name", ""),
+                        "place_id": db_place.get("place_id", ""),
+                        "city": db_place.get("city", ""),
+                        "region": db_place.get("region", "")
+                    }
+                    # 위치 정보 추가
+                    if db_place.get("latitude") and db_place.get("longitude"):
+                        place_info["lat"] = db_place["latitude"]
+                        place_info["lng"] = db_place["longitude"]
+                    map_places.append(place_info)
+                    continue
+
+            # DB 조회 실패 시 기존 정보 사용 (fallback)
             place_info = {
                 "name": place.get("name", ""),
                 "category": place.get("category", ""),
-                "table_name": place.get("table_name", ""),
-                "place_id": place.get("place_id", place.get("id", "")),
+                "table_name": table_name,
+                "place_id": place_id,
                 "city": place.get("city", ""),
                 "region": place.get("region", "")
             }
@@ -1515,18 +1848,18 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
             map_places.append(place_info)
     
     response = f"""
-🎉 **여행 일정이 확정되었습니다!**
+🎉 <strong>여행 일정이 확정되었습니다!</strong>
 
-📋 **확정된 일정 정보:**
-• **지역**: {confirmed_plan.get('region', 'N/A')}
-• **기간**: {confirmed_plan.get('duration', 'N/A')} 
-• **일정**: {itinerary_summary}
-• **장소**: {places_summary}
+📋 <strong>확정된 일정 정보:</strong>
+• <strong>지역</strong>: {confirmed_plan.get('region', 'N/A')}
+• <strong>기간</strong>: {confirmed_plan.get('duration', 'N/A')}
+• <strong>일정</strong>: {itinerary_summary}
+• <strong>장소</strong>: {places_summary}
 
-🗺️ **지도에서 여행지를 확인하세요!**
+🗺️ <strong>지도에서 여행지를 확인하세요!</strong>
 확정된 여행지들이 지도에 표시됩니다.
 
-🔄 **지도 페이지로 이동 중...**
+🔄 <strong>지도 페이지로 이동 중...</strong>
     """
     
     return {
@@ -1623,13 +1956,13 @@ def format_travel_response_with_linebreaks(response: str) -> str:
     formatted = response
     
     # 일차별 제목 앞에 개행 추가
-    formatted = formatted.replace("**[", "\n\n**[")
+    formatted = formatted.replace("<strong>[", "\n\n<strong>[")
     
     # 각 일정 항목 앞에 개행 추가 (• 기호 기준)
     formatted = formatted.replace("• ", "\n• ")
     
     # 여행 팁 섹션 앞에 개행 추가
-    formatted = formatted.replace("💡 **여행 팁**", "\n\n💡 **여행 팁**")
+    formatted = formatted.replace("💡 <strong>여행 팁</strong>", "\n\n💡 <strong>여행 팁</strong>")
     
     # 확정 안내 앞에 개행 추가
     formatted = formatted.replace("이 일정으로 확정", "\n\n이 일정으로 확정")
@@ -1639,7 +1972,6 @@ def format_travel_response_with_linebreaks(response: str) -> str:
         formatted = formatted[2:]
     
     # 연속된 개행 정리 (3개 이상 -> 2개)
-    import re
     formatted = re.sub(r'\n{3,}', '\n\n', formatted)
     
     return formatted.strip()
@@ -1678,6 +2010,51 @@ def integrate_response_node(state: TravelState) -> TravelState:
         **state,
         "conversation_context": integrated_response
     }
+
+def get_place_from_recommendations(place_id: str, table_name: str) -> dict:
+    """place_recommendations 테이블에서 place_id와 table_name으로 정확한 정보 조회"""
+    try:
+        from sqlalchemy import create_engine, text
+
+        # DB 연결
+        engine = create_engine(CONNECTION_STRING)
+
+        with engine.connect() as conn:
+            # place_id와 table_name으로 정확한 조회
+            search_query = """
+            SELECT place_id, table_name, name, region, city, category,
+                   latitude, longitude, overview
+            FROM place_recommendations
+            WHERE place_id = :place_id AND table_name = :table_name
+            LIMIT 1
+            """
+
+            result = conn.execute(text(search_query), {
+                "place_id": place_id,
+                "table_name": table_name
+            })
+            row = result.fetchone()
+
+            if row:
+                return {
+                    "place_id": str(row.place_id),
+                    "table_name": row.table_name,
+                    "name": row.name,
+                    "region": row.region,
+                    "city": row.city,
+                    "category": row.category,
+                    "latitude": row.latitude if hasattr(row, 'latitude') else None,
+                    "longitude": row.longitude if hasattr(row, 'longitude') else None,
+                    "overview": row.overview if hasattr(row, 'overview') else "",
+                    "description": f"장소: {row.name}"
+                }
+            else:
+                print(f"❌ place_recommendations에서 찾을 수 없음: place_id={place_id}, table_name={table_name}")
+                return None
+
+    except Exception as e:
+        print(f"place_recommendations 검색 오류: {e}")
+        return None
 
 def find_place_in_recommendations(place_name: str) -> dict:
     """place_recommendations 테이블에서 장소명으로 실제 데이터 검색 (벡터 업데이트 후 불필요)"""
@@ -1737,7 +2114,8 @@ def find_real_place_id(place_name: str, table_name: str, region: str = "") -> st
         }
         
         if table_name not in table_models:
-            return "1"  # 기본값
+            print(f"❌ 지원하지 않는 table_name: {table_name}")
+            return None  # 기본값 "1" 대신 None 반환
             
         # DB 연결
         import os
@@ -1761,16 +2139,16 @@ def find_real_place_id(place_name: str, table_name: str, region: str = "") -> st
             if place:
                 return str(place.id)
             else:
-                # 매칭되지 않으면 해당 테이블의 첫 번째 ID 사용 (더 안전함)
-                first_place = session.query(table_model).first()
-                return str(first_place.id) if first_place else "1"
+                # 매칭되지 않으면 None 반환 (무등산 주상절리대 fallback 방지)
+                print(f"❌ 장소명 '{place_name}'이 {table_name} 테이블에서 찾을 수 없음")
+                return None
                 
         finally:
             session.close()
             
     except Exception as e:
         print(f"place_id 조회 오류: {e}")
-        return "1"  # 오류 시 기본값
+        return None  # 오류 시 기본값 "1" 대신 None 반환
 
 def extract_structured_places(docs: List[Document]) -> List[dict]:
     """RAG 검색 결과에서 구조화된 장소 정보 추출 (업데이트된 메타데이터 활용)"""
@@ -1781,16 +2159,43 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
             # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
             metadata = doc.metadata or {}
 
-            place_info = {
-                "name": metadata.get("name", ""),
-                "category": metadata.get("category", ""),
-                "region": metadata.get("region", ""),
-                "city": metadata.get("city", ""),
-                "table_name": metadata.get("table_name", "nature"),
-                "place_id": metadata.get("place_id", "1"),
-                "description": doc.page_content[:200],  # 첫 200자
-                "similarity_score": metadata.get('similarity_score', 0)
-            }
+            # 메타데이터에서 place_id와 table_name 추출
+            place_id = metadata.get("place_id")
+            table_name = metadata.get("table_name")
+
+            # place_id와 table_name이 있으면 DB에서 정확한 정보 조회
+            if place_id and table_name and place_id != "1":
+                db_place = get_place_from_recommendations(place_id, table_name)
+                if db_place:
+                    place_info = {
+                        **db_place,  # DB에서 가져온 정확한 정보 사용
+                        "description": doc.page_content[:200],  # 첫 200자
+                        "similarity_score": metadata.get('similarity_score', 0)
+                    }
+                else:
+                    # DB 조회 실패 시 메타데이터 사용 (fallback)
+                    place_info = {
+                        "name": metadata.get("name", "장소명 미상"),
+                        "category": metadata.get("category", ""),
+                        "region": metadata.get("region", ""),
+                        "city": metadata.get("city", ""),
+                        "table_name": table_name,
+                        "place_id": place_id,
+                        "description": doc.page_content[:200],
+                        "similarity_score": metadata.get('similarity_score', 0)
+                    }
+            else:
+                # 메타데이터가 불완전한 경우 기존 방식 사용
+                place_info = {
+                    "name": metadata.get("name", ""),
+                    "category": metadata.get("category", ""),
+                    "region": metadata.get("region", ""),
+                    "city": metadata.get("city", ""),
+                    "table_name": metadata.get("table_name", "nature"),
+                    "place_id": place_id or "unknown",  # "1" 대신 "unknown" 사용
+                    "description": doc.page_content[:200],
+                    "similarity_score": metadata.get('similarity_score', 0)
+                }
 
             # 메타데이터에 name이 없으면 문서 내용에서 추출 (호환성 보장)
             if not place_info["name"]:
@@ -1846,10 +2251,9 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
 
 def extract_places_from_response(response: str, structured_places: List[dict]) -> List[dict]:
     """LLM 응답에서 실제 언급된 장소들만 추출하여 매칭"""
-    import re
     
-    # 응답에서 **장소명** 패턴으로 장소 추출
-    place_pattern = r'\*\*([^*]+)\*\*'
+    # 응답에서 <strong>장소명</strong> 패턴으로 장소 추출
+    place_pattern = r'<strong>([^<]+)</strong>'
     mentioned_places = re.findall(place_pattern, response)
     
     # 매칭된 장소들 저장
@@ -1931,14 +2335,12 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
     regions, cities, categories = extract_location_and_category(user_query)
     duration = extract_duration(user_query)
 
-    import re
-
     # 일차별 구조 파싱 (더 유연한 패턴)
     day_patterns = [
-        r'\*\*\[(\d+)일차\]\*\*',  # **[1일차]**
-        r'\[(\d+)일차\]',          # [1일차]
-        r'(\d+)일차',              # 1일차
-        r'\*\*(\d+)일차\*\*'       # **1일차**
+        r'<strong>\[(\d+)일차\]</strong>',  # <strong>[1일차]</strong>
+        r'\[(\d+)일차\]',                    # [1일차]
+        r'(\d+)일차',                        # 1일차
+        r'<strong>(\d+)일차</strong>'         # <strong>1일차</strong>
     ]
 
     # 가장 많이 매칭되는 패턴 사용
@@ -2011,20 +2413,19 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
 
 def parse_day_schedule(day_content: str, structured_places: List[dict]) -> List[dict]:
     """하루 일정 파싱 (개선된 패턴 인식)"""
-    import re
 
     schedule = []
 
     # 더 유연한 패턴들 (다양한 형식 지원)
     patterns = [
-        # • 09:00-12:00 **장소명** - 설명
-        r'•\s*(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)',
-        # • 09:00 **장소명** - 설명 (단일 시간)
-        r'•\s*(\d{1,2}:\d{2})\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)',
-        # • **장소명** (09:00-12:00) - 설명
-        r'•\s*\*\*([^*\n]+)\*\*\s*\((\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\)\s*-\s*([^\n]+)',
-        # 시간 없이: • **장소명** - 설명
-        r'•\s*\*\*([^*\n]+)\*\*\s*-\s*([^\n]+)'
+        # • 09:00-12:00 <strong>장소명</strong> - 설명
+        r'•\s*(\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\s*<strong>([^<\n]+)</strong>\s*-\s*([^\n]+)',
+        # • 09:00 <strong>장소명</strong> - 설명 (단일 시간)
+        r'•\s*(\d{1,2}:\d{2})\s*<strong>([^<\n]+)</strong>\s*-\s*([^\n]+)',
+        # • <strong>장소명</strong> (09:00-12:00) - 설명
+        r'•\s*<strong>([^<\n]+)</strong>\s*\((\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?)\)\s*-\s*([^\n]+)',
+        # 시간 없이: • <strong>장소명</strong> - 설명
+        r'•\s*<strong>([^<\n]+)</strong>\s*-\s*([^\n]+)'
     ]
 
     for pattern in patterns:
@@ -2097,7 +2498,7 @@ def calculate_plan_confidence(structured_places: List[dict], response: str) -> f
         score += avg_similarity * 40
     
     # 응답 구조화 정도 (30점)
-    structure_indicators = ["**[", "일차]", "•", ":**", "💡"]
+    structure_indicators = ["<strong>[", "일차]", "•", ":**", "💡"]
     structure_score = sum(10 for indicator in structure_indicators if indicator in response)
     score += min(structure_score, 30)
     
@@ -2111,7 +2512,6 @@ def calculate_plan_confidence(structured_places: List[dict], response: str) -> f
         score += 10
     
     # 시간 정보 포함 여부 (10점)
-    import re
     time_patterns = re.findall(r'\d{2}:\d{2}', response)
     if len(time_patterns) >= 3:
         score += 10
@@ -2236,11 +2636,140 @@ def create_travel_workflow():
 # 전역 워크플로우 인스턴스
 travel_workflow = create_travel_workflow() if LANGGRAPH_AVAILABLE else None
 
-# 세션 상태 관리를 위한 전역 변수 (실제 운영에서는 Redis나 DB 사용)
-session_states = {}
+# 개선된 상태 관리: 세션 대신 인메모리 상태 (새 추천시 덮어쓰기)
+current_travel_state = {
+    "last_query": "",
+    "travel_plan": {},
+    "places": [],
+    "context": "",
+    "timestamp": None
+}
+
+async def get_travel_recommendation_langgraph_stream(query: str):
+    """LangGraph 기반 실시간 스트리밍 여행 추천"""
+    global current_travel_state
+    import asyncio
+    import datetime
+
+    if not travel_workflow:
+        # LangGraph 미사용 시 기존 함수로 폴백
+        yield {'type': 'status', 'content': 'LangGraph 시스템 준비 중...'}
+        result = get_travel_recommendation(query, stream=False)
+
+        # 텍스트를 청크로 나누어 스트리밍
+        chunks = [result[i:i+10] for i in range(0, len(result), 10)]
+        for chunk in chunks:
+            yield {'type': 'content', 'content': chunk}
+            await asyncio.sleep(0.1)
+
+        yield {'type': 'metadata', 'travel_plan': {}, 'tool_results': {}}
+        return
+
+    print(f"🚀 LangGraph 스트리밍 워크플로우 실행: '{query}'")
+
+    try:
+        # 새 추천 요청시 기존 상태 초기화 (덮어쓰기)
+        current_travel_state = {
+            "last_query": query,
+            "travel_plan": {},
+            "places": [],
+            "context": "",
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+
+        # 상태 생성
+        if not conversation_history:
+            conversation_history = []
+
+        # 메시지 히스토리에 새 쿼리 추가
+        messages = conversation_history + [query]
+
+        # 전역 상태에서 기존 여행 계획 가져오기 (컨텍스트 유지)
+        existing_travel_plan = current_travel_state.get("travel_plan", {})
+        print(f"🔄 기존 여행 계획 상태: {bool(existing_travel_plan)}")
+
+        initial_state = {
+            "messages": messages,
+            "query_type": "unknown",
+            "need_rag": False,
+            "need_search": False,
+            "need_tool": False,
+            "need_confirmation": False,
+            "history": " ".join(messages),
+            "rag_results": [],
+            "search_results": [],
+            "tool_results": {},
+            "travel_plan": existing_travel_plan,  # 기존 여행 계획 포함
+            "user_preferences": {},
+            "conversation_context": "",
+            "formatted_ui_response": {}
+        }
+
+        yield {'type': 'status', 'content': '🔍 여행 요청을 분석하고 있습니다...'}
+
+        # 워크플로우 실행 (스트리밍)
+        response_text = ""
+        final_state = None
+
+        # LangGraph 워크플로우를 단계별로 실행하면서 스트리밍
+        for step_output in travel_workflow.stream(initial_state):
+            print(f"🔄 워크플로우 단계: {step_output}")
+
+            # 각 단계의 출력을 분석해서 스트리밍 데이터 생성
+            if isinstance(step_output, dict):
+                for node_name, node_state in step_output.items():
+                    if node_name == "classify_query":
+                        yield {'type': 'status', 'content': '📋 질문 유형을 분석했습니다...'}
+                    elif node_name == "handle_rag":
+                        yield {'type': 'status', 'content': '🔍 관련 여행지 정보를 검색했습니다...'}
+                    elif node_name == "generate_response":
+                        yield {'type': 'status', 'content': '✨ AI가 추천을 생성하고 있습니다...'}
+
+                        # 응답 텍스트가 있으면 스트리밍
+                        if 'conversation_context' in node_state:
+                            new_content = node_state['conversation_context']
+                            if new_content and new_content != response_text:
+                                chunk = new_content[len(response_text):]
+                                response_text = new_content
+
+                                # 텍스트를 작은 청크로 스트리밍
+                                for char in chunk:
+                                    yield {'type': 'content', 'content': char}
+                                    await asyncio.sleep(0.02)
+
+                    final_state = node_state
+
+        # 최종 상태 업데이트
+        if final_state:
+            current_travel_state.update({
+                "travel_plan": final_state.get('travel_plan', {}),
+                "places": final_state.get('tool_results', {}).get('places', []),
+                "context": final_state.get('conversation_context', ''),
+            })
+
+            # 메타데이터 전송
+            yield {
+                'type': 'metadata',
+                'travel_plan': final_state.get('travel_plan', {}),
+                'action_required': final_state.get('tool_results', {}).get('action_required'),
+                'tool_results': final_state.get('tool_results', {})
+            }
+
+        print("✅ LangGraph 스트리밍 워크플로우 완료!")
+
+    except Exception as e:
+        print(f"❌ LangGraph 스트리밍 워크플로우 오류: {e}")
+        yield {'type': 'status', 'content': f'⚠️ 처리 중 오류가 발생했습니다: {str(e)}'}
+
+        # 오류 시 기존 시스템으로 폴백
+        result = get_travel_recommendation(query, stream=False)
+        yield {'type': 'content', 'content': result}
+        yield {'type': 'metadata', 'travel_plan': {}, 'tool_results': {}}
 
 def get_travel_recommendation_langgraph(query: str, conversation_history: List[str] = None, session_id: str = "default") -> dict:
-    """LangGraph 기반 여행 추천 (구조화된 응답 반환, 세션 상태 유지)"""
+    """LangGraph 기반 여행 추천 (개선된 상태 관리 - 새 추천시 덮어쓰기)"""
+    import datetime
+
     if not travel_workflow:
         # LangGraph 미사용 시 기존 함수로 폴백
         response = get_travel_recommendation(query, stream=False)
@@ -2259,39 +2788,61 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
         if conversation_history and isinstance(conversation_history, list):
             messages = conversation_history + [query]
         
-        # 세션 상태 복원 또는 초기화
-        if session_id in session_states:
-            print(f"📝 기존 세션 상태 복원: {session_id}")
-            initial_state = session_states[session_id].copy()
-            # 새 메시지 추가
-            initial_state["messages"] = messages
+        # 확정이 아닌 새 여행 추천 요청시에만 기존 상태 초기화
+        is_confirmation = any(keyword in query.lower() for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이"])
+        is_new_travel_request = any(keyword in query.lower() for keyword in ["추천", "여행", "일정", "계획", "박", "일"])
+
+        global current_travel_state
+
+        if is_confirmation and current_travel_state.get("travel_plan"):
+            print("🎯 확정 요청 - 기존 상태 유지")
+        elif is_new_travel_request and not is_confirmation:
+            print("🔄 새로운 여행 추천 - 기존 상태 초기화")
+            current_travel_state = {
+                "last_query": query,
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": datetime.datetime.now().isoformat()
+            }
         else:
-            print(f"🆕 새 세션 상태 생성: {session_id}")
-            # 초기 상태 설정
-            initial_state = TravelState(
-                messages=messages,
-                query_type="",
-                need_rag=False,
-                need_search=False,
-                need_tool=False,
-                need_confirmation=False,
-                history="",
-                rag_results=[],
-                search_results=[],
-                tool_results={},
-                travel_plan={},
-                user_preferences={},
-                conversation_context="",
-                formatted_ui_response={}
-            )
-        
+            print("💬 일반 대화 - 기존 상태 유지")
+
+        print(f"🆕 상태로 처리: {query}")
+
+        # 전역 상태에서 기존 여행 계획 가져오기 (컨텍스트 유지)
+        existing_travel_plan = current_travel_state.get("travel_plan", {})
+        print(f"🔄 기존 여행 계획 상태: {bool(existing_travel_plan)}")
+
+        # 초기 상태 설정 (간소화)
+        initial_state = {
+            "messages": messages,
+            "query_type": "",
+            "need_rag": False,
+            "need_search": False,
+            "need_tool": False,
+            "need_confirmation": False,
+            "history": " ".join(messages),
+            "rag_results": [],
+            "search_results": [],
+            "tool_results": {},
+            "travel_plan": existing_travel_plan,  # 기존 여행 계획 포함
+            "user_preferences": {},
+            "conversation_context": "",
+            "formatted_ui_response": {}
+        }
+
         # 워크플로우 실행
         final_state = travel_workflow.invoke(initial_state)
-        
-        # 세션 상태 저장 (여행 계획이 있는 경우에만)
+
+        # 전역 상태 업데이트 (새 추천으로 덮어쓰기)
         if final_state.get("travel_plan"):
-            session_states[session_id] = final_state.copy()
-            print(f"💾 세션 상태 저장 완료: {session_id}")
+            current_travel_state.update({
+                "travel_plan": final_state.get("travel_plan", {}),
+                "places": final_state.get("tool_results", {}).get("places", []),
+                "context": final_state.get("conversation_context", ""),
+            })
+            print(f"💾 새로운 여행 상태 저장 완료: {len(current_travel_state.get('places', []))}개 장소")
         
         # 구조화된 응답 반환
         tool_results = final_state.get("tool_results", {})

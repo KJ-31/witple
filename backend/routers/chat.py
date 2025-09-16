@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
+import json
+import asyncio
 import sys
 import os
 
@@ -8,25 +11,46 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 try:
-    from LLM_RAG import get_travel_recommendation, get_travel_recommendation_langgraph, LANGGRAPH_AVAILABLE
+    from LLM_RAG import (
+        get_travel_recommendation,
+        get_travel_recommendation_optimized,
+        get_travel_recommendation_langgraph,
+        get_travel_recommendation_stream_async,
+        get_travel_recommendation_langgraph_stream,
+        llm_cache,
+        current_travel_state,
+        LANGGRAPH_AVAILABLE
+    )
     print("✅ LLM_RAG module imported successfully")
     print(f"🔧 LangGraph 사용 가능: {LANGGRAPH_AVAILABLE}")
     print(f"🔧 get_travel_recommendation 함수: {get_travel_recommendation is not None}")
     print(f"🔧 get_travel_recommendation_langgraph 함수: {get_travel_recommendation_langgraph is not None}")
+    print(f"🔧 get_travel_recommendation_stream_async 함수: {get_travel_recommendation_stream_async is not None}")
+    print(f"🔧 get_travel_recommendation_langgraph_stream 함수: {get_travel_recommendation_langgraph_stream is not None}")
 except ImportError as e:
     print(f"❌ Warning: Could not import LLM_RAG module: {e}")
     print("This is likely due to missing dependencies (langchain_aws, boto3, etc.)")
     import traceback
     traceback.print_exc()
     get_travel_recommendation = None
+    get_travel_recommendation_optimized = None
     get_travel_recommendation_langgraph = None
+    get_travel_recommendation_stream_async = None
+    get_travel_recommendation_langgraph_stream = None
+    llm_cache = None
+    current_travel_state = None
     LANGGRAPH_AVAILABLE = False
 except Exception as e:
     print(f"❌ Error initializing LLM_RAG module: {e}")
     import traceback
     traceback.print_exc()
     get_travel_recommendation = None
+    get_travel_recommendation_optimized = None
     get_travel_recommendation_langgraph = None
+    get_travel_recommendation_stream_async = None
+    get_travel_recommendation_langgraph_stream = None
+    llm_cache = None
+    current_travel_state = None
     LANGGRAPH_AVAILABLE = False
 
 router = APIRouter()
@@ -59,6 +83,181 @@ class ChatResponse(BaseModel):
     response_lines: Optional[List[str]] = None  # 줄별 배열 형태 응답
     redirect_url: Optional[str] = None  # 리다이렉트 URL
     places: Optional[List[dict]] = None  # 지도 표시용 장소 정보
+
+@router.post("/chat/stream")
+async def chat_with_llm_stream(chat_message: ChatMessage):
+    """
+    스트리밍 방식으로 LLM 응답을 실시간 전송합니다.
+    Server-Sent Events (SSE) 형식으로 응답을 청크 단위로 전송합니다.
+    """
+    async def generate_response():
+        try:
+            if get_travel_recommendation is None and get_travel_recommendation_langgraph is None:
+                # 기본 응답을 스트림으로 전송
+                default_message = f"죄송합니다. 현재 AI 여행 추천 시스템을 준비 중입니다. 📝\n\n'{chat_message.message}'에 대한 답변을 위해 조금만 기다려주세요!"
+
+                # 문자 단위로 스트리밍
+                for char in default_message:
+                    await asyncio.sleep(0.02)  # 타이핑 효과
+                    yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
+
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
+                return
+
+            print(f"🔍 Processing travel query (streaming): {chat_message.message}")
+
+            # 🚀 스마트 캐싱: 빈번한 질문은 캐시된 응답을 스트리밍으로 전송
+            if llm_cache and llm_cache.enabled:
+                cached_response = llm_cache.get_cached_response(chat_message.message)
+                if cached_response:
+                    print("⚡ 캐시된 응답을 스트리밍으로 전송!")
+
+                    # 캐시 히트 알림
+                    yield f"data: {json.dumps({'type': 'status', 'content': '⚡ 빠른 응답을 준비했습니다!', 'done': False}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.1)
+
+                    # 캐시된 응답을 빠른 속도로 스트리밍
+                    sentences = cached_response.split('.')
+                    for i, sentence in enumerate(sentences):
+                        if sentence.strip():
+                            sentence_with_dot = sentence.strip() + ('.' if i < len(sentences) - 1 else '')
+
+                            # 캐시된 응답은 더 빠르게 전송
+                            for char in sentence_with_dot:
+                                await asyncio.sleep(0.01)  # 더 빠른 타이핑 (0.015 → 0.01)
+                                yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
+
+                            await asyncio.sleep(0.05)  # 문장 간 짧은 휴지
+
+                    # 완료 표시
+                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True, 'cached': True}, ensure_ascii=False)}\n\n"
+                    return
+
+            # LangGraph 우선 사용 - 실제 스트리밍 구현
+            if LANGGRAPH_AVAILABLE and get_travel_recommendation_langgraph:
+                print("🚀 Using LangGraph workflow for real streaming response")
+
+                # 진행 상황 메시지들
+                status_messages = [
+                    "🔍 여행지 정보를 검색하고 있습니다...",
+                    "📋 최적의 여행 코스를 분석 중입니다...",
+                    "✨ AI가 맞춤 여행 계획을 생성 중입니다..."
+                ]
+
+                for msg in status_messages:
+                    yield f"data: {json.dumps({'type': 'status', 'content': msg, 'done': False}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.3)
+
+                # 🚀 실제 LangGraph 스트리밍 생성
+                if get_travel_recommendation_langgraph_stream:
+                    print("🔄 LangGraph 스트리밍 함수 사용")
+
+                    # 스트리밍 응답 생성
+                    full_response = ""
+                    travel_plan = {}
+                    action_required = None
+                    tool_results = {}
+
+                    async for chunk_data in get_travel_recommendation_langgraph_stream(chat_message.message):
+                        if chunk_data['type'] == 'content':
+                            # 실시간 텍스트 스트리밍
+                            content = chunk_data['content']
+                            full_response += content
+
+                            # 즉시 스트리밍 (타이핑 효과 제거)
+                            yield f"data: {json.dumps({'type': 'content', 'content': content, 'done': False}, ensure_ascii=False)}\n\n"
+
+                        elif chunk_data['type'] == 'status':
+                            # 상태 업데이트
+                            yield f"data: {json.dumps({'type': 'status', 'content': chunk_data['content'], 'done': False}, ensure_ascii=False)}\n\n"
+
+                        elif chunk_data['type'] == 'metadata':
+                            # 메타데이터 수집
+                            travel_plan = chunk_data.get('travel_plan', {})
+                            action_required = chunk_data.get('action_required')
+                            tool_results = chunk_data.get('tool_results', {})
+
+                    # 응답 캐싱
+                    if llm_cache and llm_cache.enabled and full_response:
+                        llm_cache.cache_response(chat_message.message, full_response, expire=7200)
+                        print("💾 스트리밍 응답 캐시 저장 완료")
+
+                    # 완료 및 추가 데이터 전송
+                    final_data = {
+                        'type': 'done',
+                        'content': '',
+                        'done': True,
+                        'travel_plan': travel_plan,
+                        'action_required': action_required,
+                        'redirect_url': tool_results.get('redirect_url'),
+                        'places': tool_results.get('places'),
+                        'cached': False
+                    }
+                    yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+
+                else:
+                    # 스트리밍 함수가 없으면 기존 방식으로 폴백
+                    print("⚠️ 스트리밍 함수 없음, 기존 방식으로 처리")
+
+                    result = get_travel_recommendation_langgraph(chat_message.message, conversation_history=[], session_id="current")
+                    response_text = result.get('response', '응답을 생성할 수 없습니다.')
+
+                    # 응답을 빠르게 스트리밍
+                    for char in response_text:
+                        await asyncio.sleep(0.01)
+                        yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
+
+                    # 메타데이터 전송
+                    tool_results = result.get('raw_state', {}).get('tool_results', {})
+                    final_data = {
+                        'type': 'done',
+                        'content': '',
+                        'done': True,
+                        'travel_plan': result.get('travel_plan', {}),
+                        'action_required': result.get('action_required'),
+                        'redirect_url': tool_results.get('redirect_url'),
+                        'places': tool_results.get('places'),
+                        'cached': False
+                    }
+                    yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+
+            else:
+                # 기존 RAG 시스템 스트리밍
+                print("⚠️ LangGraph 사용 불가능, 기존 RAG 시스템으로 스트리밍")
+
+                yield f"data: {json.dumps({'type': 'status', 'content': '🔍 여행 정보를 검색 중입니다...', 'done': False}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.3)
+
+                # 커스텀 스트림 함수 호출
+                response_generator = get_travel_recommendation_stream_async(chat_message.message)
+
+                async for chunk in response_generator:
+                    yield f"data: {json.dumps({'type': 'content', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
+
+                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            print(f"❌ Streaming chat error: {e}")
+            error_message = "죄송합니다. 응답 생성 중 오류가 발생했습니다."
+
+            for char in error_message:
+                await asyncio.sleep(0.02)
+                yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e), 'done': True}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate_response(),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx 버퍼링 비활성화
+            "Content-Type": "text/event-stream",  # SSE 헤더 추가
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_llm(chat_message: ChatMessage):
@@ -112,14 +311,24 @@ async def chat_with_llm(chat_message: ChatMessage):
                 places=tool_results.get('places')
             )
         
-        # LangGraph 사용 불가능 시 기존 RAG 시스템 사용
+        # LangGraph 사용 불가능 시 기존 RAG 시스템 사용 (성능 최적화)
         else:
-            print("⚠️ LangGraph 사용 불가능, 기존 RAG 시스템으로 폴백")
-            response = get_travel_recommendation(chat_message.message, stream=False)
-            print(f"✅ Got basic RAG response: {response[:100]}..." if len(response) > 100 else f"✅ Got response: {response}")
-            
+            print("⚠️ LangGraph 사용 불가능, 고속 RAG 시스템으로 폴백")
+
+            # 타임아웃과 함께 빠른 RAG 호출
+            import asyncio
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(get_travel_recommendation, chat_message.message, False),
+                    timeout=10.0  # 10초 타임아웃
+                )
+                print(f"✅ Got fast RAG response: {response[:100]}..." if len(response) > 100 else f"✅ Got response: {response}")
+            except asyncio.TimeoutError:
+                response = "⏰ 요청 처리 시간이 초과되었습니다. 더 간단한 질문으로 다시 시도해주세요."
+                print("❌ RAG response timeout")
+
             response_html, response_lines = process_response_for_frontend(response)
-            
+
             return ChatResponse(
                 response=response,
                 success=True,
@@ -148,24 +357,43 @@ async def chat_health():
     챗봇 서비스의 상태를 확인합니다.
     """
     try:
+        # Redis 상태 확인
+        redis_status = "disconnected"
+        redis_info = {}
+        if llm_cache:
+            try:
+                cache_stats = llm_cache.get_cache_stats()
+                redis_status = "connected" if cache_stats.get("enabled") else "disabled"
+                redis_info = cache_stats
+            except Exception as e:
+                redis_status = f"error: {str(e)}"
+
+        # LLM 시스템 상태 확인
+        llm_status = "healthy"
         if get_travel_recommendation is None:
+            llm_status = "unhealthy"
             return {
-                "status": "unhealthy", 
-                "message": "LLM RAG 시스템이 초기화되지 않음"
+                "status": "unhealthy",
+                "message": "LLM RAG 시스템이 초기화되지 않음",
+                "redis_status": redis_status,
+                "redis_info": redis_info
             }
-        
-        # 간단한 테스트 쿼리로 시스템 상태 확인
-        test_response = get_travel_recommendation("서울", stream=False)
-        
+
         return {
             "status": "healthy",
-            "message": "LLM RAG 시스템이 정상 작동 중"
+            "message": "LLM RAG 시스템이 정상 작동 중",
+            "redis_status": redis_status,
+            "redis_info": redis_info,
+            "llm_status": llm_status,
+            "langgraph_available": LANGGRAPH_AVAILABLE
         }
-        
+
     except Exception as e:
         return {
-            "status": "unhealthy", 
-            "message": f"LLM RAG 시스템 오류: {str(e)}"
+            "status": "unhealthy",
+            "message": f"LLM RAG 시스템 오류: {str(e)}",
+            "redis_status": "unknown",
+            "redis_info": {}
         }
 
 class ScheduleItem(BaseModel):
@@ -300,6 +528,219 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
             message="여행 일정 확정 중 오류가 발생했습니다.",
             error=str(e)
         )
+
+@router.get("/chat/cache/stats")
+async def get_cache_stats():
+    """
+    Redis 캐시 통계 조회
+    """
+    try:
+        if llm_cache and llm_cache.enabled:
+            stats = llm_cache.get_cache_stats()
+            return {
+                "success": True,
+                "cache_stats": stats
+            }
+        else:
+            return {
+                "success": False,
+                "message": "캐시가 비활성화되어 있습니다.",
+                "cache_stats": {"enabled": False}
+            }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"캐시 통계 조회 오류: {str(e)}",
+            "cache_stats": {"enabled": False, "error": str(e)}
+        }
+
+@router.post("/chat/cache/clear")
+async def clear_cache():
+    """
+    LLM 캐시 초기화 (개발/테스트용)
+    """
+    try:
+        if llm_cache and llm_cache.enabled:
+            # LLM 관련 키만 삭제
+            llm_keys = llm_cache.redis.keys("llm:*")
+            if llm_keys:
+                deleted_count = llm_cache.redis.delete(*llm_keys)
+                return {
+                    "success": True,
+                    "message": f"{deleted_count}개의 캐시 키가 삭제되었습니다."
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": "삭제할 캐시가 없습니다."
+                }
+        else:
+            return {
+                "success": False,
+                "message": "캐시가 비활성화되어 있습니다."
+            }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"캐시 초기화 오류: {str(e)}"
+        }
+
+@router.post("/chat/cache/benchmark")
+async def benchmark_cache_performance():
+    """
+    캐시 성능 벤치마크 테스트
+    """
+    try:
+        if not llm_cache or not llm_cache.enabled:
+            return {
+                "success": False,
+                "message": "캐시가 비활성화되어 있습니다."
+            }
+
+        import time
+
+        # 테스트 쿼리들
+        test_queries = [
+            "부산 2박 3일 여행 추천",
+            "제주도 맛집 추천",
+            "서울 핫플레이스",
+            "강릉 바다 여행",
+            "경주 역사 여행"
+        ]
+
+        benchmark_results = {
+            "cache_enabled": True,
+            "test_results": [],
+            "summary": {}
+        }
+
+        total_cache_hits = 0
+        total_cache_misses = 0
+        cache_time_total = 0
+        miss_time_total = 0
+
+        for query in test_queries:
+            # 캐시 미스 테스트 (캐시 초기화 후)
+            cache_key = llm_cache._generate_cache_key(query)
+            llm_cache.redis.delete(cache_key)
+
+            miss_start = time.time()
+            cached_response = llm_cache.get_cached_response(query)
+            miss_time = time.time() - miss_start
+
+            # 테스트 응답 캐싱
+            test_response = f"테스트 응답: {query}에 대한 샘플 여행 추천입니다."
+            llm_cache.cache_response(query, test_response, expire=300)  # 5분
+
+            # 캐시 히트 테스트
+            hit_start = time.time()
+            cached_response = llm_cache.get_cached_response(query)
+            hit_time = time.time() - hit_start
+
+            if cached_response:
+                total_cache_hits += 1
+                cache_time_total += hit_time
+            else:
+                total_cache_misses += 1
+                miss_time_total += miss_time
+
+            benchmark_results["test_results"].append({
+                "query": query,
+                "cache_hit": cached_response is not None,
+                "hit_time_ms": round(hit_time * 1000, 2),
+                "miss_time_ms": round(miss_time * 1000, 2),
+                "speedup": round(miss_time / hit_time, 1) if hit_time > 0 else 0
+            })
+
+        # 요약 통계
+        avg_cache_time = (cache_time_total / total_cache_hits) if total_cache_hits > 0 else 0
+        avg_miss_time = (miss_time_total / total_cache_misses) if total_cache_misses > 0 else 0
+
+        benchmark_results["summary"] = {
+            "total_tests": len(test_queries),
+            "cache_hits": total_cache_hits,
+            "cache_misses": total_cache_misses,
+            "avg_cache_time_ms": round(avg_cache_time * 1000, 2),
+            "avg_miss_time_ms": round(avg_miss_time * 1000, 2),
+            "average_speedup": round(avg_miss_time / avg_cache_time, 1) if avg_cache_time > 0 else 0,
+            "cache_hit_rate": f"{(total_cache_hits / len(test_queries)) * 100:.1f}%"
+        }
+
+        return {
+            "success": True,
+            "benchmark": benchmark_results
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"벤치마크 테스트 오류: {str(e)}"
+        }
+
+@router.get("/chat/current-state")
+async def get_current_travel_state():
+    """
+    현재 여행 상태 조회 (새 추천시 덮어쓰기 방식)
+    """
+    try:
+        if current_travel_state is None:
+            return {
+                "success": False,
+                "message": "여행 상태 시스템이 초기화되지 않았습니다."
+            }
+
+        # 현재 상태 반환
+        state_copy = current_travel_state.copy()
+
+        return {
+            "success": True,
+            "current_state": state_copy,
+            "has_travel_plan": bool(state_copy.get("travel_plan")),
+            "places_count": len(state_copy.get("places", [])),
+            "last_query": state_copy.get("last_query", ""),
+            "timestamp": state_copy.get("timestamp")
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"상태 조회 오류: {str(e)}"
+        }
+
+@router.post("/chat/clear-state")
+async def clear_current_travel_state():
+    """
+    현재 여행 상태 초기화
+    """
+    try:
+        if current_travel_state is None:
+            return {
+                "success": False,
+                "message": "여행 상태 시스템이 초기화되지 않았습니다."
+            }
+
+        # 상태 초기화
+        current_travel_state.clear()
+        current_travel_state.update({
+            "last_query": "",
+            "travel_plan": {},
+            "places": [],
+            "context": "",
+            "timestamp": None
+        })
+
+        return {
+            "success": True,
+            "message": "여행 상태가 초기화되었습니다."
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"상태 초기화 오류: {str(e)}"
+        }
 
 @router.get("/chat/travel-plan/{plan_id}")
 async def get_travel_plan(plan_id: str):
