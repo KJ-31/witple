@@ -11,34 +11,6 @@ export function ChatbotButton() {
   // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
   const allowedPaths = ['/', '/recommendations']
 
-  // 알림 상태 변화를 로그로 확인
-  useEffect(() => {
-    console.log('🚨 ChatbotButton - hasUnreadResponse 변경:', hasUnreadResponse)
-    if (hasUnreadResponse) {
-      console.log('🔴 알림 아이콘이 렌더링되어야 함')
-
-      // DOM에서 실제로 알림 요소를 찾아보기
-      setTimeout(() => {
-        const notificationElement = document.querySelector('.notification-dot')
-        console.log('🔍 DOM에서 알림 요소 찾기:', notificationElement)
-      }, 100)
-    }
-  }, [hasUnreadResponse])
-
-  // 컴포넌트가 렌더링될 때마다 상태 확인
-  useEffect(() => {
-    console.log('🔄 ChatbotButton 렌더링 - 현재 상태:', {
-      hasUnreadResponse,
-      isAppLoading,
-      pathname,
-      shouldShow: !isAppLoading && allowedPaths.some(path => {
-        if (path === '/') {
-          return pathname === '/'
-        }
-        return pathname.startsWith(path)
-      })
-    })
-  })
 
   // 현재 경로가 허용된 페이지가 아니거나 로딩 중이면 렌더링하지 않음
   if (!allowedPaths.some(path => {
@@ -82,18 +54,17 @@ export function ChatbotButton() {
             className="notification-dot"
             style={{
               position: 'absolute',
-              top: '-8px',
-              right: '-8px',
-              width: '24px',
-              height: '24px',
+              top: '-4px',
+              right: '-4px',
+              width: '20px',
+              height: '20px',
               backgroundColor: '#ef4444',
-              border: '2px solid white',
+
               borderRadius: '50%',
               zIndex: 99999,
               boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
               animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
             }}
-            onLoad={() => console.log('🔴 빨간 원이 DOM에 렌더링됨')}
           >
           </div>
         )}

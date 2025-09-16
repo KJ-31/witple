@@ -47,10 +47,6 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
   const [isAppLoading, setIsAppLoading] = useState(false)
   const [hasUnreadResponse, setHasUnreadResponse] = useState(false)
 
-  // hasUnreadResponse 상태 변화 추적
-  useEffect(() => {
-    console.log('🔔 hasUnreadResponse 상태 변경됨:', hasUnreadResponse)
-  }, [hasUnreadResponse])
   const [pendingResponseId, setPendingResponseId] = useState<number | null>(null)
   const modalClosedDuringResponseRef = useRef(false)
 
@@ -107,22 +103,14 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
 
   // 모달 상태 변화 추적
   useEffect(() => {
-    console.log('🔄 모달 상태 변경:', showChatbot ? '열림' : '닫힘')
-
     if (showChatbot) {
       // 모달이 열리면 알림 클리어
-      console.log('🔔 모달이 열림 - 알림 클리어')
       setHasUnreadResponse(false)
       modalClosedDuringResponseRef.current = false
     } else {
       // 모달이 닫히면서 진행 중인 응답이 있으면 플래그 설정
-      console.log('🚪 모달이 닫힘 - pendingResponseId:', pendingResponseId)
       if (pendingResponseId !== null) {
-        console.log('🚪 모달이 닫힘 - 진행 중인 응답 있음, 알림 플래그 설정')
         modalClosedDuringResponseRef.current = true
-        console.log('🚪 modalClosedDuringResponseRef.current 설정됨:', modalClosedDuringResponseRef.current)
-      } else {
-        console.log('🚪 모달이 닫힘 - 진행 중인 응답 없음')
       }
     }
   }, [showChatbot, pendingResponseId])
@@ -156,7 +144,6 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     setChatMessages(prev => [...prev, loadingMessage])
 
     // 진행 중인 응답 추적 (모달이 닫혔을 때 알림을 위해)
-    console.log('📤 메시지 전송 - pendingResponseId 설정:', loadingMessage.id)
     setPendingResponseId(loadingMessage.id)
 
     try {
@@ -203,28 +190,8 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       })
 
       // 응답 완료 후 알림 처리
-      console.log('🔔 응답 완료:', {
-        pendingResponseId,
-        loadingMessageId: loadingMessage.id,
-        modalClosedDuringResponse: modalClosedDuringResponseRef.current,
-        currentShowChatbot: showChatbot
-      })
-
-      // pendingResponseId 체크 없이 modalClosedDuringResponseRef만 확인
-      console.log('🔄 알림 체크 - modalClosedDuringResponse:', modalClosedDuringResponseRef.current)
-
-      // 모달이 응답 중에 닫힌 경우에만 알림 표시
       if (modalClosedDuringResponseRef.current) {
-        console.log('🔴 알림 설정됨 - 모달이 응답 중에 닫혔음')
         setHasUnreadResponse(true)
-        console.log('🔴 setHasUnreadResponse(true) 호출됨')
-
-        // 상태 변경이 즉시 적용되는지 확인
-        setTimeout(() => {
-          console.log('🔴 1초 후 hasUnreadResponse 상태 확인 필요')
-        }, 1000)
-      } else {
-        console.log('🟡 알림 설정 안함 - 모달이 열린 상태에서 응답 완료')
       }
 
       // pendingResponseId 초기화 및 플래그 리셋
@@ -248,19 +215,8 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       })
 
       // 에러 발생 시에도 알림 처리
-      console.log('❌ 에러 발생 후 알림 처리:', {
-        pendingResponseId,
-        loadingMessageId: loadingMessage.id,
-        modalClosedDuringResponse: modalClosedDuringResponseRef.current,
-        currentShowChatbot: showChatbot
-      })
-
-      // 모달이 응답 중에 닫힌 경우에만 알림 표시
       if (modalClosedDuringResponseRef.current) {
-        console.log('🔴 알림 설정됨 - 모달이 응답 중에 닫혔는데 에러 발생')
         setHasUnreadResponse(true)
-      } else {
-        console.log('🟡 알림 설정 안함 - 모달이 열린 상태에서 에러 발생')
       }
 
       // pendingResponseId 초기화 및 플래그 리셋
