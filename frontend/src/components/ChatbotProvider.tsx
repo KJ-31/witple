@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
 
 interface ChatMessage {
   id: number
@@ -22,6 +22,8 @@ interface ChatbotContextType {
   handleChatSubmit: (message: string) => Promise<void>
   isAppLoading: boolean
   setIsAppLoading: (loading: boolean) => void
+  hasUnreadResponse: boolean
+  clearNotification: () => void
 }
 
 const ChatbotContext = createContext<ChatbotContextType | undefined>(undefined)
@@ -43,6 +45,10 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
   const [chatMessage, setChatMessage] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isAppLoading, setIsAppLoading] = useState(false)
+  const [hasUnreadResponse, setHasUnreadResponse] = useState(false)
+
+  const [pendingResponseId, setPendingResponseId] = useState<number | null>(null)
+  const modalClosedDuringResponseRef = useRef(false)
 
   // 초기 메시지 및 저장된 메시지 로드
   useEffect(() => {
@@ -95,6 +101,25 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     }
   }, [chatMessages])
 
+  // 모달 상태 변화 추적
+  useEffect(() => {
+    if (showChatbot) {
+      // 모달이 열리면 알림 클리어
+      setHasUnreadResponse(false)
+      modalClosedDuringResponseRef.current = false
+    } else {
+      // 모달이 닫히면서 진행 중인 응답이 있으면 플래그 설정
+      if (pendingResponseId !== null) {
+        modalClosedDuringResponseRef.current = true
+      }
+    }
+  }, [showChatbot, pendingResponseId])
+
+  const clearNotification = () => {
+    setHasUnreadResponse(false)
+    setPendingResponseId(null)
+    modalClosedDuringResponseRef.current = false
+  }
 
   const handleChatSubmit = async (messageText: string) => {
     if (!messageText.trim()) return
@@ -117,6 +142,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       timestamp: new Date()
     }
     setChatMessages(prev => [...prev, loadingMessage])
+
+    // 진행 중인 응답 추적 (모달이 닫혔을 때 알림을 위해)
+    setPendingResponseId(loadingMessage.id)
 
     try {
       // API 호출
@@ -149,7 +177,7 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
           lines: data.response_lines,    // 줄별 배열 데이터
           formatted_response: data.formatted_response  // 구조화된 데이터
         }
-        
+
         // 리다이렉트 URL이 있으면 페이지 이동
         if (data.redirect_url) {
           console.log('🗺️ 지도 페이지로 리다이렉트:', data.redirect_url)
@@ -157,9 +185,18 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
             window.location.href = data.redirect_url
           }, 2000) // 2초 후 리다이렉트 (사용자가 확정 메시지를 읽을 시간 제공)
         }
-        
+
         return [...filteredMessages, botResponse]
       })
+
+      // 응답 완료 후 알림 처리
+      if (modalClosedDuringResponseRef.current) {
+        setHasUnreadResponse(true)
+      }
+
+      // pendingResponseId 초기화 및 플래그 리셋
+      setPendingResponseId(null)
+      modalClosedDuringResponseRef.current = false
 
 
     } catch (error) {
@@ -177,6 +214,15 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
         return [...filteredMessages, errorResponse]
       })
 
+      // 에러 발생 시에도 알림 처리
+      if (modalClosedDuringResponseRef.current) {
+        setHasUnreadResponse(true)
+      }
+
+      // pendingResponseId 초기화 및 플래그 리셋
+      setPendingResponseId(null)
+      modalClosedDuringResponseRef.current = false
+
     }
   }
 
@@ -189,7 +235,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     setChatMessages,
     handleChatSubmit,
     isAppLoading,
-    setIsAppLoading
+    setIsAppLoading,
+    hasUnreadResponse,
+    clearNotification
   }
 
   return (
