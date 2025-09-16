@@ -772,18 +772,15 @@ export default function MapPage() {
         ne.lat(), ne.lng()
       )
 
-      // 줌 레벨에 따른 최대 반경 제한
+      // 줌 레벨에 따른 고정 반경 사용 (재검색 버튼은 줌 13 이상에서만 표시)
       const zoomLevel = mapInstance.getZoom()
-      let maxRadius = 50.0 // 기본 최대 반경
+      let searchRadius = 10.0 // 기본 반경 (줌 13)
 
-      if (zoomLevel >= 15) maxRadius = 15.0      // 매우 확대: 15km
-      else if (zoomLevel >= 13) maxRadius = 20.0  // 확대: 20km
-      else if (zoomLevel >= 11) maxRadius = 25.0  // 보통: 25km
-      else maxRadius = 30.0                       // 전체: 30km (줄임)
-
-      const calculatedRadius = diagonalDistance * 0.5
-      const searchRadius = Math.min(Math.max(calculatedRadius, 10.0), maxRadius) // 최소 10km로 증가
-
+      if (zoomLevel >= 17) searchRadius = 1.0       // 매우 상세: 1km (극단적으로 작게)
+      else if (zoomLevel >= 16) searchRadius = 2.0   // 상세: 2km
+      else if (zoomLevel >= 15) searchRadius = 3.0   // 구/동 단위: 3km
+      else if (zoomLevel >= 14) searchRadius = 5.0   // 구/동 단위: 5km
+      else searchRadius = 10.0                       // 줌 13: 10km
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius}&limit=500`
 
@@ -820,6 +817,13 @@ export default function MapPage() {
       if (categoryFilter) {
         places = places.filter((place: AttractionData) => place.category === categoryFilter)
       }
+
+      // 검색 결과 로그
+      console.log('검색 결과:', {
+        totalPlaces: places.length,
+        searchRadius: searchRadius.toFixed(2),
+        categoryFilter: categoryFilter || '전체'
+      })
 
       setCategoryPlaces(places)
     } catch (error: any) {
@@ -2031,7 +2035,7 @@ export default function MapPage() {
     }
 
     const zoomLevel = mapInstance.getZoom();
-    const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 14; // 장소찾기 모드 + 지도 이동 + 줌 레벨 14 이상
+    const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 13; // 장소찾기 모드 + 지도 이동 + 줌 레벨 13 이상
 
     setShowResearchButton(shouldShowButton);
   }, [showItinerary, mapHasMoved, mapInstance]);
@@ -2042,7 +2046,7 @@ export default function MapPage() {
 
     const handleZoomChanged = () => {
       const zoomLevel = mapInstance.getZoom();
-      const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 14;
+      const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 13;
       setShowResearchButton(shouldShowButton);
     };
 
@@ -2887,8 +2891,8 @@ export default function MapPage() {
         <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
           <button
             onClick={() => {
-              // 현재 지도 중심점을 기준으로 재검색
-              fetchNearbyPlacesByMapCenter(selectedCategory);
+              // 현재 지도 중심점을 기준으로 전체 카테고리 재검색
+              fetchNearbyPlacesByMapCenter(null);
               setMapHasMoved(false); // 재검색 후 이동 상태 초기화
             }}
             className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
@@ -3275,8 +3279,8 @@ export default function MapPage() {
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 현재 지도 중심점 기준으로 검색 (일정이 없어도 동작)
-                        fetchNearbyPlacesByMapCenter(selectedCategory)
+                        // 현재 지도 중심점 기준으로 전체 카테고리 검색
+                        fetchNearbyPlacesByMapCenter(null)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
