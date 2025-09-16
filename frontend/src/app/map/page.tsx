@@ -197,6 +197,11 @@ export default function MapPage() {
   // 막대그래프 상세보기 토글 상태 (구간별)
   const [showRouteDetails, setShowRouteDetails] = useState<{[key: string]: boolean}>({})
 
+  // 재검색 버튼 관련 상태
+  const [showResearchButton, setShowResearchButton] = useState<boolean>(false)
+  const [mapHasMoved, setMapHasMoved] = useState<boolean>(false)
+  const [initialMapCenter, setInitialMapCenter] = useState<{lat: number, lng: number} | null>(null)
+
 
   // 장소 ID 파싱 함수
   const parsePlaceId = (placeId: string): {tableName: string, numericId: string} => {
@@ -739,6 +744,95 @@ export default function MapPage() {
       setCategoryLoading(false)
     }
   }, [selectedItineraryPlaces])
+
+  // 현재 보이는 지도 영역 기준 장소 검색
+  const fetchNearbyPlacesByMapCenter = useCallback(async (categoryFilter?: string | null) => {
+    try {
+      setCategoryLoading(true)
+
+      if (!mapInstance) {
+        setCategoryPlaces([])
+        return
+      }
+
+      // 현재 지도의 보이는 영역(bounds) 가져오기
+      const bounds = mapInstance.getBounds()
+      if (!bounds) {
+        setCategoryPlaces([])
+        return
+      }
+
+      const ne = bounds.getNorthEast()
+      const sw = bounds.getSouthWest()
+      const center = bounds.getCenter()
+
+      // 지도 보이는 영역의 반경 계산 (대각선 거리의 70%)
+      const diagonalDistance = calculateDistance(
+        sw.lat(), sw.lng(),
+        ne.lat(), ne.lng()
+      )
+
+      // 줌 레벨에 따른 최대 반경 제한
+      const zoomLevel = mapInstance.getZoom()
+      let maxRadius = 50.0 // 기본 최대 반경
+
+      if (zoomLevel >= 15) maxRadius = 15.0      // 매우 확대: 15km
+      else if (zoomLevel >= 13) maxRadius = 20.0  // 확대: 20km
+      else if (zoomLevel >= 11) maxRadius = 25.0  // 보통: 25km
+      else maxRadius = 30.0                       // 전체: 30km (줄임)
+
+      const calculatedRadius = diagonalDistance * 0.5
+      const searchRadius = Math.min(Math.max(calculatedRadius, 10.0), maxRadius) // 최소 10km로 증가
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius}&limit=500`
+
+      // 지도 중심점을 기준점으로 설정
+      const centerPlaceData = [{
+        id: 'map_center',
+        name: '지도 중심점',
+        latitude: center.lat(),
+        longitude: center.lng()
+      }]
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(centerPlaceData)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      let places = data.attractions || []
+
+      // 카테고리 필터 적용
+      if (categoryFilter) {
+        places = places.filter((place: AttractionData) => place.category === categoryFilter)
+      }
+
+      setCategoryPlaces(places)
+    } catch (error: any) {
+      console.error('지도 중심점 기준 주변 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+      setCategoryPlaces([])
+    } finally {
+      setCategoryLoading(false)
+    }
+  }, [mapInstance])
 
   // 장소 상세 정보 가져오기
   const fetchPlaceDetail = useCallback(async (placeId: string) => {
@@ -1899,6 +1993,76 @@ export default function MapPage() {
     };
   }, [mapInstance, activeMarkerIndex, currentSegments, cachedRouteResults]);
 
+  // 지도 인스턴스 로드 시 초기 설정 및 이동 감지
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    // 초기 중심점 설정 (한 번만)
+    if (!initialMapCenter) {
+      const center = mapInstance.getCenter();
+      if (center) {
+        setInitialMapCenter({
+          lat: center.lat(),
+          lng: center.lng()
+        });
+      }
+    }
+
+    // 지도 이동 감지 리스너 추가
+    const dragEndListener = mapInstance.addListener('dragend', () => {
+      setMapHasMoved(true);
+    });
+
+    const zoomChangedListener = mapInstance.addListener('zoom_changed', () => {
+      setMapHasMoved(true);
+    });
+
+    return () => {
+      if (dragEndListener && dragEndListener.remove) dragEndListener.remove();
+      if (zoomChangedListener && zoomChangedListener.remove) zoomChangedListener.remove();
+    };
+  }, [mapInstance, initialMapCenter]);
+
+  // 재검색 버튼 표시 조건 체크
+  useEffect(() => {
+    if (!mapInstance) {
+      setShowResearchButton(false);
+      return;
+    }
+
+    const zoomLevel = mapInstance.getZoom();
+    const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 14; // 장소찾기 모드 + 지도 이동 + 줌 레벨 14 이상
+
+    setShowResearchButton(shouldShowButton);
+  }, [showItinerary, mapHasMoved, mapInstance]);
+
+  // 줌 레벨 변경 시 재검색 버튼 상태 업데이트
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    const handleZoomChanged = () => {
+      const zoomLevel = mapInstance.getZoom();
+      const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 14;
+      setShowResearchButton(shouldShowButton);
+    };
+
+    const zoomChangedListener = mapInstance.addListener('zoom_changed', handleZoomChanged);
+    
+    return () => {
+      if (zoomChangedListener && zoomChangedListener.remove) {
+        zoomChangedListener.remove();
+      }
+    };
+  }, [mapInstance, showItinerary, mapHasMoved]);
+
+  // 장소찾기 모드나 카테고리 변경 시 지도 이동 상태 초기화
+  useEffect(() => {
+    if (showItinerary || !selectedCategory) {
+      setMapHasMoved(false);
+      setShowResearchButton(false);
+    }
+  }, [showItinerary, selectedCategory]);
+
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
@@ -2713,8 +2877,28 @@ export default function MapPage() {
               <span>{category.name}</span>
             </button>
           ))}
+
         </div>
       </div>
+      )}
+
+      {/* 현 지도에서 재검색 버튼 - 카테고리 아래 중앙 배치 */}
+      {showResearchButton && (
+        <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
+          <button
+            onClick={() => {
+              // 현재 지도 중심점을 기준으로 재검색
+              fetchNearbyPlacesByMapCenter(selectedCategory);
+              setMapHasMoved(false); // 재검색 후 이동 상태 초기화
+            }}
+            className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>현 지도에서 재검색</span>
+          </button>
+        </div>
       )}
 
       {/* Route Status Toast */}
@@ -2775,6 +2959,7 @@ export default function MapPage() {
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
           source={sourceParam}
+          disableAutoBounds={!showItinerary} // 장소찾기 모드에서는 자동 bounds 비활성화
           onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
@@ -3090,8 +3275,8 @@ export default function MapPage() {
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
-                        fetchNearbyPlaces(selectedCategory)
+                        // 현재 지도 중심점 기준으로 검색 (일정이 없어도 동작)
+                        fetchNearbyPlacesByMapCenter(selectedCategory)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
