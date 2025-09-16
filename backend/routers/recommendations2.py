@@ -216,6 +216,16 @@ async def get_main_explore_feed(
         limited_regions = target_regions  # 모든 지역 포함
         limited_categories = target_categories[:6]  # 상위 6개 카테고리 (요청사항 반영)
 
+        # 🚀 Redis 캐시 키 생성
+        cache_key = f"explore_feed:{user_id or 'anonymous'}:{':'.join(sorted(limited_regions))}:{':'.join(sorted(limited_categories))}"
+        
+        # 캐시에서 조회 시도
+        from cache_utils import cache
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"🎯 Cache hit for explore feed: {cache_key}")
+            return cached_result
+
         # 병렬로 제한된 섹션 데이터 조회
         explore_data = await fetch_explore_data_parallel(
             user_id=user_id,
@@ -231,7 +241,7 @@ async def get_main_explore_feed(
             if category_data
         )
 
-        return {
+        result = {
             "data": explore_data,
             "metadata": {
                 "total_sections": total_sections,
@@ -241,6 +251,12 @@ async def get_main_explore_feed(
                 "ordering": "dynamic_popularity"  # 동적 인기순 표시
             }
         }
+
+        # 🚀 Redis 캐시에 저장 (10분 TTL)
+        cache.set(cache_key, result, expire=600)
+        logger.info(f"💾 Cached explore feed: {cache_key}")
+
+        return result
 
     except Exception as e:
         logger.error(f"Error in get_main_explore_feed: {e}")
