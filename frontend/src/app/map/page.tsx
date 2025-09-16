@@ -197,6 +197,11 @@ export default function MapPage() {
   // 막대그래프 상세보기 토글 상태 (구간별)
   const [showRouteDetails, setShowRouteDetails] = useState<{[key: string]: boolean}>({})
 
+  // 재검색 버튼 관련 상태
+  const [showResearchButton, setShowResearchButton] = useState<boolean>(false)
+  const [mapHasMoved, setMapHasMoved] = useState<boolean>(false)
+  const [initialMapCenter, setInitialMapCenter] = useState<{lat: number, lng: number} | null>(null)
+
 
   // 장소 ID 파싱 함수
   const parsePlaceId = (placeId: string): {tableName: string, numericId: string} => {
@@ -676,7 +681,8 @@ export default function MapPage() {
       }
       
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500`
+      const categoryParam = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500${categoryParam}`
       
       // 선택한 장소들의 정보를 준비
       const selectedPlacesData = selectedItineraryPlaces
@@ -721,12 +727,8 @@ export default function MapPage() {
       
       const data = await response.json()
       let places = data.attractions || []
-      
-      // 카테고리 필터 적용
-      if (categoryFilter) {
-        places = places.filter((place: AttractionData) => place.category === categoryFilter)
-      }
-      
+
+      // 백엔드에서 이미 카테고리 필터링된 결과가 옴
       setCategoryPlaces(places)
     } catch (error: any) {
       console.error('주변 장소 검색 실패:', error)
@@ -739,6 +741,200 @@ export default function MapPage() {
       setCategoryLoading(false)
     }
   }, [selectedItineraryPlaces])
+
+  // 현재 보이는 지도 영역 기준 장소 검색
+  const fetchNearbyPlacesByMapCenter = useCallback(async (categoryFilter?: string | null) => {
+    try {
+      setCategoryLoading(true)
+
+      if (!mapInstance) {
+        setCategoryPlaces([])
+        return
+      }
+
+      // 현재 지도의 보이는 영역(bounds) 가져오기
+      const bounds = mapInstance.getBounds()
+      if (!bounds) {
+        setCategoryPlaces([])
+        return
+      }
+
+      const ne = bounds.getNorthEast()
+      const sw = bounds.getSouthWest()
+      const center = bounds.getCenter()
+
+      // 지도 보이는 영역의 반경 계산 (대각선 거리의 70%)
+      const diagonalDistance = calculateDistance(
+        sw.lat(), sw.lng(),
+        ne.lat(), ne.lng()
+      )
+
+      // 줌 레벨에 따른 고정 반경 사용 (재검색 버튼은 줌 13 이상에서만 표시)
+      const zoomLevel = mapInstance.getZoom()
+      let searchRadius = 10.0 // 기본 반경 (줌 13)
+
+      if (zoomLevel >= 17) searchRadius = 1.0       // 매우 상세: 1km (극단적으로 작게)
+      else if (zoomLevel >= 16) searchRadius = 2.0   // 상세: 2km
+      else if (zoomLevel >= 15) searchRadius = 3.0   // 구/동 단위: 3km
+      else if (zoomLevel >= 14) searchRadius = 5.0   // 구/동 단위: 5km
+      else searchRadius = 10.0                       // 줌 13: 10km
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius}&limit=500`
+
+      // 지도 중심점을 기준점으로 설정
+      const centerPlaceData = [{
+        id: 'map_center',
+        name: '지도 중심점',
+        latitude: center.lat(),
+        longitude: center.lng()
+      }]
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(centerPlaceData)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      let places = data.attractions || []
+
+      // 카테고리 필터 적용
+      if (categoryFilter) {
+        places = places.filter((place: AttractionData) => place.category === categoryFilter)
+      }
+
+      // 검색 결과 로그
+      console.log('검색 결과:', {
+        totalPlaces: places.length,
+        searchRadius: searchRadius.toFixed(2),
+        categoryFilter: categoryFilter || '전체'
+      })
+
+      setCategoryPlaces(places)
+    } catch (error: any) {
+      console.error('지도 중심점 기준 주변 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+      setCategoryPlaces([])
+    } finally {
+      setCategoryLoading(false)
+    }
+  }, [mapInstance])
+
+  // 현재 지도 영역(bounds) 기준 장소 검색 (재검색 버튼용)
+  const fetchPlacesInBounds = useCallback(async (categoryFilter?: string | null) => {
+    try {
+      setCategoryLoading(true)
+
+      if (!mapInstance) {
+        setCategoryPlaces([])
+        return
+      }
+
+      // 현재 지도의 보이는 영역(bounds) 가져오기
+      const bounds = mapInstance.getBounds()
+      if (!bounds) {
+        setCategoryPlaces([])
+        return
+      }
+
+      const ne = bounds.getNorthEast()
+      const sw = bounds.getSouthWest()
+
+      // Bounds 좌표 정보 (사각형 영역)
+      const boundsData = {
+        min_lat: sw.lat(),
+        max_lat: ne.lat(),
+        min_lng: sw.lng(),
+        max_lng: ne.lng()
+      }
+
+      console.log('지도 Bounds:', boundsData)
+
+      // bounds를 중심점과 반경으로 변환
+      const centerLat = (boundsData.min_lat + boundsData.max_lat) / 2
+      const centerLng = (boundsData.min_lng + boundsData.max_lng) / 2
+
+      // 모바일 감지
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+      // bounds 크기에 따른 동적 반경 계산
+      const diagonalDistance = calculateDistance(
+        boundsData.min_lat, boundsData.min_lng,
+        boundsData.max_lat, boundsData.max_lng
+      )
+
+      // 모바일에서는 더 작은 반경 사용 (실제 보이는 영역에 맞춤)
+      const radiusMultiplier = isMobile ? 0.5 : 0.7
+      const searchRadius = Math.min(Math.max(diagonalDistance * radiusMultiplier, 1.0), 10.0) // 최소 1km, 최대 10km
+
+      console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km', isMobile ? '(모바일)' : '(PC)')
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const categoryParam = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500${categoryParam}`
+
+      const centerPlaceData = [{
+        id: 'map_center',
+        name: '지도 중심점',
+        latitude: centerLat,
+        longitude: centerLng
+      }]
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(centerPlaceData)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      let places = data.attractions || []
+
+      // 백엔드에서 이미 카테고리 필터링된 결과가 옴
+      console.log('Bounds 검색 결과:', {
+        totalPlaces: places.length,
+        bounds: boundsData,
+        categoryFilter: categoryFilter || '전체'
+      })
+
+      setCategoryPlaces(places)
+    } catch (error: any) {
+      console.error('지도 bounds 기준 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+      setCategoryPlaces([])
+    } finally {
+      setCategoryLoading(false)
+    }
+  }, [mapInstance])
 
   // 장소 상세 정보 가져오기
   const fetchPlaceDetail = useCallback(async (placeId: string) => {
@@ -1347,7 +1543,7 @@ export default function MapPage() {
   // 상태 업데이트 함수
   const updateStatus = (message: string, type: 'loading' | 'success' | 'error') => {
     setRouteStatus({ message, type });
-    setTimeout(() => setRouteStatus(null), 3000);
+    setTimeout(() => setRouteStatus(null), 5000);
   };
 
   // 기존 경로 제거
@@ -1899,6 +2095,76 @@ export default function MapPage() {
     };
   }, [mapInstance, activeMarkerIndex, currentSegments, cachedRouteResults]);
 
+  // 지도 인스턴스 로드 시 초기 설정 및 이동 감지
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    // 초기 중심점 설정 (한 번만)
+    if (!initialMapCenter) {
+      const center = mapInstance.getCenter();
+      if (center) {
+        setInitialMapCenter({
+          lat: center.lat(),
+          lng: center.lng()
+        });
+      }
+    }
+
+    // 지도 이동 감지 리스너 추가
+    const dragEndListener = mapInstance.addListener('dragend', () => {
+      setMapHasMoved(true);
+    });
+
+    const zoomChangedListener = mapInstance.addListener('zoom_changed', () => {
+      setMapHasMoved(true);
+    });
+
+    return () => {
+      if (dragEndListener && dragEndListener.remove) dragEndListener.remove();
+      if (zoomChangedListener && zoomChangedListener.remove) zoomChangedListener.remove();
+    };
+  }, [mapInstance, initialMapCenter]);
+
+  // 재검색 버튼 표시 조건 체크
+  useEffect(() => {
+    if (!mapInstance) {
+      setShowResearchButton(false);
+      return;
+    }
+
+    const zoomLevel = mapInstance.getZoom();
+    const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 13; // 장소찾기 모드 + 지도 이동 + 줌 레벨 13 이상
+
+    setShowResearchButton(shouldShowButton);
+  }, [showItinerary, mapHasMoved, mapInstance]);
+
+  // 줌 레벨 변경 시 재검색 버튼 상태 업데이트
+  useEffect(() => {
+    if (!mapInstance) return;
+
+    const handleZoomChanged = () => {
+      const zoomLevel = mapInstance.getZoom();
+      const shouldShowButton = !showItinerary && mapHasMoved && zoomLevel >= 13;
+      setShowResearchButton(shouldShowButton);
+    };
+
+    const zoomChangedListener = mapInstance.addListener('zoom_changed', handleZoomChanged);
+    
+    return () => {
+      if (zoomChangedListener && zoomChangedListener.remove) {
+        zoomChangedListener.remove();
+      }
+    };
+  }, [mapInstance, showItinerary, mapHasMoved]);
+
+  // 장소찾기 모드나 카테고리 변경 시 지도 이동 상태 초기화
+  useEffect(() => {
+    if (showItinerary || !selectedCategory) {
+      setMapHasMoved(false);
+      setShowResearchButton(false);
+    }
+  }, [showItinerary, selectedCategory]);
+
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
@@ -2242,9 +2508,9 @@ export default function MapPage() {
     const distanceText = totalDistance > 0 ? `${(totalDistance / 1000).toFixed(1)}km` : '알 수 없음';
     const durationText = totalDuration > 0 ? `${Math.round(totalDuration / 60)}분` : '알 수 없음';
     
-    const routeTypeText = isOptimized ? '최적화된 경로!' : '기본 동선 표시 완료!';
+    const routeTypeText = isOptimized ? '최적화 경로' : '기본 동선';
     updateStatus(
-      `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}`,
+      `${routeTypeText} (${segments.length}개 구간) - 총 거리: ${distanceText}, 총 시간: ${durationText}\n※ 현재 시간 기준의 예상치입니다.\n실제 여행 시 다시 확인하세요.`,
       'success'
     );
   };
@@ -2506,7 +2772,7 @@ export default function MapPage() {
       const optimized = optimizeRouteOrderWithConstraints(originCoords, destinationCoords, destinationNames, constraints);
       
 
-      updateStatus(`${dayNumber}일차 경로 최적화 완료! (${lockedCount}개 순서 고정) 예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
+      updateStatus(`${dayNumber}일차 경로 최적화 중.. (${lockedCount}개 순서 고정)\n예상 거리: ${optimized.totalDistance.toFixed(1)}km. 실제 경로를 계산 중...`, 'loading');
 
       // 최적화된 순서대로 장소 객체 재구성
       const optimizedPlaces = [firstPlace];
@@ -2713,8 +2979,28 @@ export default function MapPage() {
               <span>{category.name}</span>
             </button>
           ))}
+
         </div>
       </div>
+      )}
+
+      {/* 현 지도에서 재검색 버튼 - 카테고리 아래 중앙 배치 */}
+      {showResearchButton && (
+        <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
+          <button
+            onClick={() => {
+              // 현재 지도 bounds를 기준으로 선택된 카테고리 재검색
+              fetchPlacesInBounds(selectedCategory);
+              setMapHasMoved(false); // 재검색 후 이동 상태 초기화
+            }}
+            className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>현 지도에서 재검색</span>
+          </button>
+        </div>
       )}
 
       {/* Route Status Toast */}
@@ -2738,7 +3024,7 @@ export default function MapPage() {
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
             )}
-            <span className="text-sm font-medium">{routeStatus.message}</span>
+            <span className="text-sm font-medium whitespace-pre-line">{routeStatus.message}</span>
           </div>
         </div>
       )}
@@ -2775,6 +3061,7 @@ export default function MapPage() {
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
           source={sourceParam}
+          disableAutoBounds={!showItinerary} // 장소찾기 모드에서는 자동 bounds 비활성화
           onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
               // 카테고리 마커 클릭 시 바텀 시트에 상세정보 표시
@@ -3090,8 +3377,8 @@ export default function MapPage() {
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 선택된 카테고리가 있으면 해당 카테고리로, 없으면 전체 검색
-                        fetchNearbyPlaces(selectedCategory)
+                        // 현재 지도 bounds 기준으로 선택된 카테고리 검색
+                        fetchPlacesInBounds(selectedCategory)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >

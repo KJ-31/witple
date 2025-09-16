@@ -18,6 +18,7 @@ interface GoogleMapProps {
   onMarkerClick?: (markerId: string, markerType: string, position?: { lat: number; lng: number }) => void
   selectedMarkerIdFromParent?: string | null
   source?: string | null // GPS 활성화 여부를 결정하는 source 파라미터 추가
+  disableAutoBounds?: boolean // 자동 bounds 조정 비활성화 옵션
 }
 
 // 카테고리별 아이콘 매핑
@@ -58,7 +59,8 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   onMapLoad,
   onMarkerClick,
   selectedMarkerIdFromParent = null,
-  source = null
+  source = null,
+  disableAutoBounds = false
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
@@ -284,14 +286,14 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
     }
   }, [selectedMarkerIdFromParent, selectedMarkerId])
 
-  // 지도 영역 조정 (모든 마커가 보이도록)
+  // 지도 영역 조정 (모든 마커가 보이도록) - disableAutoBounds가 false일 때만
   useEffect(() => {
-    if (map && markers.length > 0) {
+    if (map && markers.length > 0 && !disableAutoBounds) {
       const bounds = new (window as any).google.maps.LatLngBounds()
       markers.forEach(marker => bounds.extend(marker.position))
       map.fitBounds(bounds)
     }
-  }, [map, markers])
+  }, [map, markers, disableAutoBounds])
 
   // GPS 모드별 위치 추적 (profile에서만 가능)
   useEffect(() => {

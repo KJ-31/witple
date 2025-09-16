@@ -33,6 +33,26 @@ export default function FeedPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
 
+  // 사용자의 좋아요 상태를 업데이트하는 함수
+  const updateLikeStates = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/proxy/api/v1/posts/user/${userId}/likes`)
+      if (response.ok) {
+        const data = await response.json()
+        const likedPostIds = new Set(data.liked_post_ids)
+
+        setPosts(prevPosts =>
+          prevPosts.map(post => ({
+            ...post,
+            isLiked: likedPostIds.has(post.id)
+          }))
+        )
+      }
+    } catch (error) {
+      console.error('좋아요 상태 조회 오류:', error)
+    }
+  }
+
   // 포스트 데이터를 API에서 가져오는 함수
   const fetchPosts = async () => {
     try {
@@ -52,6 +72,11 @@ export default function FeedPage() {
           isLiked: false // 초기값은 좋아요 안함
         }))
         setPosts(postsWithLiked)
+
+        // 로그인된 사용자라면 좋아요 상태 업데이트
+        if (session?.user?.id) {
+          updateLikeStates(session.user.id)
+        }
       } else {
         console.error('포스트 가져오기 실패')
         // 실패시 빈 배열 유지
@@ -76,36 +101,64 @@ export default function FeedPage() {
       const currentPost = posts.find(post => post.id === postId)
       if (!currentPost) return
 
-      const endpoint = currentPost.isLiked
-        ? `/api/proxy/api/v1/posts/${postId}/like`  // DELETE 요청
-        : `/api/proxy/api/v1/posts/${postId}/like`  // POST 요청
-
-      const method = currentPost.isLiked ? 'DELETE' : 'POST'
-
-      const response = await fetch(endpoint, {
-        method: method,
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      })
-
-      if (response.ok) {
-        const result = await response.json()
-
-        // UI 업데이트 - 서버 응답의 likes_count 사용
-        setPosts(prevPosts =>
-          prevPosts.map(post =>
-            post.id === postId
-              ? {
-                ...post,
-                isLiked: !post.isLiked,
-                likes_count: result.likes_count
-              }
-              : post
-          )
+      if (currentPost.isLiked) {
+        // 좋아요 취소 (DELETE)
+        const response = await fetch(
+          `/api/proxy/api/v1/posts/${postId}/like?user_id=${session?.user?.id}`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          }
         )
+
+        if (response.ok) {
+          const result = await response.json()
+          // UI 업데이트
+          setPosts(prevPosts =>
+            prevPosts.map(post =>
+              post.id === postId
+                ? {
+                  ...post,
+                  isLiked: false,
+                  likes_count: result.likes_count
+                }
+                : post
+            )
+          )
+        } else {
+          console.error('좋아요 취소 실패')
+        }
       } else {
-        console.error('좋아요 처리 실패')
+        // 좋아요 추가 (POST)
+        const response = await fetch(`/api/proxy/api/v1/posts/${postId}/like`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: session?.user?.id
+          })
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          // UI 업데이트
+          setPosts(prevPosts =>
+            prevPosts.map(post =>
+              post.id === postId
+                ? {
+                  ...post,
+                  isLiked: true,
+                  likes_count: result.likes_count
+                }
+                : post
+            )
+          )
+        } else {
+          console.error('좋아요 추가 실패')
+        }
       }
     } catch (error) {
       console.error('좋아요 처리 중 오류:', error)

@@ -64,6 +64,7 @@ class Post(Base):
     user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
     caption = Column(Text, nullable=False)
     image_url = Column(String, nullable=False)  # 이미지 파일 경로 또는 URL
+    image_vector = Column(Text, nullable=True)  # CLIP 이미지 벡터 (512차원, JSON 문자열)
     location = Column(String, nullable=True)
     likes_count = Column(Integer, default=0)
     comments_count = Column(Integer, default=0)
@@ -72,6 +73,15 @@ class Post(Base):
 
     # Relationship to user
     user = relationship("User", back_populates="posts")
+
+
+class PostLike(Base):
+    __tablename__ = "post_likes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserPreference(Base):
