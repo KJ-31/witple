@@ -436,9 +436,6 @@ export default function UserProfilePage() {
                             {formatDate(trip.start_date)} - {formatDate(trip.end_date)}
                           </span>
                         )}
-                        <span className="bg-blue-600 text-white px-2 py-1 rounded-full">
-                          {trip.status_display}
-                        </span>
                       </div>
                     </div>
                     <Calendar className="w-5 h-5 text-gray-400 flex-shrink-0" />
