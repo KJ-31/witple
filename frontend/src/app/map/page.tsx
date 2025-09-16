@@ -681,7 +681,8 @@ export default function MapPage() {
       }
       
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500`
+      const categoryParam = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=5.0&limit=500${categoryParam}`
       
       // 선택한 장소들의 정보를 준비
       const selectedPlacesData = selectedItineraryPlaces
@@ -726,12 +727,8 @@ export default function MapPage() {
       
       const data = await response.json()
       let places = data.attractions || []
-      
-      // 카테고리 필터 적용
-      if (categoryFilter) {
-        places = places.filter((place: AttractionData) => place.category === categoryFilter)
-      }
-      
+
+      // 백엔드에서 이미 카테고리 필터링된 결과가 옴
       setCategoryPlaces(places)
     } catch (error: any) {
       console.error('주변 장소 검색 실패:', error)
@@ -888,7 +885,8 @@ export default function MapPage() {
       console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km', isMobile ? '(모바일)' : '(PC)')
 
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500`
+      const categoryParam = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500${categoryParam}`
 
       const centerPlaceData = [{
         id: 'map_center',
@@ -918,12 +916,7 @@ export default function MapPage() {
       const data = await response.json()
       let places = data.attractions || []
 
-      // 카테고리 필터 적용 (프론트엔드에서)
-      if (categoryFilter) {
-        places = places.filter((place: AttractionData) => place.category === categoryFilter)
-      }
-
-      // 검색 결과 로그
+      // 백엔드에서 이미 카테고리 필터링된 결과가 옴
       console.log('Bounds 검색 결과:', {
         totalPlaces: places.length,
         bounds: boundsData,

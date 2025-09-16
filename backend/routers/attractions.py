@@ -149,7 +149,7 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     
     return distance
 
-async def get_nearby_attractions(db: Session, selected_places: List[dict], radius_km: float = 1.0, limit: int = 50):
+async def get_nearby_attractions(db: Session, selected_places: List[dict], radius_km: float = 1.0, limit: int = 50, category: str = None):
     """선택한 장소들 기준으로 주변 관광지 검색"""
     try:
         if not selected_places:
@@ -157,7 +157,20 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
         
         nearby_attractions = []
         processed_ids = set()  # 중복 방지
-        
+
+        # 카테고리 필터에 따른 테이블 선택
+        search_tables = {}
+        if category:
+            # 특정 카테고리에 맞는 테이블만 검색
+            for table_name, table_model in CATEGORY_TABLES.items():
+                if get_category_from_table(table_name) == category:
+                    search_tables[table_name] = table_model
+            logger.info(f"카테고리 '{category}' 필터 적용: {list(search_tables.keys())} 테이블에서 검색")
+        else:
+            # 카테고리 필터가 없으면 모든 테이블 검색
+            search_tables = CATEGORY_TABLES
+            logger.info("전체 카테고리에서 검색")
+
         # 선택한 각 장소를 중심으로 검색
         for selected_place in selected_places:
             if not selected_place.get('latitude') or not selected_place.get('longitude'):
@@ -169,8 +182,8 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
             # 검색 범위 계산 (성능 최적화)
             bounds = get_approximate_bounds(center_lat, center_lng, radius_km)
             
-            # 모든 카테고리 테이블에서 검색
-            for table_name, table_model in CATEGORY_TABLES.items():
+            # 선택된 카테고리 테이블에서 검색
+            for table_name, table_model in search_tables.items():
                 try:
                     # 범위 기반 필터링으로 성능 최적화 - LIMIT 제거로 범위 내 모든 데이터 조회
                     query = db.query(table_model).filter(
@@ -350,6 +363,7 @@ async def get_nearby_places(
     selected_places: List[dict],
     radius_km: float = Query(1.0, ge=0.1, le=10, description="검색 반경 (km)"),
     limit: int = Query(50, ge=1, le=500, description="최대 결과 수"),
+    category: Optional[str] = Query(None, description="카테고리 필터"),
     db: Session = Depends(get_db)
 ):
     """선택한 장소들을 기준으로 주변 관광지를 검색합니다."""
@@ -367,7 +381,8 @@ async def get_nearby_places(
             db=db,
             selected_places=selected_places,
             radius_km=radius_km,
-            limit=limit
+            limit=limit,
+            category=category
         )
         
         return {
