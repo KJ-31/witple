@@ -372,30 +372,6 @@ export default function UserProfilePage() {
                   </div>
                 )}
               </div>
-
-              {/* 여행 취향 */}
-              {(userProfile.priority || userProfile.accommodation || userProfile.exploration) && (
-                <div className="mt-4 p-4 bg-gray-700 rounded-lg">
-                  <h3 className="font-semibold text-white mb-2">여행 취향</h3>
-                  <div className="space-y-2 text-sm text-gray-300">
-                    {userProfile.priority && (
-                      <div>
-                        <span className="font-medium">우선순위:</span> {userProfile.priority}
-                      </div>
-                    )}
-                    {userProfile.accommodation && (
-                      <div>
-                        <span className="font-medium">숙박 선호:</span> {userProfile.accommodation}
-                      </div>
-                    )}
-                    {userProfile.exploration && (
-                      <div>
-                        <span className="font-medium">탐험 스타일:</span> {userProfile.exploration}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
