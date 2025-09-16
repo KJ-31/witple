@@ -533,7 +533,7 @@ export default function Home() {
                   ))
                 ) : searchQuery.trim() ? (
                   <div className="px-4 py-3 text-[#94A9C9] text-sm text-center">
-                    "{searchQuery}"에 대한 검색 결과가 없습니다
+                    &quot;{searchQuery}&quot;에 대한 검색 결과가 없습니다
                   </div>
                 ) : null}
               </div>
