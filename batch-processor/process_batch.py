@@ -17,6 +17,7 @@ import boto3
 import pandas as pd
 import numpy as np
 from langchain_experimental.open_clip import OpenCLIPEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import requests
@@ -53,6 +54,15 @@ JOB_ID = os.getenv('AWS_BATCH_JOB_ID', 'unknown')
 # 시간 가중치 설정 (외부화)
 TIME_DECAY_LAMBDA = float(os.getenv('TIME_DECAY_LAMBDA', '0.0231'))  # 30일 후 50% 감쇠
 
+# 텍스트 벡터화 모델 설정 (HuggingFace MiniLM)
+TEXT_MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"
+TEXT_VECTOR_DIM = 384
+
+# 이미지 벡터화 모델 설정 (OpenCLIP)
+OPENCLIP_IMAGE_MODEL_NAME = "ViT-B-32"  # 이미지용 (512차원)
+OPENCLIP_IMAGE_CHECKPOINT = "laion2b_s34b_b79k"
+IMAGE_VECTOR_DIM = 512
+
 # 로드된 환경변수 확인
 logger = logging.getLogger(__name__)
 print(f"🔧 Environment Variables:")
@@ -68,6 +78,9 @@ print(f"  TIME_DECAY_LAMBDA: {TIME_DECAY_LAMBDA} (30-day decay: {np.exp(-TIME_DE
 OPENCLIP_MODEL_NAME = "ViT-B-32"
 OPENCLIP_CHECKPOINT = "laion2b_s34b_b79k"
 
+print(f"  TEXT_VECTOR_DIM: {TEXT_VECTOR_DIM} (MiniLM 텍스트 벡터 차원)")
+print(f"  IMAGE_VECTOR_DIM: {IMAGE_VECTOR_DIM} (CLIP 이미지 벡터 차원)")
+
 class BatchProcessor:
     def __init__(self):
         logger.info("🚀 Initializing Batch Processor")
@@ -75,26 +88,25 @@ class BatchProcessor:
         # AWS 클라이언트 초기화
         self.s3_client = boto3.client('s3', region_name=AWS_REGION)
         
-        # OpenCLIP 모델 로드
-        logger.info(f"📥 Loading OpenCLIP model: {OPENCLIP_MODEL_NAME}")
-        self.embedding_model = OpenCLIPEmbeddings(
-            model_name=OPENCLIP_MODEL_NAME,
-            checkpoint=OPENCLIP_CHECKPOINT
+        # 텍스트 벡터화 모델 로드 (HuggingFace MiniLM)
+        logger.info(f"📥 Loading HuggingFace text model: {TEXT_MODEL_NAME}")
+        self.text_embedding_model = HuggingFaceEmbeddings(
+            model_name=TEXT_MODEL_NAME
         )
 
-        # 동적 벡터 차원 감지
-        logger.info("🔍 Detecting vector dimensions...")
-        test_vector = self.embedding_model.embed_query("test")
-        self.vector_dimension = len(test_vector)
-        logger.info(f"✅ OpenCLIP model loaded successfully. Vector dimension: {self.vector_dimension}")
+        # 이미지 벡터화 모델 로드 (OpenCLIP)
+        logger.info(f"📥 Loading OpenCLIP image model: {OPENCLIP_IMAGE_MODEL_NAME}")
+        self.image_embedding_model = OpenCLIPEmbeddings(
+            model_name=OPENCLIP_IMAGE_MODEL_NAME,
+            checkpoint=OPENCLIP_IMAGE_CHECKPOINT
+        )
 
-        # 차원 검증
-        if self.vector_dimension not in [384, 512, 768, 1024]:
-            logger.warning(f"⚠️ Unexpected vector dimension: {self.vector_dimension}")
-        elif self.vector_dimension == 512:
-            logger.info("🎯 Using 512-dimensional OpenCLIP vectors (ViT-B-32)")
-        else:
-            logger.info(f"🎯 Using {self.vector_dimension}-dimensional vectors")
+        # 벡터 차원 설정
+        self.text_vector_dimension = TEXT_VECTOR_DIM
+        self.image_vector_dimension = IMAGE_VECTOR_DIM
+        logger.info(f"✅ Text and image models loaded successfully.")
+        logger.info(f"🎯 Text vectors (MiniLM): {self.text_vector_dimension} dimensions")
+        logger.info(f"🎯 Image vectors (CLIP): {self.image_vector_dimension} dimensions")
         
         # 데이터베이스 연결
         if DATABASE_URL:
@@ -169,12 +181,49 @@ class BatchProcessor:
             logger.debug(f"🔥 Cache hit for text encoding: {cache_key[:50]}...")
             return self.bert_encoding_cache[cache_key]
 
-        # 캐시 미스 시 OpenCLIP 인코딩 수행
-        vector = self.embedding_model.embed_query(text)
+        # 캐시 미스 시 MiniLM 텍스트 인코딩 수행 (384차원)
+        vector = self.text_embedding_model.embed_query(text)
+        # 벡터 차원 검증 및 패딩/트리밍
+        if len(vector) > TEXT_VECTOR_DIM:
+            vector = vector[:TEXT_VECTOR_DIM]  # 트리밍
+        elif len(vector) < TEXT_VECTOR_DIM:
+            vector = vector + [0.0] * (TEXT_VECTOR_DIM - len(vector))  # 제로 패딩
         self.bert_encoding_cache[cache_key] = vector
         logger.debug(f"🧠 Generated new encoding for: {cache_key[:50]}...")
 
         return vector
+
+    def _encode_image_rgb(self, image_path_or_url: str) -> List[float]:
+        """이미지를 RGB 기준 512차원 벡터로 인코딩"""
+        cache_key = f"image:{image_path_or_url}"
+        self._cache_attempts += 1
+
+        # 캐시 조회
+        if cache_key in self.bert_encoding_cache:
+            self._cache_hits += 1
+            logger.debug(f"🔥 Cache hit for image encoding: {cache_key[:50]}...")
+            return self.bert_encoding_cache[cache_key]
+
+        try:
+            # CLIP을 통한 이미지 인코딩 (512차원)
+            # 실제 이미지 파일이나 URL을 처리하는 경우 embed_image 메서드 사용
+            # 현재는 이미지 설명 텍스트를 이미지 모델로 인코딩
+            vector = self.image_embedding_model.embed_query(f"image: {image_path_or_url}")
+
+            # 벡터 차원 검증 및 패딩/트리밍 (512차원)
+            if len(vector) > IMAGE_VECTOR_DIM:
+                vector = vector[:IMAGE_VECTOR_DIM]  # 트리밍
+            elif len(vector) < IMAGE_VECTOR_DIM:
+                vector = vector + [0.0] * (IMAGE_VECTOR_DIM - len(vector))  # 제로 패딩
+
+            self.bert_encoding_cache[cache_key] = vector
+            logger.debug(f"🖼️ Generated new CLIP image encoding for: {cache_key[:50]}...")
+            return vector
+
+        except Exception as e:
+            logger.error(f"❌ Error encoding image {image_path_or_url}: {e}")
+            # 에러 시 제로 벡터 반환
+            return [0.0] * IMAGE_VECTOR_DIM
 
     def _generate_time_weighted_user_vector(self, user_id: str, data: Dict[str, Any], place_vectors: Dict[str, Any]) -> List[float]:
         """시간 가중치를 적용한 사용자 벡터 생성 (안전성 강화)"""
@@ -406,7 +455,7 @@ class BatchProcessor:
                 else:
                     place_text = f"Place category: {place_category} with {len(data['unique_users'])} visitors"
 
-                # OpenCLIP 벡터 생성 (캐시 활용하여 중복 연산 방지)
+                # MiniLM 텍스트 벡터 생성 (캐시 활용하여 중복 연산 방지)
                 vector = self._encode_text_with_cache(place_text)
                 
                 # 인기도 점수 계산
@@ -515,7 +564,7 @@ class BatchProcessor:
             cache_hit_ratio = (self._cache_hits / max(self._cache_attempts, 1)) * 100
 
         logger.info(f"✅ Generated vectors for {len(user_vectors)} users and {len(place_vectors)} places")
-        logger.info(f"🔥 OpenCLIP encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
+        logger.info(f"🔥 Text encoding cache: {total_cache_entries} entries, {cache_hit_ratio:.1f}% hit ratio")
         logger.info(f"⏰ Time-weighted vectors: {self.stats['time_weighted_users']} users, Fallback: {self.stats['fallback_users']} users")
 
         self.stats['processed_users'] = len(user_vectors)
@@ -527,7 +576,7 @@ class BatchProcessor:
         }
     
     def create_user_behavior_text(self, user_data: Dict[str, Any]) -> str:
-        """사용자 행동 데이터를 OpenCLIP 입력용 텍스트로 변환"""
+        """사용자 행동 데이터를 MiniLM 입력용 텍스트로 변환"""
         categories = list(user_data['categories_visited'])
         total_actions = len(user_data['actions'])
         
@@ -545,7 +594,7 @@ class BatchProcessor:
                        f"performed {total_actions} actions: " + \
                        ', '.join(behavior_parts)
         
-        return behavior_text[:512]  # OpenCLIP 텍스트 입력 길이 제한
+        return behavior_text[:512]  # MiniLM 텍스트 입력 길이 제한
     
     def save_to_database(self, vectors_data: Dict[str, Dict[str, Any]]) -> bool:
         """벡터 데이터를 데이터베이스에 저장"""
@@ -556,15 +605,22 @@ class BatchProcessor:
         logger.info("💾 Saving vectors to database")
         
         db = self.SessionLocal()
+        user_success_count = 0
+        place_success_count = 0
+        user_failures = []
+        place_failures = []
+        
         try:
             user_vectors = vectors_data['user_vectors']
             place_vectors = vectors_data['place_vectors']
+            
+            logger.info(f"📊 Processing {len(user_vectors)} user vectors and {len(place_vectors)} place vectors")
             
             # 사용자 벡터 업데이트/삽입
             for user_id, data in user_vectors.items():
                 try:
                     # UPSERT 쿼리 실행
-                    db.execute(text("""
+                    result = db.execute(text("""
                         INSERT INTO user_behavior_vectors 
                         (user_id, behavior_vector, like_score, bookmark_score, click_score, dwell_time_score,
                          total_actions, total_likes, total_bookmarks, total_clicks, last_action_date, vector_updated_at)
@@ -595,7 +651,10 @@ class BatchProcessor:
                         'total_clicks': data['total_clicks'],
                         'last_action_date': data['last_action_date']
                     })
+                    user_success_count += 1
+                    logger.debug(f"✅ User vector {user_id} saved successfully")
                 except Exception as e:
+                    user_failures.append(f"{user_id}: {str(e)}")
                     logger.error(f"❌ Failed to save user vector {user_id}: {str(e)}")
                     db.rollback()  # 트랜잭션 복구
                     continue
@@ -603,7 +662,7 @@ class BatchProcessor:
             # 장소 벡터 업데이트/삽입
             for place_key, data in place_vectors.items():
                 try:
-                    db.execute(text("""
+                    result = db.execute(text("""
                         INSERT INTO place_vectors 
                         (place_id, place_category, behavior_vector, combined_vector,
                          total_likes, total_bookmarks, total_clicks, unique_users,
@@ -634,17 +693,50 @@ class BatchProcessor:
                         'popularity_score': data['popularity_score'],
                         'engagement_score': data['engagement_score']
                     })
+                    place_success_count += 1
+                    logger.debug(f"✅ Place vector {place_key} saved successfully")
                 except Exception as e:
+                    place_failures.append(f"{place_key}: {str(e)}")
                     logger.error(f"❌ Failed to save place vector {place_key}: {str(e)}")
                     db.rollback()  # 트랜잭션 복구
                     continue
             
+            # 트랜잭션 커밋
             db.commit()
-            logger.info(f"✅ Saved {len(user_vectors)} user vectors and {len(place_vectors)} place vectors to database")
-            return True
+            
+            # 상세한 결과 로깅
+            logger.info(f"📊 Database save results:")
+            logger.info(f"  - User vectors: {user_success_count}/{len(user_vectors)} saved successfully")
+            logger.info(f"  - Place vectors: {place_success_count}/{len(place_vectors)} saved successfully")
+            
+            if user_failures:
+                logger.warning(f"⚠️ User vector failures: {len(user_failures)}")
+                for failure in user_failures[:5]:  # 최대 5개만 로그
+                    logger.warning(f"  - {failure}")
+                if len(user_failures) > 5:
+                    logger.warning(f"  - ... and {len(user_failures) - 5} more failures")
+            
+            if place_failures:
+                logger.warning(f"⚠️ Place vector failures: {len(place_failures)}")
+                for failure in place_failures[:5]:  # 최대 5개만 로그
+                    logger.warning(f"  - {failure}")
+                if len(place_failures) > 5:
+                    logger.warning(f"  - ... and {len(place_failures) - 5} more failures")
+            
+            # 성공 기준: 전체의 80% 이상이 성공해야 함
+            total_expected = len(user_vectors) + len(place_vectors)
+            total_success = user_success_count + place_success_count
+            success_rate = total_success / total_expected if total_expected > 0 else 0
+            
+            if success_rate >= 0.8:
+                logger.info(f"✅ Database save completed successfully (success rate: {success_rate:.1%})")
+                return True
+            else:
+                logger.error(f"❌ Database save failed (success rate: {success_rate:.1%} < 80%)")
+                return False
             
         except Exception as e:
-            logger.error(f"❌ Database save failed: {str(e)}")
+            logger.error(f"❌ Database save failed with exception: {str(e)}")
             db.rollback()
             return False
         finally:

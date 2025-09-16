@@ -8,7 +8,7 @@ export default function BubbleAnimation() {
   const { setShowChatbot, showChatbot } = useChatbot()
 
   const { rive, RiveComponent } = useRive({
-    src: '/rive/bubble_2.riv',
+    src: '/rive/bubble_3.riv',
     stateMachines: 'State Machine 1',
     autoplay: true,
     autoBind: true as any, // ViewModel(Default Instance) 자동 바인딩
@@ -100,10 +100,10 @@ export default function BubbleAnimation() {
   }, [rive, showChatbot, showTrigger])
 
   return (
-    <div className="fixed" style={{ top: '-110px', right: '35px', zIndex: 9999 }}>
+    <div className="fixed" style={{ top: '700px', right: '35px', zIndex: 9999 }}>
       <div style={{ visibility: visible ? 'visible' : 'hidden' }}>
         <div className="relative">
-          <RiveComponent style={{ width: 400, height: 400 }} />
+          <RiveComponent style={{ width: 400, height: 100 }} />
           {/* 클릭 히트박스 */}
           <div
             onClick={() => setShowChatbot(true)}

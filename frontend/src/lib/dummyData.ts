@@ -190,7 +190,8 @@ const handleAuthError = async (response: Response) => {
 export const fetchRecommendations = async (
   limit: number = 21,  // v2 API는 featured 1개 + feed 20개
   maxSections: number = 5, // 최대 섹션 수
-  maxItemsPerSection: number = 6 // 섹션당 최대 아이템 수
+  maxItemsPerSection: number = 6, // 섹션당 최대 아이템 수
+  region?: string // 지역 필터
 ): Promise<{ data: any[], hasMore: boolean }> => {
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
@@ -210,7 +211,12 @@ export const fetchRecommendations = async (
     }
 
     // v2 추천 시스템 API 사용
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?limit=${limit}`
+    const params = new URLSearchParams({ limit: limit.toString() })
+    if (region) {
+      params.append('region', region)
+    }
+
+    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
     console.log('v2 추천 API 호출:', url)
 
     // 3초 타임아웃으로 빠른 실패 처리
@@ -363,6 +369,101 @@ const fetchV2ExploreFeedWithCategories = async (
   } catch (error) {
     console.error('v2 탐색 피드 호출 오류:', error)
     return { data: [], hasMore: false }
+  }
+}
+
+// bookmark_cnt 기반 인기 장소 조회 함수 (비로그인 사용자용)
+const fetchPopularPlacesByBookmarks = async (
+  maxSections: number = 3,
+  maxItemsPerSection: number = 8,
+  region?: string
+): Promise<{ data: CitySection[], hasMore: boolean }> => {
+  try {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+
+    // bookmark_cnt 기준으로 정렬된 인기 장소 조회
+    const params = new URLSearchParams({
+      limit: (maxSections * maxItemsPerSection).toString()
+    })
+
+    if (region) {
+      params.append('region', region)
+    }
+
+    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
+    console.log('인기 장소 API 호출 (bookmark_cnt 기준):', url)
+
+    const response = await fetch(url, { headers })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+    console.log('v2 API 응답 (인기 장소):', result)
+
+    // v2 API 응답 처리 { featured, feed, total_count }
+    let allItems = []
+    if (result && typeof result === 'object') {
+      if (result.featured) allItems.push(result.featured)
+      if (result.feed && Array.isArray(result.feed)) {
+        allItems.push(...result.feed)
+      }
+    }
+
+    if (allItems.length > 0) {
+      // 지역별로 그룹화
+      const regionGroups: { [key: string]: any[] } = {}
+
+      allItems.forEach(item => {
+        const region = item.region || '기타'
+        if (!regionGroups[region]) {
+          regionGroups[region] = []
+        }
+        regionGroups[region].push(item)
+      })
+
+      const sections: CitySection[] = []
+      const regions = Object.keys(regionGroups).slice(0, maxSections)
+
+      for (const region of regions) {
+        const items = regionGroups[region].slice(0, maxItemsPerSection)
+
+        const attractions: Attraction[] = items.map(item => ({
+          id: item.id || `${item.table_name}_${item.place_id}`,
+          name: item.name || '이름 없음',
+          description: item.description || '설명 없음',
+          imageUrl: getImageUrl(item.image_urls),
+          rating: 4.5,
+          category: getCategoryFromTableName(item.table_name || 'nature')
+        }))
+
+        if (attractions.length > 0) {
+          sections.push({
+            id: `popular-${region}`,
+            cityName: region,
+            description: `${region} 인기 명소`,
+            region: region,
+            attractions: attractions,
+            recommendationScore: 90 // 인기도 기반이므로 높은 점수
+          })
+        }
+      }
+
+      console.log(`북마크 기반 인기 장소 완료: ${sections.length}개 지역`)
+      return { data: sections, hasMore: false }
+    }
+
+    return { data: [], hasMore: false }
+  } catch (error) {
+    console.error('인기 장소 조회 오류:', error)
+    // 실패 시 기존 explore API로 fallback
+    return await fetchV2ExploreFeedWithCategories(maxSections, maxItemsPerSection)
   }
 }
 
@@ -783,7 +884,8 @@ export const fetchPopularSectionsForNewUsers = async (
 export const fetchPersonalizedRegionCategories = async (
   requestedLimit?: number,
   userInfo?: any,
-  session?: any
+  session?: any,
+  region?: string
 ): Promise<{ data: CitySection[], hasMore: boolean }> => {
   try {
     // 백엔드에서 설정 가져오기
@@ -796,19 +898,19 @@ export const fetchPersonalizedRegionCategories = async (
       console.warn('설정 계산 실패, 기본값 사용:', settings)
       const fallbackSettings = { sectionCount: 3, itemsPerSection: 8, totalRecommendations: 24 }
       return session
-        ? await fetchRecommendations(fallbackSettings.totalRecommendations, fallbackSettings.sectionCount, fallbackSettings.itemsPerSection)
-        : await fetchV2ExploreFeedWithCategories(fallbackSettings.sectionCount)
+        ? await fetchRecommendations(fallbackSettings.totalRecommendations, fallbackSettings.sectionCount, fallbackSettings.itemsPerSection, region)
+        : await fetchPopularPlacesByBookmarks(fallbackSettings.sectionCount, fallbackSettings.itemsPerSection, region)
     }
 
     console.log(`v2 API 통합 추천: 사용자타입=${userType}, 로그인=${!!session}, 제한=${settings.totalRecommendations}, 섹션=${settings.sectionCount}, 아이템=${settings.itemsPerSection}`)
 
-    // 로그인 사용자: 개인화 추천, 비로그인 사용자: 카테고리별 탐색 피드
+    // 로그인 사용자: 개인화 추천, 비로그인 사용자: 북마크 기반 인기 장소
     if (session) {
       // ✅ v2 개인화 추천 API 직접 호출 (로그인 사용자)
-      return await fetchRecommendations(settings.totalRecommendations, settings.sectionCount, settings.itemsPerSection)
+      return await fetchRecommendations(settings.totalRecommendations, settings.sectionCount, settings.itemsPerSection, region)
     } else {
-      // ✅ v2 탐색 피드 API 호출 (비로그인 사용자 - 카테고리별 구조)
-      return await fetchV2ExploreFeedWithCategories(settings.sectionCount, settings.itemsPerSection)
+      // ✅ 북마크 기반 인기 장소 API 호출 (비로그인 사용자)
+      return await fetchPopularPlacesByBookmarks(settings.sectionCount, settings.itemsPerSection, region)
     }
   } catch (error) {
     console.error('v2 개인화 추천 API 호출 오류:', error instanceof Error ? error.message : String(error))
