@@ -3,9 +3,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRive, useStateMachineInput } from '@rive-app/react-canvas'
 import { useChatbot } from './ChatbotProvider'
+import { usePathname } from 'next/navigation'
 
 export default function BubbleAnimation() {
-  const { setShowChatbot, showChatbot } = useChatbot()
+  const { setShowChatbot, showChatbot, isAppLoading } = useChatbot()
+  const pathname = usePathname()
+
+  // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
+  const allowedPaths = ['/', '/recommendations']
+
+  // 현재 경로가 허용된 페이지가 아니면 렌더링하지 않음
+  const shouldShowBubble = allowedPaths.some(path => {
+    if (path === '/') {
+      return pathname === '/'  // 메인화면은 정확히 일치해야 함
+    }
+    return pathname.startsWith(path)  // 추천탭은 startsWith로 체크
+  })
 
   const { rive, RiveComponent } = useRive({
     src: '/rive/bubble_3.riv',
@@ -61,6 +74,16 @@ export default function BubbleAnimation() {
   }
 
   useEffect(() => {
+    // shouldShowBubble이 false이면 애니메이션 중단
+    if (!shouldShowBubble) {
+      if (firstTimeout.current) clearTimeout(firstTimeout.current)
+      if (textInterval.current) clearInterval(textInterval.current)
+      startedRef.current = false
+      setVisible(false)
+      return
+    }
+
+    // rive가 없거나 이미 시작되었으면 리턴
     if (!rive || startedRef.current) return
     startedRef.current = true
 
@@ -76,11 +99,11 @@ export default function BubbleAnimation() {
 
     // 샘플 문구 순환
     const samples = [
-      '^.^',
+      '어디로 떠나고 싶으신가요?',
       'hello, World!',
-      '안녕하세요! 길이가 조금 더 긴 문장입니다.',
-      'Rive + Data Binding 테스트 중…',
-      '줄바꿈/오토 레이아웃 확인용 문구예요.',
+      '원하는 곳을 말해보세요!',
+      '한옥에서 보내는 특별한 경험은 어떠신가요?',
+      '최근 가장 인기있는 곳이 궁금하신가요?',
     ]
     let idx = 0
     setSpeech(samples[idx])
@@ -97,18 +120,28 @@ export default function BubbleAnimation() {
       if (textInterval.current) clearInterval(textInterval.current)
       startedRef.current = false
     }
-  }, [rive, showChatbot, showTrigger])
+  }, [rive, showChatbot, showTrigger, shouldShowBubble, pathname]) // pathname 의존성 추가
+
+  // 허용된 페이지가 아니거나 로딩 중이면 BubbleAnimation 숨김
+  if (!shouldShowBubble || isAppLoading) {
+    return null
+  }
 
   return (
-    <div className="fixed" style={{ top: '700px', right: '35px', zIndex: 9999 }}>
-      <div style={{ visibility: visible ? 'visible' : 'hidden' }}>
+    <div className="fixed z-[9999] bottom-[136px] sm:bottom-[164px] right-[44px] sm:right-[58px] md:right-[68px] lg:right-[72px]">
+      <div
+        className={`transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      >
         <div className="relative">
-          <RiveComponent style={{ width: 400, height: 100 }} />
+          {/* 반응형 크기 조정 */}
+          <div className="w-[300px] h-[70px] sm:w-[350px] sm:h-[87px] md:w-[400px] md:h-[100px]">
+            <RiveComponent className="w-full h-full" />
+          </div>
+
           {/* 클릭 히트박스 */}
           <div
             onClick={() => setShowChatbot(true)}
-            className="absolute cursor-pointer"
-            style={{ top: '25%', left: '50%', width: '80%', height: '25%' }}
+            className="absolute cursor-pointer top-[25%] left-[50%] w-[80%] h-[25%]"
           />
         </div>
       </div>

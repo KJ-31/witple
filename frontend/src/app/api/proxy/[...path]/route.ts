@@ -12,8 +12,8 @@ const getBackendUrl = () => {
     return 'http://witple-backend-service:80'; // Kubernetes 서비스 이름
   }
   
-  // 개발 환경에서는 기본값 사용
-  return 'http://localhost:8001';
+  // 개발 환경에서는 기본값 사용 (Docker Compose의 백엔드 포트에 맞춤)
+  return 'http://localhost:8000';
 };
 
 const API_INTERNAL_URL = getBackendUrl();

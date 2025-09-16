@@ -20,6 +20,8 @@ interface ChatbotContextType {
   chatMessages: ChatMessage[]
   setChatMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void
   handleChatSubmit: (message: string) => Promise<void>
+  isAppLoading: boolean
+  setIsAppLoading: (loading: boolean) => void
 }
 
 const ChatbotContext = createContext<ChatbotContextType | undefined>(undefined)
@@ -40,6 +42,7 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
   const [showChatbot, setShowChatbot] = useState(false)
   const [chatMessage, setChatMessage] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [isAppLoading, setIsAppLoading] = useState(false)
 
   // 초기 메시지 및 저장된 메시지 로드
   useEffect(() => {
@@ -184,7 +187,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     setChatMessage,
     chatMessages,
     setChatMessages,
-    handleChatSubmit
+    handleChatSubmit,
+    isAppLoading,
+    setIsAppLoading
   }
 
   return (

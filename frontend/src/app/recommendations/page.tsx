@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { BottomNavigation } from '../../components'
+import { useDataCache } from '../../contexts/DataCacheContext'
+import { useChatbot } from '../../components/ChatbotProvider'
 
 interface RecommendationItem {
   id: string
@@ -21,6 +23,7 @@ interface RecommendationItem {
 export default function RecommendationsPage() {
   const router = useRouter()
   const { data: session } = useSession()
+  const { setIsAppLoading } = useChatbot()
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState(() => {
     // 초기값을 sessionStorage에서 가져오기
@@ -37,6 +40,8 @@ export default function RecommendationsPage() {
     }
     return '레저'
   })
+
+  const { getCachedData, setCachedData, isCacheValid } = useDataCache()
   const [leftColumnItems, setLeftColumnItems] = useState<RecommendationItem[]>([])
   const [rightColumnItems, setRightColumnItems] = useState<RecommendationItem[]>([])
   const [discoveryItems, setDiscoveryItems] = useState<RecommendationItem[]>([])
@@ -48,6 +53,60 @@ export default function RecommendationsPage() {
   const [isNavigatedBack, setIsNavigatedBack] = useState(false)
 
   const categories = ['레저', '숙박', '쇼핑', '자연', '맛집', '인문']
+
+  // 카테고리별 데이터 fetcher 함수
+  const fetchCategoryData = async (category: string) => {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+
+    if (session && (session as any).backendToken) {
+      headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+    }
+
+    const apiUrl = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?limit=15`
+    const response = await fetch(apiUrl, { headers })
+
+    if (!response.ok) {
+      throw new Error(`API 응답 실패: ${response.status}`)
+    }
+
+    const data = await response.json()
+
+    let attractions = []
+    if (data && typeof data === 'object') {
+      if (data.featured || data.feed) {
+        const allItems = []
+        if (data.featured) allItems.push(data.featured)
+        if (data.feed && Array.isArray(data.feed)) {
+          allItems.push(...data.feed)
+        }
+        attractions = allItems
+      }
+    }
+
+    const formattedItems = attractions.map((attraction: any, index: number) => ({
+      id: attraction.id || `${attraction.table_name}_${attraction.place_id}`,
+      title: attraction.name || attraction.title,
+      author: attraction.city?.name || attraction.region || '여행지',
+      genre: category,
+      views: attraction.views || attraction.bookmark_cnt || Math.floor(Math.random() * 5000) + 1000,
+      imageUrl: attraction.imageUrl || getImageUrl(attraction.image_urls) || `https://picsum.photos/100/100?random=${Date.now() + index}`
+    }))
+
+    return {
+      leftColumnItems: formattedItems.slice(0, 8),
+      rightColumnItems: formattedItems.slice(8, 15)
+    }
+  }
+
+  // 로딩 상태를 전역 상태와 동기화
+  useEffect(() => {
+    setIsAppLoading(loading)
+  }, [loading, setIsAppLoading])
 
   // 페이지 로드/언마운트 시 스크롤 위치 관리
   useEffect(() => {
@@ -139,128 +198,49 @@ export default function RecommendationsPage() {
     }
   }
 
-  // DB에서 데이터 가져오기
+  // 카테고리 데이터 로드
   useEffect(() => {
-    const fetchCategoryData = async () => {
-      // 저장된 데이터 확인
-      const storedData = loadFromStorage()
-      if (storedData && storedData.selectedCategory === selectedCategory && storedData.leftColumnItems) {
-        // 저장된 데이터가 현재 선택된 카테고리와 같으면 사용
-        setLeftColumnItems(storedData.leftColumnItems || [])
-        setRightColumnItems(storedData.rightColumnItems || [])
-        setLoading(false)
-        
-        // 뒤로가기로 온 경우 스크롤 위치 복원을 데이터 로드 후에 실행
-        if (isNavigatedBack) {
-          setTimeout(() => {
-            restoreScrollPosition()
-          }, 200)
+    const loadCategoryData = async () => {
+      const cacheKey = `recommendations-${selectedCategory}`
+
+      // 캐시된 데이터 확인 (10분 캐시)
+      if (isCacheValid(cacheKey, 10 * 60 * 1000)) {
+        const cachedData = getCachedData<{leftColumnItems: RecommendationItem[], rightColumnItems: RecommendationItem[]}>(cacheKey)
+        if (cachedData) {
+          setLeftColumnItems(cachedData.leftColumnItems)
+          setRightColumnItems(cachedData.rightColumnItems)
+          setLoading(false)
+
+          if (isNavigatedBack) {
+            setTimeout(() => {
+              restoreScrollPosition()
+            }, 200)
+          }
+          return
         }
-        return
       }
 
+      // 새 데이터 fetching
+      setLoading(true)
       try {
-        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+        const categoryData = await fetchCategoryData(selectedCategory)
 
-        // 메인 추천 데이터 (15개) - 카테고리별 필터링
-        const categoryMap: { [key: string]: string } = {
-          '레저': 'leisure_sports',
-          '숙박': 'accommodation',
-          '쇼핑': 'shopping',
-          '자연': 'nature',
-          '맛집': 'restaurants',
-          '인문': 'humanities'
-        }
-        const categoryFilter = categoryMap[selectedCategory] || 'leisure_sports'
-        
-        // 헤더 설정 - 로그인 상태에 따른 인증 처리
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'accept': 'application/json',
-        }
-        
-        // 세션에서 토큰 가져오기
-        if (session && (session as any).backendToken) {
-          headers['Authorization'] = `Bearer ${(session as any).backendToken}`
-        }
-        
-        // ❌ v1 API 주석처리 - v2 API로 대체
-        // 로그인 상태에 따라 다른 API 엔드포인트 사용
-        // let apiUrl = `${API_BASE_URL}/proxy/api/v1/attractions/search?q=&category=${categoryFilter}&limit=15`
-        // if (session && (session as any).backendToken) {
-        //   // 로그인 상태: 개인화 추천 API 사용
-        //   apiUrl = `${API_BASE_URL}/proxy/api/v1/recommendations/mixed?category=${categoryFilter}&limit=15`
-        // }
+        setLeftColumnItems(categoryData.leftColumnItems)
+        setRightColumnItems(categoryData.rightColumnItems)
 
-        // ✅ v2 추천 시스템 API 사용
-        let apiUrl = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?limit=15`
-        
-        const response = await fetch(apiUrl, { headers })
-        if (response.ok) {
-          const data = await response.json()
-          
-          // v2 API 응답 형식 처리 { featured, feed, total_count }
-          let attractions = []
-          if (data && typeof data === 'object') {
-            if (data.featured || data.feed) {
-              // v2 personalized feed 응답 처리
-              const allItems = []
-              if (data.featured) allItems.push(data.featured)
-              if (data.feed && Array.isArray(data.feed)) {
-                allItems.push(...data.feed)
-              }
-              attractions = allItems
-              console.log('v2 추천 시스템 응답 아이템 수:', attractions.length)
-            } else {
-              console.warn('예상치 못한 v2 API 응답 형식:', Object.keys(data))
-              attractions = []
-            }
-          } else {
-            console.warn('v2 API 응답이 객체가 아님:', typeof data)
-            attractions = []
-          }
+        // 캐시에 저장 (10분 캐시)
+        setCachedData(cacheKey, categoryData, 10 * 60 * 1000)
 
-          const formattedItems = attractions.map((attraction: any, index: number) => ({
-            id: attraction.id || `${attraction.table_name}_${attraction.place_id}`,
-            title: attraction.name || attraction.title,
-            author: attraction.city?.name || attraction.region || '여행지',
-            genre: selectedCategory,
-            views: attraction.views || attraction.bookmark_cnt || Math.floor(Math.random() * 5000) + 1000, // v2에서 bookmark_cnt 사용
-            imageUrl: attraction.imageUrl || getImageUrl(attraction.image_urls) || `https://picsum.photos/100/100?random=${Date.now() + index}`
-          }))
-
-          const leftItems = formattedItems.slice(0, 8)
-          const rightItems = formattedItems.slice(8, 15)
-          
-          setLeftColumnItems(leftItems)
-          setRightColumnItems(rightItems)
-
-          // 현재 카테고리 데이터를 저장 (다른 데이터는 유지)
-          const currentStoredData = loadFromStorage() || {}
-          saveToStorage({
-            ...currentStoredData,
-            selectedCategory,
-            leftColumnItems: leftItems,
-            rightColumnItems: rightItems
-          })
-        } else {
-          console.error('API 응답 실패:', response.status)
-          const errorText = await response.text()
-          console.error('오류 응답:', errorText)
-          setLeftColumnItems([])
-          setRightColumnItems([])
-        }
       } catch (error) {
         console.error('데이터 가져오기 실패:', error)
         setLeftColumnItems([])
         setRightColumnItems([])
+      } finally {
+        setLoading(false)
       }
-
-      setLoading(false)
     }
 
-
-    fetchCategoryData()
+    loadCategoryData()
   }, [selectedCategory, session])
 
   // 추가 섹션 데이터 가져오기
@@ -268,9 +248,9 @@ export default function RecommendationsPage() {
     const fetchAdditionalSections = async () => {
       // 저장된 데이터 확인
       const storedData = loadFromStorage()
-      if (storedData && storedData.discoveryItems && storedData.newItems && 
-          storedData.popularItems && storedData.hiddenItems && 
-          storedData.themeItems && storedData.seasonalItems) {
+      if (storedData && storedData.discoveryItems && storedData.newItems &&
+        storedData.popularItems && storedData.hiddenItems &&
+        storedData.themeItems && storedData.seasonalItems) {
         // 저장된 데이터가 있으면 사용
         setDiscoveryItems(storedData.discoveryItems || [])
         setNewItems(storedData.newItems || [])
@@ -278,7 +258,7 @@ export default function RecommendationsPage() {
         setHiddenItems(storedData.hiddenItems || [])
         setThemeItems(storedData.themeItems || [])
         setSeasonalItems(storedData.seasonalItems || [])
-        
+
         // 뒤로가기로 온 경우 스크롤 위치 복원을 데이터 로드 후에 실행
         if (isNavigatedBack) {
           setTimeout(() => {
@@ -376,7 +356,7 @@ export default function RecommendationsPage() {
         }
         // v2 데이터를 이미 추출했으므로 조건문 수정
         if (popularAttractions.length > 0) {
-          
+
           const formattedPopularItems = popularAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
@@ -405,7 +385,7 @@ export default function RecommendationsPage() {
         }
         // v2 데이터를 이미 추출했으므로 조건문 수정
         if (hiddenAttractions.length > 0) {
-          
+
           const formattedHiddenItems = hiddenAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
@@ -436,7 +416,7 @@ export default function RecommendationsPage() {
         }
         // v2 데이터를 이미 추출했으므로 조건문 수정
         if (themeAttractions.length > 0) {
-          
+
           const formattedThemeItems = themeAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
@@ -465,7 +445,7 @@ export default function RecommendationsPage() {
         }
         // v2 데이터를 이미 추출했으므로 조건문 수정
         if (seasonalAttractions.length > 0) {
-          
+
           const formattedSeasonalItems = seasonalAttractions.map((attraction: any) => ({
             id: attraction.id,
             title: attraction.name,
@@ -483,24 +463,24 @@ export default function RecommendationsPage() {
           const currentStoredData = loadFromStorage() || {}
           // state에서 현재 값을 가져와서 저장 (빈 배열이 아닌 경우에만)
           const dataToSave: any = { ...currentStoredData }
-          
+
           // 각 섹션의 데이터가 있으면 저장
           const sections = [
             { key: 'discoveryItems', getter: () => discoveryItems },
-            { key: 'newItems', getter: () => newItems },  
+            { key: 'newItems', getter: () => newItems },
             { key: 'popularItems', getter: () => popularItems },
             { key: 'hiddenItems', getter: () => hiddenItems },
             { key: 'themeItems', getter: () => themeItems },
             { key: 'seasonalItems', getter: () => seasonalItems }
           ]
-          
+
           sections.forEach(section => {
             const data = section.getter()
             if (data && data.length > 0) {
               dataToSave[section.key] = data
             }
           })
-          
+
           saveToStorage(dataToSave)
         }, 500) // state 업데이트를 충분히 기다림
       } catch (error) {
@@ -534,20 +514,38 @@ export default function RecommendationsPage() {
   // 이미지 URL 추출 함수
   const getImageUrl = (imageUrls: any): string => {
     if (!imageUrls) return '';
-    
+
     try {
       // JSON 문자열인 경우 파싱
       const urls = typeof imageUrls === 'string' ? JSON.parse(imageUrls) : imageUrls;
-      
+
       // 배열인 경우 첫 번째 이미지 반환
       if (Array.isArray(urls) && urls.length > 0) {
         return urls[0];
       }
-      
+
       return '';
     } catch (error) {
       console.error('이미지 URL 파싱 오류:', error);
       return '';
+    }
+  }
+
+  // 스마트한 카테고리 변경 핸들러
+  const handleCategoryChange = (newCategory: string) => {
+    if (newCategory === selectedCategory) return
+
+    // 새 카테고리에 캐시된 데이터가 있는지 확인
+    const cacheKey = `recommendations-${newCategory}`
+
+    // 캐시된 데이터가 있으면 로딩 표시 없이 즉시 전환
+    if (isCacheValid(cacheKey, 10 * 60 * 1000)) {
+      setSelectedCategory(newCategory)
+      setLoading(false)
+    } else {
+      // 캐시된 데이터가 없으면 로딩 표시
+      setLoading(true)
+      setSelectedCategory(newCategory)
     }
   }
 
@@ -584,7 +582,7 @@ export default function RecommendationsPage() {
             {categories.map((category) => (
               <button
                 key={category}
-                onClick={() => setSelectedCategory(category)}
+                onClick={() => handleCategoryChange(category)}
                 className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-colors ${selectedCategory === category
                   ? 'bg-[#3E68FF] text-white'
                   : 'bg-[#1F3C7A]/30 text-[#6FA0E6] hover:bg-[#1F3C7A]/50'
@@ -810,13 +808,6 @@ export default function RecommendationsPage() {
 
         {/* 계절 추천 섹션 */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-white">계절 추천</h2>
-            <button className="text-[#6FA0E6] text-sm hover:text-[#3E68FF] transition-colors">
-              더보기
-            </button>
-          </div>
-
           <div className="overflow-x-auto no-scrollbar">
             <div className="flex gap-4 pb-4" style={{ width: 'max-content' }}>
               {seasonalItems.map((item) => (
@@ -884,7 +875,7 @@ function RecommendationCard({
 
   // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
   const textColor = (item.genre === 'restaurants' || item.genre === 'shopping' ||
-                     item.genre === '맛집' || item.genre === '쇼핑')
+    item.genre === '맛집' || item.genre === '쇼핑')
     ? '#E8EAFF'
     : '#0D121C'
 
