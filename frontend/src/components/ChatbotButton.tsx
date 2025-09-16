@@ -8,11 +8,16 @@ export function ChatbotButton() {
   const { setShowChatbot } = useChatbot()
   const pathname = usePathname()
 
-  // 숨겨야 할 페이지 경로들
-  const hiddenPaths = ['/feed', '/profile', '/attraction', '/plan', '/itinerary']
+  // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
+  const allowedPaths = ['/', '/recommendations']
 
-  // 현재 경로가 숨겨야 할 페이지에 포함되면 렌더링하지 않음
-  if (hiddenPaths.some(path => pathname.startsWith(path))) {
+  // 현재 경로가 허용된 페이지가 아니면 렌더링하지 않음
+  if (!allowedPaths.some(path => {
+    if (path === '/') {
+      return pathname === '/'  // 메인화면은 정확히 일치해야 함
+    }
+    return pathname.startsWith(path)  // 추천탭은 startsWith로 체크
+  })) {
     return null
   }
 

@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google'
 import { PWAInstallPrompt, ChatbotProvider, ChatbotButton, ChatbotModal } from '../components'
 import NextAuthSessionProvider from '../components/SessionProvider'
 import ActionTrackerProvider from '../components/ActionTrackerProvider'
+import { DataCacheProvider } from '../contexts/DataCacheContext'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -55,18 +56,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko" className="h-full">
       <body className={`${inter.className} h-full bg-gray-50 overflow-y-auto no-scrollbar`}>
-        <ActionTrackerProvider>
-          <NextAuthSessionProvider>
-          <ChatbotProvider>
-            <main className="min-h-[100dvh]">
-              {children}
-            </main>
-            <ChatbotButton />
-            <ChatbotModal />
-            <PWAInstallPrompt />
-          </ChatbotProvider>
-        </NextAuthSessionProvider>
-        </ActionTrackerProvider>
+        <DataCacheProvider>
+          <ActionTrackerProvider>
+            <NextAuthSessionProvider>
+            <ChatbotProvider>
+              <main className="min-h-[100dvh]">
+                {children}
+              </main>
+              <ChatbotButton />
+              <ChatbotModal />
+              <PWAInstallPrompt />
+            </ChatbotProvider>
+          </NextAuthSessionProvider>
+          </ActionTrackerProvider>
+        </DataCacheProvider>
       </body>
     </html>
   )

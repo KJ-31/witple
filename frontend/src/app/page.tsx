@@ -7,10 +7,12 @@ import BubbleAnimation from '../components/BubbleAnimation'
 import { BottomNavigation } from '../components'
 import { trackClick } from '../utils/actionTracker'
 import { useActionTrackerSession } from '../hooks/useActionTrackerSession'
+import { useDataCache } from '../contexts/DataCacheContext'
 
 export default function Home() {
   const router = useRouter()
   const { session, status } = useActionTrackerSession()
+  const { getCachedData, setCachedData, isCacheValid } = useDataCache()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
   const [popularSection, setPopularSection] = useState<CitySection | null>(null)
@@ -127,10 +129,26 @@ export default function Home() {
   }, [session])
 
   // 추천 도시 데이터 로드 함수 (동적 설정 적용)
-  const loadRecommendedCities = useCallback(async (currentUserInfo?: { name: string, preferences: any } | null, region?: string) => {
+  const loadRecommendedCities = useCallback(async (currentUserInfo?: { name: string, preferences: any } | null, region?: string, force: boolean = false) => {
     if (loading) {
       console.log('이미 로딩 중이므로 중복 요청 방지')
       return
+    }
+
+    const cacheKey = `home-cities-${region || 'all'}-${session?.user?.id || 'guest'}`
+
+    // 강제 새로고침이 아니고 캐시가 유효하면 사용
+    if (!force && isCacheValid(cacheKey, 15 * 60 * 1000)) { // 15분 캐시
+      const cachedData = getCachedData<{
+        citySections: CitySection[],
+        availableRegions: string[]
+      }>(cacheKey)
+
+      if (cachedData) {
+        setCitySections(cachedData.citySections)
+        setAvailableRegions(cachedData.availableRegions)
+        return
+      }
     }
 
     console.log('추천 데이터 로드 시작 - 세션:', !!session, ', 지역:', region)
@@ -226,15 +244,29 @@ export default function Home() {
 
       console.log('총 추천 장소 수:', totalAttractions)
 
+      const finalData = totalAttractions === 0 ? result.data : processedData
+
       if (totalAttractions === 0) {
         console.warn('필터링 후 모든 데이터가 사라짐, 원본 데이터로 대체')
-        // 원본 데이터를 그대로 사용 (백엔드에서 이미 처리됨)
         console.log('🔄 원본 데이터로 setCitySections 호출:', result.data.length, '개 섹션')
-        setCitySections(result.data)
       } else {
         console.log('🔄 처리된 데이터로 setCitySections 호출:', processedData.length, '개 섹션')
-        setCitySections(processedData)
       }
+
+      setCitySections(finalData)
+
+      // 사용 가능한 지역 추출 및 업데이트
+      const regions = Array.from(new Set(finalData.map(section => section.region || section.cityName || '')))
+      .filter(region => region) // 빈 문자열 제거
+      .sort()
+
+      setAvailableRegions(regions)
+
+      // 캐시에 저장
+      setCachedData(cacheKey, {
+        citySections: finalData,
+        availableRegions: regions
+      }, 15 * 60 * 1000)
     } catch (error) {
       console.warn('데이터 로드 오류:', error instanceof Error ? error.message : String(error))
       setCitySections([])
@@ -244,19 +276,44 @@ export default function Home() {
   }, [session]) // userInfo 의존성 제거
 
   // 지역별 인기순 섹션 로드 함수 (모든 사용자용)
-  const loadPopularSection = useCallback(async (region: string = selectedRegion) => {
+  const loadPopularSection = useCallback(async (region: string = selectedRegion, force: boolean = false) => {
+    const cacheKey = `home-popular-${region}`
+
+    // 강제 새로고침이 아니고 캐시가 유효하면 사용
+    if (!force && isCacheValid(cacheKey, 15 * 60 * 1000)) { // 15분 캐시
+      const cachedData = getCachedData<{
+        popularSection: CitySection | null,
+        availableRegions: string[]
+      }>(cacheKey)
+
+      if (cachedData) {
+        setPopularSection(cachedData.popularSection)
+        if (cachedData.availableRegions.length > 0) {
+          setAvailableRegions(cachedData.availableRegions)
+        }
+        return
+      }
+    }
+
     console.log(`인기순 섹션 로드 시작: 지역=${region}`)
 
     try {
       const result = await fetchPopularSectionByRegion(region, 6, 6)
       setPopularSection(result.data)
       setAvailableRegions(result.availableRegions)
+
+      // 캐시에 저장
+      setCachedData(cacheKey, {
+        popularSection: result.data,
+        availableRegions: result.availableRegions
+      }, 15 * 60 * 1000)
+
       console.log(`인기순 섹션 로드 완료: ${region}, 카테고리=${result.data?.categorySections?.length || 0}개`)
     } catch (error) {
       console.warn('인기순 섹션 로드 오류:', error)
       setPopularSection(null)
     }
-  }, [selectedRegion])
+  }, [selectedRegion, getCachedData, setCachedData, isCacheValid])
 
   // 위치 검색 함수
   const searchLocation = useCallback(async (query: string) => {

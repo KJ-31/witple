@@ -9,9 +9,16 @@ export default function BubbleAnimation() {
   const { setShowChatbot, showChatbot } = useChatbot()
   const pathname = usePathname()
 
-  // ChatbotButton 표시 여부 확인 (ChatbotButton과 동일한 로직)
-  const hiddenPaths = ['/feed', '/profile', '/attraction', '/plan', '/itinerary']
-  const shouldHideButton = hiddenPaths.some(path => pathname.startsWith(path))
+  // 표시해야 할 페이지 경로들 (메인화면과 추천탭에서만 표시)
+  const allowedPaths = ['/', '/recommendations']
+
+  // 현재 경로가 허용된 페이지가 아니면 렌더링하지 않음
+  const shouldShowBubble = allowedPaths.some(path => {
+    if (path === '/') {
+      return pathname === '/'  // 메인화면은 정확히 일치해야 함
+    }
+    return pathname.startsWith(path)  // 추천탭은 startsWith로 체크
+  })
 
   const { rive, RiveComponent } = useRive({
     src: '/rive/bubble_3.riv',
@@ -67,6 +74,16 @@ export default function BubbleAnimation() {
   }
 
   useEffect(() => {
+    // shouldShowBubble이 false이면 애니메이션 중단
+    if (!shouldShowBubble) {
+      if (firstTimeout.current) clearTimeout(firstTimeout.current)
+      if (textInterval.current) clearInterval(textInterval.current)
+      startedRef.current = false
+      setVisible(false)
+      return
+    }
+
+    // rive가 없거나 이미 시작되었으면 리턴
     if (!rive || startedRef.current) return
     startedRef.current = true
 
@@ -103,10 +120,10 @@ export default function BubbleAnimation() {
       if (textInterval.current) clearInterval(textInterval.current)
       startedRef.current = false
     }
-  }, [rive, showChatbot, showTrigger])
+  }, [rive, showChatbot, showTrigger, shouldShowBubble, pathname]) // pathname 의존성 추가
 
-  // ChatbotButton이 숨겨진 페이지에서는 BubbleAnimation도 숨김
-  if (shouldHideButton) {
+  // 허용된 페이지가 아니면 BubbleAnimation 숨김
+  if (!shouldShowBubble) {
     return null
   }
 
