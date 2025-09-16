@@ -166,8 +166,8 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
             center_lat = float(selected_place['latitude'])
             center_lng = float(selected_place['longitude'])
             
-            # 검색 범위 계산 (성능 최적화) - 5km로 확장
-            bounds = get_approximate_bounds(center_lat, center_lng, 5.0)
+            # 검색 범위 계산 (성능 최적화)
+            bounds = get_approximate_bounds(center_lat, center_lng, radius_km)
             
             # 모든 카테고리 테이블에서 검색
             for table_name, table_model in CATEGORY_TABLES.items():
@@ -205,8 +205,8 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
                         float(attraction.latitude), float(attraction.longitude)
                     )
                     
-                    # 5km 반경 내에 있는 장소만 추가
-                    if distance <= 5.0:
+                    # 지정된 반경 내에 있는 장소만 추가
+                    if distance <= radius_km:
                         category = get_category_from_table(table_name)
                         formatted_attraction = format_attraction_data(attraction, category, table_name)
                         formatted_attraction['distance'] = round(distance, 2)  # 거리 정보 추가

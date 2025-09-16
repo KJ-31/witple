@@ -838,6 +838,100 @@ export default function MapPage() {
     }
   }, [mapInstance])
 
+  // 현재 지도 영역(bounds) 기준 장소 검색 (재검색 버튼용)
+  const fetchPlacesInBounds = useCallback(async (categoryFilter?: string | null) => {
+    try {
+      setCategoryLoading(true)
+
+      if (!mapInstance) {
+        setCategoryPlaces([])
+        return
+      }
+
+      // 현재 지도의 보이는 영역(bounds) 가져오기
+      const bounds = mapInstance.getBounds()
+      if (!bounds) {
+        setCategoryPlaces([])
+        return
+      }
+
+      const ne = bounds.getNorthEast()
+      const sw = bounds.getSouthWest()
+
+      // Bounds 좌표 정보 (사각형 영역)
+      const boundsData = {
+        min_lat: sw.lat(),
+        max_lat: ne.lat(),
+        min_lng: sw.lng(),
+        max_lng: ne.lng()
+      }
+
+      console.log('지도 Bounds:', boundsData)
+
+      // bounds를 중심점과 반경으로 변환
+      const centerLat = (boundsData.min_lat + boundsData.max_lat) / 2
+      const centerLng = (boundsData.min_lng + boundsData.max_lng) / 2
+
+      // bounds 크기에 따른 동적 반경 계산 (대각선 거리의 70%)
+      const diagonalDistance = calculateDistance(
+        boundsData.min_lat, boundsData.min_lng,
+        boundsData.max_lat, boundsData.max_lng
+      )
+      const searchRadius = Math.min(Math.max(diagonalDistance * 0.7, 1.0), 10.0) // 최소 1km, 최대 10km
+
+      console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km')
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500`
+
+      const centerPlaceData = [{
+        id: 'map_center',
+        name: '지도 중심점',
+        latitude: centerLat,
+        longitude: centerLng
+      }]
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(centerPlaceData)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API 응답 상세:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText: errorText
+        })
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const places = data.attractions || []
+
+      // 검색 결과 로그
+      console.log('Bounds 검색 결과:', {
+        totalPlaces: places.length,
+        bounds: boundsData,
+        categoryFilter: categoryFilter || '전체'
+      })
+
+      setCategoryPlaces(places)
+    } catch (error: any) {
+      console.error('지도 bounds 기준 장소 검색 실패:', error)
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      })
+      setCategoryPlaces([])
+    } finally {
+      setCategoryLoading(false)
+    }
+  }, [mapInstance])
+
   // 장소 상세 정보 가져오기
   const fetchPlaceDetail = useCallback(async (placeId: string) => {
     try {
@@ -2891,8 +2985,8 @@ export default function MapPage() {
         <div className="absolute top-36 left-1/2 transform -translate-x-1/2 z-50">
           <button
             onClick={() => {
-              // 현재 지도 중심점을 기준으로 전체 카테고리 재검색
-              fetchNearbyPlacesByMapCenter(null);
+              // 현재 지도 bounds를 기준으로 전체 카테고리 재검색
+              fetchPlacesInBounds(null);
               setMapHasMoved(false); // 재검색 후 이동 상태 초기화
             }}
             className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center space-x-2 backdrop-blur-sm bg-orange-600 hover:bg-orange-500 text-white shadow-lg"
@@ -3279,8 +3373,8 @@ export default function MapPage() {
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 현재 지도 중심점 기준으로 전체 카테고리 검색
-                        fetchNearbyPlacesByMapCenter(null)
+                        // 현재 지도 bounds 기준으로 전체 카테고리 검색
+                        fetchPlacesInBounds(null)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
