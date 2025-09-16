@@ -1432,11 +1432,6 @@ export default function ProfilePage() {
           {session.user?.name || session.user?.email || '사용자'}
         </h1>
 
-        <div className="flex items-center space-x-1 mb-6">
-          <span className="text-green-400">🍃</span>
-          <span className="text-green-400 font-semibold">555</span>
-        </div>
-
         {/* 편집 모드 토글 버튼 */}
         <button
           onClick={() => {
