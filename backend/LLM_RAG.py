@@ -890,6 +890,66 @@ def get_db_regions_and_cities():
         # 기본값 반환
         return ['서울특별시', '부산광역시', '대구광역시'], ['서울', '부산', '대구']
 
+def extract_region_from_context(state):
+    """현재 대화 컨텍스트에서 지역명 추출"""
+    try:
+        # 1. 현재 여행 계획에서 지역 추출
+        travel_plan = state.get("travel_plan", {})
+        if travel_plan:
+            # 여행 계획의 region 필드에서 직접 추출
+            if "region" in travel_plan and travel_plan["region"]:
+                return travel_plan["region"]
+
+            # 장소들에서 지역 추출
+            places = travel_plan.get("places", [])
+            for place in places:
+                if isinstance(place, dict):
+                    region = place.get("region") or place.get("city")
+                    if region:
+                        return region
+                elif isinstance(place, str):
+                    extracted_region = extract_region_from_query(place)
+                    if extracted_region:
+                        return extracted_region
+
+        # 2. 글로벌 current_travel_state에서 지역 추출
+        global current_travel_state
+        if current_travel_state and current_travel_state.get("travel_plan"):
+            plan = current_travel_state["travel_plan"]
+            if isinstance(plan, dict):
+                if "region" in plan and plan["region"]:
+                    return plan["region"]
+
+                places = plan.get("places", [])
+                for place in places:
+                    if isinstance(place, dict):
+                        region = place.get("region") or place.get("city")
+                        if region:
+                            return region
+
+        # 3. 메시지 히스토리에서 지역 추출
+        messages = state.get("messages", [])
+        if messages:
+            # 최근 메시지부터 역순으로 검색
+            for message in reversed(messages):
+                if isinstance(message, str):
+                    extracted_region = extract_region_from_query(message)
+                    if extracted_region:
+                        return extracted_region
+
+        # 4. 마지막 쿼리에서 지역 추출
+        last_query = current_travel_state.get("last_query", "") if current_travel_state else ""
+        if last_query:
+            extracted_region = extract_region_from_query(last_query)
+            if extracted_region:
+                return extracted_region
+
+        return None
+
+    except Exception as e:
+        print(f"❌ 컨텍스트에서 지역 추출 오류: {e}")
+        return None
+
 def extract_region_from_query(query):
     """사용자 쿼리에서 지역명 추출 (DB 기반)"""
     # DB에서 실제 region과 city 데이터 가져오기
@@ -909,7 +969,9 @@ def extract_region_from_query(query):
         '서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
         '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주',
         '해운대', '강남', '강북', '종로', '명동', '홍대', '이태원', '인사동',
-        '광안리', '남포동', '서면'
+        '광안리', '남포동', '서면', '강릉', '춘천', '원주', '속초', '동해',
+        '삼척', '태백', '정선', '평창', '영월', '횡성', '홍천', '화천',
+        '양구', '인제', '고성', '양양'
     ]
     region_keywords.extend(aliases)
 
@@ -1118,6 +1180,100 @@ def format_weather_detail(data):
     except Exception as e:
         return f"상세 정보 처리 오류: {e}\n"
 
+def get_smart_weather_info(region_name, travel_date=None):
+    """스마트 날씨 조회: 단기예보 우선, 실패 시 과거 데이터 폴백"""
+    import datetime
+
+    try:
+        # 1. 먼저 단기예보(미래 날씨) 시도 - 현재 시간 기준 3일 이내
+        now = datetime.datetime.now()
+
+        # 여행 날짜가 없으면 현재 날짜로 가정
+        if not travel_date:
+            travel_dt = now
+        else:
+            try:
+                if isinstance(travel_date, str):
+                    if len(travel_date) == 8:  # YYYYMMDD
+                        travel_dt = datetime.datetime.strptime(travel_date, '%Y%m%d')
+                    else:
+                        travel_dt = datetime.datetime.strptime(travel_date, '%Y-%m-%d')
+                else:
+                    travel_dt = travel_date
+            except Exception as e:
+                print(f"날짜 파싱 오류: {e}")
+                travel_dt = now
+
+        days_diff = (travel_dt - now).days
+        print(f"📅 여행일: {travel_dt.strftime('%Y-%m-%d')}, 현재로부터 {days_diff}일 후")
+
+        # 단기예보 가능 기간: 오늘~3일 후 (기상청 API 제공 범위)
+        if 0 <= days_diff <= 3:
+            print(f"🌤️ {region_name} 단기예보 조회 중... ({days_diff}일 후)")
+            future_weather = get_weather_info(region_name)
+            if not future_weather.startswith("❌"):
+                return f"📍 <strong>{region_name} 예상 날씨</strong> (여행일 기준)\n\n{future_weather}"
+
+        # 2. 단기예보 실패 시 과거 동일 기간 날씨로 폴백
+        print(f"📅 {region_name} 과거 동일 기간 날씨 조회 중...")
+
+        # 작년 동일 기간 날짜 계산
+        now = datetime.datetime.now()
+        if travel_date:
+            try:
+                if isinstance(travel_date, str) and len(travel_date) == 8:
+                    travel_dt = datetime.datetime.strptime(travel_date, '%Y%m%d')
+                else:
+                    travel_dt = now
+                # 작년 동일 날짜
+                last_year_date = travel_dt.replace(year=travel_dt.year - 1)
+            except:
+                last_year_date = now.replace(year=now.year - 1)
+        else:
+            # 여행 날짜 없으면 작년 이맘때
+            last_year_date = now.replace(year=now.year - 1)
+
+        historical_date = last_year_date.strftime('%Y%m%d')
+        historical_weather = get_historical_weather_info(region_name, historical_date)
+
+        if not historical_weather.startswith("❌"):
+            # 과거 날씨에서 평균 기온만 추출
+            simplified_weather = simplify_historical_weather(historical_weather, region_name, last_year_date.strftime('%Y-%m-%d'))
+            return f"📊 <strong>{region_name} 참고 날씨</strong> (작년 동일 기간)\n\n{simplified_weather}\n\n💡 <em>실제 여행 시 최신 예보를 확인해주세요!</em>"
+
+        # 3. 모든 시도 실패 시 일반적인 계절 정보
+        month = now.month if not travel_date else travel_dt.month
+        seasonal_info = get_seasonal_weather_info(region_name, month)
+        return seasonal_info
+
+    except Exception as e:
+        return f"📍 <strong>{region_name}</strong>\n날씨 정보를 가져올 수 없어 일반적인 계절 정보를 제공합니다.\n\n{get_seasonal_weather_info(region_name, datetime.datetime.now().month)}"
+
+def get_seasonal_weather_info(region_name, month):
+    """계절별 일반적인 날씨 정보 제공"""
+    seasonal_data = {
+        1: {"temp": "영하~5°C", "desc": "춥고 건조", "clothes": "두꺼운 외투, 목도리 필수"},
+        2: {"temp": "0~8°C", "desc": "추위가 절정", "clothes": "패딩, 장갑 권장"},
+        3: {"temp": "5~15°C", "desc": "봄의 시작, 일교차 큼", "clothes": "얇은 외투, 레이어드"},
+        4: {"temp": "10~20°C", "desc": "따뜻한 봄날씨", "clothes": "가디건, 얇은 재킷"},
+        5: {"temp": "15~25°C", "desc": "화창하고 쾌적", "clothes": "반팔, 긴팔 셔츠"},
+        6: {"temp": "20~28°C", "desc": "더워지기 시작", "clothes": "반팔, 선크림 필수"},
+        7: {"temp": "23~32°C", "desc": "무덥고 습함, 장마", "clothes": "시원한 옷, 우산 준비"},
+        8: {"temp": "25~33°C", "desc": "가장 더운 시기", "clothes": "통풍 잘되는 옷"},
+        9: {"temp": "20~28°C", "desc": "선선해지기 시작", "clothes": "반팔~얇은 긴팔"},
+        10: {"temp": "15~23°C", "desc": "가을 단풍, 쾌적", "clothes": "가디건, 얇은 외투"},
+        11: {"temp": "8~18°C", "desc": "쌀쌀한 가을", "clothes": "두꺼운 외투 준비"},
+        12: {"temp": "0~8°C", "desc": "추위 시작", "clothes": "코트, 목도리"}
+    }
+
+    info = seasonal_data.get(month, seasonal_data[datetime.datetime.now().month])
+
+    return f"""🌡️ <strong>평균 기온</strong>: {info['temp']}
+☁️ <strong>날씨 특징</strong>: {info['desc']}
+👕 <strong>복장 추천</strong>: {info['clothes']}
+
+💡 <em>일반적인 {month}월 날씨 정보입니다. 여행 전 최신 예보를 확인해주세요!</em>"""
+
 def is_weather_query(query):
     """쿼리가 날씨 관련 질문인지 판단"""
     weather_keywords = [
@@ -1128,6 +1284,288 @@ def is_weather_query(query):
 
     query_lower = query.lower()
     return any(keyword in query_lower for keyword in weather_keywords)
+
+def is_historical_weather_query(query):
+    """쿼리가 과거 날씨 관련 질문인지 판단"""
+    import re
+
+    historical_keywords = [
+        '지난', '작년', '전년', '과거', '예전', '이전', '지난주', '지난달', '지난해',
+        '어제', '그때', '당시', '년전', '달전', '주전', '일전',
+        '작년 이맘때', '지난번', '그 당시', '몇년전', '몇달전'
+    ]
+
+    weather_keywords = [
+        '날씨', '기온', '온도', '비', '눈', '바람', '습도', '강수', '기상'
+    ]
+
+    query_lower = query.lower()
+
+    # 일반적인 과거 키워드 체크
+    has_historical = any(keyword in query_lower for keyword in historical_keywords)
+    has_weather = any(keyword in query_lower for keyword in weather_keywords)
+
+    # 구체적인 날짜 패턴 체크 (과거로 간주)
+    date_patterns = [
+        r'\d{1,2}월\s*\d{1,2}일',  # 10월 4일
+        r'\d{4}년\s*\d{1,2}월\s*\d{1,2}일',  # 2023년 10월 4일
+        r'\d{1,2}/\d{1,2}',  # 10/4
+        r'\d{4}/\d{1,2}/\d{1,2}',  # 2023/10/4
+        r'\d{1,2}-\d{1,2}',  # 10-4
+        r'\d{4}-\d{1,2}-\d{1,2}'  # 2023-10-4
+    ]
+
+    # 추가 날짜 패턴들 (년도 포함)
+    additional_patterns = [
+        r'20\d{2}년',  # 2023년, 2022년 등
+        r'20\d{2}[.-/]\d{1,2}[.-/]\d{1,2}',  # 2023-10-15, 2023.10.15 등
+        r'20\d{2}년\s*\d{1,2}월',  # 2023년 10월
+    ]
+
+    date_patterns.extend(additional_patterns)
+    has_specific_date = any(re.search(pattern, query_lower) for pattern in date_patterns)
+
+    return (has_historical or has_specific_date) and has_weather
+
+def get_historical_weather_info(region_name, date_str):
+    """기상청 API로 과거 날씨 정보 가져오기 (지상관측 일자료)"""
+    if not WEATHER_API_KEY:
+        return "❌ 기상청 API 키가 설정되지 않았습니다."
+
+    try:
+        # 지역 좌표 가져오기
+        coords = get_coordinates_for_region(region_name)
+        if not coords:
+            return f"❌ {region_name}의 좌표 정보를 찾을 수 없습니다."
+
+        # 날짜 형식 변환 (YYYYMMDD)
+        try:
+            if len(date_str) == 8 and date_str.isdigit():
+                formatted_date = date_str
+            else:
+                # 다양한 날짜 형식 파싱
+                import re
+                # YYYY-MM-DD, YYYY/MM/DD 등의 형식을 YYYYMMDD로 변환
+                date_clean = re.sub(r'[^\d]', '', date_str)
+                if len(date_clean) == 8:
+                    formatted_date = date_clean
+                else:
+                    return "❌ 날짜 형식이 올바르지 않습니다. (예: 20231015, 2023-10-15)"
+        except:
+            return "❌ 날짜 형식을 처리할 수 없습니다."
+
+        # 기상청 지상관측 일자료 API URL
+        url = 'http://apis.data.go.kr/1360000/AsosDalyInfoService/getWthrDataList'
+
+        params = {
+            'serviceKey': WEATHER_API_KEY,
+            'pageNo': '1',
+            'numOfRows': '1',
+            'dataType': 'JSON',
+            'dataCd': 'ASOS',
+            'dateCd': 'DAY',
+            'startDt': formatted_date,
+            'endDt': formatted_date,
+            'stnIds': get_station_id_for_region(region_name)  # 지역별 관측소 ID
+        }
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        print(f"📅 과거 날씨 조회: {region_name} ({formatted_date})")
+
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+
+        if response.status_code == 200:
+            try:
+                data = response.json()
+            except Exception as json_error:
+                return f"❌ JSON 파싱 오류: {json_error}, 응답: {response.text[:200]}"
+
+            if data['response']['header']['resultCode'] == '00':
+                items = data['response']['body']['items']
+
+                if 'item' in items and len(items['item']) > 0:
+                    item = items['item'][0]
+                    return format_historical_weather_data(item, region_name, formatted_date)
+                else:
+                    return f"❌ {formatted_date}의 {region_name} 관측 데이터가 없습니다."
+            else:
+                return f"❌ 기상청 API 오류: {data['response']['header']['resultMsg']}"
+        else:
+            return f"❌ API 요청 실패: {response.status_code}"
+
+    except Exception as e:
+        return f"❌ 과거 날씨 정보 조회 오류: {e}"
+
+def get_station_id_for_region(region_name):
+    """지역명에 해당하는 기상관측소 ID 반환"""
+    station_mapping = {
+        # 주요 도시별 관측소 ID (ASOS)
+        '서울': '108',
+        '서울특별시': '108',
+        '부산': '159',
+        '부산광역시': '159',
+        '대구': '143',
+        '대구광역시': '143',
+        '인천': '112',
+        '인천광역시': '112',
+        '광주': '156',
+        '광주광역시': '156',
+        '대전': '133',
+        '대전광역시': '133',
+        '울산': '152',
+        '울산광역시': '152',
+        '제주': '184',
+        '제주도': '184',
+        '제주특별자치도': '184',
+        '강릉': '105',
+        '강원': '105',
+        '강원도': '105',
+        '강원특별자치도': '105',
+        '춘천': '101',
+        '원주': '114',
+        '수원': '119',
+        '경기': '119',
+        '경기도': '119',
+        '청주': '131',
+        '충북': '131',
+        '충청북도': '131',
+        '천안': '232',
+        '충남': '232',
+        '충청남도': '232',
+        '전주': '146',
+        '전북': '146',
+        '전라북도': '146',
+        '전라북도특별자치도': '146',
+        '광주': '156',
+        '전남': '156',
+        '전라남도': '156',
+        '안동': '136',
+        '경북': '136',
+        '경상북도': '136',
+        '창원': '155',
+        '경남': '155',
+        '경상남도': '155'
+    }
+
+    return station_mapping.get(region_name, '108')  # 기본값: 서울
+
+def format_historical_weather_data(data, region_name, date_str):
+    """과거 날씨 데이터 포맷팅"""
+    try:
+        # 날짜 포맷팅
+        year = date_str[:4]
+        month = date_str[4:6]
+        day = date_str[6:8]
+        formatted_date = f"{year}년 {month}월 {day}일"
+
+        weather_text = f"📅 <strong>{region_name} {formatted_date} 날씨 기록</strong>\n\n"
+
+        # 기온 정보
+        if 'avgTa' in data and data['avgTa']:
+            weather_text += f"🌡️ <strong>평균기온</strong>: {data['avgTa']}°C\n"
+        if 'maxTa' in data and data['maxTa']:
+            weather_text += f"🔥 <strong>최고기온</strong>: {data['maxTa']}°C\n"
+        if 'minTa' in data and data['minTa']:
+            weather_text += f"❄️ <strong>최저기온</strong>: {data['minTa']}°C\n"
+
+        # 강수량
+        if 'sumRn' in data and data['sumRn'] and data['sumRn'].strip():
+            rain_amount = float(data['sumRn'])
+            if rain_amount > 0:
+                weather_text += f"🌧️ <strong>강수량</strong>: {data['sumRn']}mm\n"
+            else:
+                weather_text += f"☀️ <strong>강수량</strong>: 0mm (맑음)\n"
+        else:
+            weather_text += f"☀️ <strong>강수량</strong>: 0mm (맑음)\n"
+
+        # 바람
+        if 'avgWs' in data and data['avgWs']:
+            weather_text += f"💨 <strong>평균풍속</strong>: {data['avgWs']}m/s\n"
+        if 'maxWs' in data and data['maxWs']:
+            weather_text += f"🌪️ <strong>최대풍속</strong>: {data['maxWs']}m/s\n"
+
+        # 습도
+        if 'avgRhm' in data and data['avgRhm']:
+            weather_text += f"💧 <strong>평균습도</strong>: {data['avgRhm']}%\n"
+
+        # 일조시간
+        if 'sumSs' in data and data['sumSs']:
+            weather_text += f"☀️ <strong>일조시간</strong>: {data['sumSs']}시간\n"
+
+        return weather_text
+
+    except Exception as e:
+        return f"❌ 과거 날씨 데이터 포맷팅 오류: {e}"
+
+def simplify_historical_weather(historical_weather_text, region_name, date_str):
+    """과거 날씨 데이터에서 평균 기온만 추출하여 단순화"""
+    try:
+        import re
+
+        # 평균기온 정보 추출
+        avg_temp_match = re.search(r'🌡️ <strong>평균기온</strong>: ([^°]+)°C', historical_weather_text)
+
+        if avg_temp_match:
+            avg_temp = avg_temp_match.group(1)
+            return f"🌡️ <strong>평균기온</strong>: {avg_temp}°C"
+        else:
+            # 평균기온 정보가 없는 경우 대체 처리
+            return "🌡️ <strong>기온 정보</strong>: 데이터 없음"
+
+    except Exception as e:
+        return f"🌡️ <strong>기온 정보</strong>: 처리 오류 ({e})"
+
+def extract_date_from_query(query):
+    """쿼리에서 날짜 추출"""
+    import re
+    import datetime
+
+    query_lower = query.lower()
+
+    # 상대적 날짜 패턴
+    if '어제' in query_lower:
+        yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
+        return yesterday.strftime('%Y%m%d')
+    elif '지난주' in query_lower:
+        last_week = datetime.datetime.now() - datetime.timedelta(days=7)
+        return last_week.strftime('%Y%m%d')
+    elif '지난달' in query_lower:
+        last_month = datetime.datetime.now() - datetime.timedelta(days=30)
+        return last_month.strftime('%Y%m%d')
+    elif '작년' in query_lower or '지난해' in query_lower:
+        last_year = datetime.datetime.now() - datetime.timedelta(days=365)
+        return last_year.strftime('%Y%m%d')
+
+    # 절대적 날짜 패턴 (YYYY-MM-DD, YYYY/MM/DD 등)
+    date_patterns = [
+        r'(\d{4})[.-/](\d{1,2})[.-/](\d{1,2})',  # 2023-10-15, 2023.10.15, 2023/10/15
+        r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일',  # 2023년 10월 15일
+        r'(\d{1,2})월\s*(\d{1,2})일',              # 10월 15일 (올해)
+        r'(\d{8})',                                # 20231015
+    ]
+
+    for pattern in date_patterns:
+        match = re.search(pattern, query)
+        if match:
+            groups = match.groups()
+            try:
+                if len(groups) == 3:
+                    year, month, day = groups
+                    if len(year) == 4:
+                        return f"{year}{month.zfill(2)}{day.zfill(2)}"
+                elif len(groups) == 2:  # 월일만 있는 경우 올해로 가정
+                    month, day = groups
+                    current_year = datetime.datetime.now().year
+                    return f"{current_year}{month.zfill(2)}{day.zfill(2)}"
+                elif len(groups) == 1 and len(groups[0]) == 8:  # YYYYMMDD
+                    return groups[0]
+            except:
+                continue
+
+    return None
 
 def interactive_mode():
     """대화형 모드"""
@@ -1231,8 +1669,8 @@ def classify_query(state: TravelState) -> TravelState:
     # 단일 확정 키워드 (짧은 답변)
     single_word_confirmations = ["확정", "결정", "좋아", "ok", "오케이", "네", "예", "응", "그래"]
 
-    # 날씨 요청인지 먼저 확인
-    is_weather_request = is_weather_query(user_input)
+    # 날씨 요청인지 먼저 확인 (현재/미래 + 과거 날씨 모두 포함)
+    is_weather_request = is_weather_query(user_input) or is_historical_weather_query(user_input)
 
     # 복합적 분류 로직
     need_rag = any(keyword in user_input for keyword in travel_keywords) or is_weather_request
@@ -1301,37 +1739,91 @@ def rag_processing_node(state: TravelState) -> TravelState:
 
     # 날씨 관련 질문인지 확인
     if is_weather_query(user_query):
-        print("🌤️ 날씨 요청 감지됨")
+        # 과거 날씨 요청인지 확인
+        if is_historical_weather_query(user_query):
+            print("📅 과거 날씨 요청 감지됨")
 
-        # 쿼리에서 지역명 추출
-        region = extract_region_from_query(user_query)
+            # 쿼리에서 지역명과 날짜 추출 (컨텍스트 우선)
+            region = extract_region_from_query(user_query)
+            if not region:
+                region = extract_region_from_context(state)
+            date_str = extract_date_from_query(user_query)
 
-        if region:
-            print(f"📍 감지된 지역: {region}")
-            weather_info = get_weather_info(region)
+            print(f"🔍 디버깅: region='{region}', date_str='{date_str}'")
 
-            return {
-                **state,
-                "conversation_context": weather_info
-            }
+            if region and date_str:
+                print(f"📍 감지된 지역: {region}, 날짜: {date_str}")
+                weather_info = get_historical_weather_info(region, date_str)
+
+                return {
+                    **state,
+                    "conversation_context": weather_info
+                }
+            elif region and not date_str:
+                return {
+                    **state,
+                    "conversation_context": f"🤔 {region}의 과거 날씨를 조회하려면 구체적인 날짜를 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 2023년 10월 15일 날씨'"
+                }
+            elif not region and date_str:
+                # 컨텍스트에서 지역 찾기 시도
+                context_region = extract_region_from_context(state)
+
+                # 글로벌 상태에서도 찾기 시도
+                if not context_region:
+                    global current_travel_state
+                    if current_travel_state.get("travel_plan", {}).get("region"):
+                        context_region = current_travel_state["travel_plan"]["region"]
+
+                if context_region:
+                    print(f"📍 컨텍스트에서 발견된 지역: {context_region}")
+                    weather_info = get_historical_weather_info(context_region, date_str)
+                    return {
+                        **state,
+                        "conversation_context": f"📍 <strong>{context_region}</strong>의 과거 날씨 정보를 조회합니다.\n\n{weather_info}"
+                    }
+
+                return {
+                    **state,
+                    "conversation_context": f"🤔 과거 날씨를 조회하려면 지역명을 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 지난주 날씨'"
+                }
+            else:
+                return {
+                    **state,
+                    "conversation_context": "🤔 과거 날씨 정보를 제공하려면 지역명과 날짜를 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 2023년 10월 15일 날씨'"
+                }
         else:
-            # 지역명이 없으면 이전 대화에서 지역 찾기 시도
-            if state.get("travel_plan") and state["travel_plan"]:
-                # 여행 계획에서 지역 추출
-                for place in state["travel_plan"]:
-                    if "지역" in place or "시" in place or "구" in place:
-                        possible_region = extract_region_from_query(place)
-                        if possible_region:
-                            weather_info = get_weather_info(possible_region)
-                            return {
-                                **state,
-                                "conversation_context": weather_info
-                            }
+            # 현재/미래 날씨 요청
+            print("🌤️ 현재/미래 날씨 요청 감지됨")
 
-            return {
-                **state,
-                "conversation_context": "🤔 날씨 정보를 제공하려면 지역명을 함께 말씀해주세요. (예: '서울 날씨', '부산 날씨')"
-            }
+            # 쿼리에서 지역명 추출 (컨텍스트 우선)
+            region = extract_region_from_query(user_query)
+            if not region:
+                region = extract_region_from_context(state)
+
+            if region:
+                print(f"📍 감지된 지역: {region}")
+                weather_info = get_weather_info(region)
+
+                return {
+                    **state,
+                    "conversation_context": weather_info
+                }
+            else:
+                # 지역명이 없으면 컨텍스트에서 지역 찾기 시도
+                context_region = extract_region_from_context(state)
+
+                if context_region:
+                    print(f"📍 컨텍스트에서 발견된 지역: {context_region}")
+                    weather_info = get_weather_info(context_region)
+                    return {
+                        **state,
+                        "conversation_context": f"📍 <strong>{context_region}</strong>의 날씨 정보를 조회합니다.\n\n{weather_info}"
+                    }
+
+                return {
+                    **state,
+                    "conversation_context": "🤔 날씨 정보를 제공하려면 지역명을 함께 말씀해주세요. (예: '서울 날씨', '부산 날씨')"
+                }
 
     try:
         # 하이브리드 검색으로 실제 장소 데이터 가져오기
@@ -1463,15 +1955,41 @@ def rag_processing_node(state: TravelState) -> TravelState:
         
         # 여행 일정 생성 완료 - 사용자 확인 대기 상태
         # 자동 확정하지 않고 사용자의 확정 의사를 기다림
-        
-        print(f"✅ RAG 처리 완료. 결과 길이: {len(formatted_response)}")
+
+        # 🌤️ 여행지 날씨 정보 자동 추가
+        region_for_weather = travel_plan.get('region', '') or extract_region_from_query(user_query)
+        if region_for_weather:
+            print(f"🌤️ {region_for_weather} 날씨 정보 조회 중...")
+            weather_info = get_smart_weather_info(region_for_weather)
+
+            # 여행 일정에 날씨 정보 통합 (여행 팁 앞에 삽입)
+            if weather_info and not weather_info.startswith("❌"):
+                # "💡 여행 팁" 앞에 날씨 정보 삽입
+                if "💡" in formatted_response:
+                    parts = formatted_response.split("💡", 1)
+                    formatted_response_with_weather = f"""{parts[0]}
+
+{weather_info}
+
+💡{parts[1]}"""
+                else:
+                    # 여행 팁이 없으면 마지막에 추가
+                    formatted_response_with_weather = f"""{formatted_response}
+
+{weather_info}"""
+            else:
+                formatted_response_with_weather = formatted_response
+        else:
+            formatted_response_with_weather = formatted_response
+
+        print(f"✅ RAG 처리 완료. 결과 길이: {len(formatted_response_with_weather)}")
         print(f"   추출된 장소 수: {len(structured_places)}")
-        
+
         return {
             **state,
             "rag_results": docs,
             "travel_plan": travel_plan,
-            "conversation_context": formatted_response,
+            "conversation_context": formatted_response_with_weather,
             "formatted_ui_response": formatted_ui_response
         }
         
@@ -2645,6 +3163,11 @@ current_travel_state = {
     "timestamp": None
 }
 
+def get_current_travel_state_ref():
+    """현재 여행 상태 반환 (참조 동기화를 위한 함수)"""
+    global current_travel_state
+    return current_travel_state
+
 async def get_travel_recommendation_langgraph_stream(query: str):
     """LangGraph 기반 실시간 스트리밍 여행 추천"""
     global current_travel_state
@@ -2668,14 +3191,29 @@ async def get_travel_recommendation_langgraph_stream(query: str):
     print(f"🚀 LangGraph 스트리밍 워크플로우 실행: '{query}'")
 
     try:
-        # 새 추천 요청시 기존 상태 초기화 (덮어쓰기)
-        current_travel_state = {
-            "last_query": query,
-            "travel_plan": {},
-            "places": [],
-            "context": "",
-            "timestamp": datetime.datetime.now().isoformat()
-        }
+        # 확정이 아닌 새 여행 추천 요청시에만 기존 상태 초기화
+        is_confirmation = any(keyword in query.lower() for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이"])
+        is_new_travel_request = any(keyword in query.lower() for keyword in ["추천", "여행", "일정", "계획", "박", "일"])
+
+        if is_confirmation and current_travel_state.get("travel_plan"):
+            print("🎯 확정 요청 - 기존 상태 유지")
+            # 기존 상태 유지하면서 마지막 쿼리만 업데이트
+            current_travel_state["last_query"] = query
+            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
+        elif is_new_travel_request and not is_confirmation:
+            print("🔄 새로운 여행 추천 - 기존 상태 초기화")
+            current_travel_state = {
+                "last_query": query,
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+        else:
+            print("🔍 기타 요청 - 기존 상태 유지하며 쿼리 추가")
+            # 날씨 질문 등 기타 요청시 기존 상태 유지
+            current_travel_state["last_query"] = query
+            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
 
         # 상태 생성
         if not conversation_history:
@@ -2741,11 +3279,23 @@ async def get_travel_recommendation_langgraph_stream(query: str):
 
         # 최종 상태 업데이트
         if final_state:
+            # places는 tool_results가 아닌 travel_plan에서 직접 가져오기
+            places = []
+            if final_state.get("tool_results", {}).get("places"):
+                # 확정 시 tool_results에서 places 가져오기
+                places = final_state.get("tool_results", {}).get("places", [])
+            elif final_state.get("travel_plan", {}).get("places"):
+                # 일반 여행 추천 시 travel_plan에서 places 가져오기
+                places = final_state.get("travel_plan", {}).get("places", [])
+
             current_travel_state.update({
                 "travel_plan": final_state.get('travel_plan', {}),
-                "places": final_state.get('tool_results', {}).get('places', []),
+                "places": places,
                 "context": final_state.get('conversation_context', ''),
+                "last_query": query,
+                "timestamp": datetime.datetime.now().isoformat()
             })
+            print(f"💾 스트리밍 여행 상태 저장 완료: {len(places)}개 장소")
 
             # 메타데이터 전송
             yield {
@@ -2788,31 +3338,36 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
         if conversation_history and isinstance(conversation_history, list):
             messages = conversation_history + [query]
         
-        # 확정이 아닌 새 여행 추천 요청시에만 기존 상태 초기화
+        # 쿼리 타입 분석
         is_confirmation = any(keyword in query.lower() for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이"])
         is_new_travel_request = any(keyword in query.lower() for keyword in ["추천", "여행", "일정", "계획", "박", "일"])
+        is_weather_query = any(keyword in query.lower() for keyword in ["날씨", "기온", "온도"])
 
         global current_travel_state
 
-        if is_confirmation and current_travel_state.get("travel_plan"):
-            print("🎯 확정 요청 - 기존 상태 유지")
-        elif is_new_travel_request and not is_confirmation:
-            print("🔄 새로운 여행 추천 - 기존 상태 초기화")
-            current_travel_state = {
+        # 디버깅 정보
+        print(f"🔍 쿼리 분석: 확정={is_confirmation}, 새여행={is_new_travel_request}, 날씨={is_weather_query}")
+        print(f"🔍 기존 상태: {bool(current_travel_state.get('travel_plan'))}")
+
+        # 새 여행 추천일 때만 상태 초기화 (확정이 아닌 경우에만)
+        if is_new_travel_request and not is_confirmation:
+            print("🔄 새로운 여행 추천 - 상태 초기화")
+            current_travel_state.clear()
+            current_travel_state.update({
                 "last_query": query,
                 "travel_plan": {},
                 "places": [],
                 "context": "",
                 "timestamp": datetime.datetime.now().isoformat()
-            }
+            })
         else:
-            print("💬 일반 대화 - 기존 상태 유지")
+            print("💾 기존 상태 유지")
+            current_travel_state["last_query"] = query
+            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
 
-        print(f"🆕 상태로 처리: {query}")
-
-        # 전역 상태에서 기존 여행 계획 가져오기 (컨텍스트 유지)
+        # 전역 상태에서 기존 여행 계획 가져오기
         existing_travel_plan = current_travel_state.get("travel_plan", {})
-        print(f"🔄 기존 여행 계획 상태: {bool(existing_travel_plan)}")
+        print(f"🔄 사용할 여행 계획: {bool(existing_travel_plan)}")
 
         # 초기 상태 설정 (간소화)
         initial_state = {
@@ -2837,12 +3392,23 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
 
         # 전역 상태 업데이트 (새 추천으로 덮어쓰기)
         if final_state.get("travel_plan"):
+            # places는 tool_results가 아닌 travel_plan에서 직접 가져오기
+            places = []
+            if final_state.get("tool_results", {}).get("places"):
+                # 확정 시 tool_results에서 places 가져오기
+                places = final_state.get("tool_results", {}).get("places", [])
+            elif final_state.get("travel_plan", {}).get("places"):
+                # 일반 여행 추천 시 travel_plan에서 places 가져오기
+                places = final_state.get("travel_plan", {}).get("places", [])
+
             current_travel_state.update({
                 "travel_plan": final_state.get("travel_plan", {}),
-                "places": final_state.get("tool_results", {}).get("places", []),
+                "places": places,
                 "context": final_state.get("conversation_context", ""),
+                "last_query": query,
+                "timestamp": datetime.datetime.now().isoformat()
             })
-            print(f"💾 새로운 여행 상태 저장 완료: {len(current_travel_state.get('places', []))}개 장소")
+            print(f"💾 새로운 여행 상태 저장 완료: {len(places)}개 장소")
         
         # 구조화된 응답 반환
         tool_results = final_state.get("tool_results", {})

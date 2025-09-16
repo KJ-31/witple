@@ -19,6 +19,7 @@ try:
         get_travel_recommendation_langgraph_stream,
         llm_cache,
         current_travel_state,
+        get_current_travel_state_ref,
         LANGGRAPH_AVAILABLE
     )
     print("✅ LLM_RAG module imported successfully")
@@ -84,7 +85,7 @@ class ChatResponse(BaseModel):
     redirect_url: Optional[str] = None  # 리다이렉트 URL
     places: Optional[List[dict]] = None  # 지도 표시용 장소 정보
 
-@router.post("/chat/stream")
+# @router.post("/chat/stream")  # 스트리밍 기능 비활성화
 async def chat_with_llm_stream(chat_message: ChatMessage):
     """
     스트리밍 방식으로 LLM 응답을 실시간 전송합니다.
@@ -685,14 +686,15 @@ async def get_current_travel_state():
     현재 여행 상태 조회 (새 추천시 덮어쓰기 방식)
     """
     try:
-        if current_travel_state is None:
+        # 함수를 통해 최신 상태 가져오기
+        if get_current_travel_state_ref is None:
             return {
                 "success": False,
                 "message": "여행 상태 시스템이 초기화되지 않았습니다."
             }
 
         # 현재 상태 반환
-        state_copy = current_travel_state.copy()
+        state_copy = get_current_travel_state_ref().copy()
 
         return {
             "success": True,
