@@ -16,19 +16,25 @@ export function ChatbotButton() {
     return null
   }
 
-  const buttonClass = "fixed z-50 w-16 h-16 bg-[#3E68FF] hover:bg-[#4C7DFF] rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
-  const buttonStyle = { bottom: '100px', right: '20px' }
-
   return (
     <button
       onClick={() => setShowChatbot(true)}
-      className={buttonClass}
-      style={buttonStyle}
+      className="
+        fixed z-50
+        bottom-[100px]
+        right-4 sm:right-6 md:right-8 lg:right-9
+        w-14 h-14 sm:w-16 sm:h-16
+        bg-[#3E68FF] hover:bg-[#4C7DFF]
+        rounded-full
+        flex items-center justify-center
+        shadow-lg
+        transition-all duration-200 hover:scale-110
+      "
     >
       <img
         src="/images/chat_icon.svg"
         alt="챗봇"
-        className="w-10 h-24"
+        className="w-8 h-8 sm:w-10 sm:h-10"
       />
     </button>
   )

@@ -3,9 +3,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRive, useStateMachineInput } from '@rive-app/react-canvas'
 import { useChatbot } from './ChatbotProvider'
+import { usePathname } from 'next/navigation'
 
 export default function BubbleAnimation() {
   const { setShowChatbot, showChatbot } = useChatbot()
+  const pathname = usePathname()
+
+  // ChatbotButton 표시 여부 확인 (ChatbotButton과 동일한 로직)
+  const hiddenPaths = ['/feed', '/profile', '/attraction', '/plan', '/itinerary']
+  const shouldHideButton = hiddenPaths.some(path => pathname.startsWith(path))
+
+  // ChatbotButton이 숨겨진 페이지에서는 BubbleAnimation도 숨김
+  if (shouldHideButton) {
+    return null
+  }
 
   const { rive, RiveComponent } = useRive({
     src: '/rive/bubble_3.riv',
@@ -76,9 +87,9 @@ export default function BubbleAnimation() {
 
     // 샘플 문구 순환
     const samples = [
-      '^.^',
+      '어디로 떠나고 싶으신가요?',
       'hello, World!',
-      '안녕하세요! 길이가 조금 더 긴 문장입니다.',
+      '안녕하세요! 쉽지만 간단하게 여행을 짜보세요',
       'Rive + Data Binding 테스트 중…',
       '줄바꿈/오토 레이아웃 확인용 문구예요.',
     ]
@@ -100,15 +111,20 @@ export default function BubbleAnimation() {
   }, [rive, showChatbot, showTrigger])
 
   return (
-    <div className="fixed" style={{ top: '700px', right: '35px', zIndex: 9999 }}>
-      <div style={{ visibility: visible ? 'visible' : 'hidden' }}>
+    <div className="fixed z-[9999] bottom-[136px] sm:bottom-[164px] right-[44px] sm:right-[58px] md:right-[68px] lg:right-[72px]">
+      <div
+        className={`transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      >
         <div className="relative">
-          <RiveComponent style={{ width: 400, height: 100 }} />
+          {/* 반응형 크기 조정 */}
+          <div className="w-[280px] h-[70px] sm:w-[350px] sm:h-[87px] md:w-[400px] md:h-[100px]">
+            <RiveComponent className="w-full h-full" />
+          </div>
+
           {/* 클릭 히트박스 */}
           <div
             onClick={() => setShowChatbot(true)}
-            className="absolute cursor-pointer"
-            style={{ top: '25%', left: '50%', width: '80%', height: '25%' }}
+            className="absolute cursor-pointer top-[25%] left-[50%] w-[80%] h-[25%]"
           />
         </div>
       </div>
