@@ -302,17 +302,55 @@ async def get_explore_section(
     offset: int = Query(0, ge=0, description="페이징 오프셋")
 ):
     """
-    특정 지역/카테고리 섹션 데이터 조회 (지연 로딩, 페이징 지원)
+    특정 지역/카테고리 섹션 데이터 조회 (우선순위 태그 기반 필터링, 지연 로딩, 페이징 지원)
     """
     try:
         user_id = str(current_user.user_id) if current_user else None
 
         logger.info(f"Getting section data: {region}/{category} for user: {user_id}")
 
+        # 🎯 로그인된 사용자의 경우 우선순위 태그 기반으로 카테고리 결정
+        target_category = category
+        if current_user and user_id:
+            try:
+                engine = await get_engine()
+                user_priority = await engine.get_user_priority_tag(user_id)
+
+                if user_priority:
+                    logger.info(f"User {user_id} priority tag: {user_priority}")
+
+                    # 우선순위 태그에 따른 카테고리 매핑
+                    priority_category_map = {
+                        'accommodation': 'accommodation',
+                        'restaurants': 'restaurants',
+                        'shopping': 'shopping',
+                        'experience': category  # 체험은 요청된 카테고리 그대로 사용
+                    }
+
+                    # 체험 태그인 경우 nature/humanities/leisure_sports 중에서만 허용
+                    if user_priority == 'experience':
+                        experience_categories = ['nature', 'humanities', 'leisure_sports']
+                        if category in experience_categories:
+                            target_category = category
+                        else:
+                            # 요청된 카테고리가 체험 카테고리가 아니면 nature로 기본 설정
+                            target_category = 'nature'
+                    else:
+                        # 다른 우선순위 태그의 경우 해당 카테고리로 고정
+                        if user_priority in priority_category_map:
+                            target_category = priority_category_map[user_priority]
+
+                    logger.info(f"Target category for region {region}: {target_category} (based on priority: {user_priority})")
+
+            except Exception as e:
+                logger.warning(f"Failed to get user priority for {user_id}: {e}")
+                # 실패 시 원래 카테고리 사용
+                target_category = category
+
         recommendations = await fetch_recommendations_with_fallback(
             user_id=user_id,
             region=region,
-            category=category,
+            category=target_category,
             limit=limit + offset,  # offset 만큼 더 조회
             fast_mode=False  # 상세 섭션은 전체 기능 사용
         )
@@ -322,7 +360,8 @@ async def get_explore_section(
 
         return {
             "region": region,
-            "category": category,
+            "category": target_category,  # 실제 사용된 카테고리 반환
+            "original_category": category,  # 원래 요청된 카테고리
             "data": paginated_recommendations,
             "pagination": {
                 "offset": offset,
