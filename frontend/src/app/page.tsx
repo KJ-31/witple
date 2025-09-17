@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { fetchPersonalizedRegionCategories, fetchPopularSectionByRegion, type CitySection } from '../lib/dummyData'
+import { fetchPersonalizedRegionCategories, fetchAllRegionsAllCategories, type CitySection } from '../lib/dummyData'
 import { BottomNavigation } from '../components'
 import { trackClick } from '../utils/actionTracker'
 import { useActionTrackerSession } from '../hooks/useActionTrackerSession'
@@ -14,7 +14,7 @@ export default function Home() {
   const { setIsAppLoading } = useChatbot()
   const [searchQuery, setSearchQuery] = useState('')
   const [citySections, setCitySections] = useState<CitySection[]>([])
-  const [popularSection, setPopularSection] = useState<CitySection | null>(null)
+  const [popularSections, setPopularSections] = useState<CitySection[]>([])
   const [availableRegions, setAvailableRegions] = useState<string[]>([])
   const [selectedRegion, setSelectedRegion] = useState<string>('서울')
   const [showRegionModal, setShowRegionModal] = useState<boolean>(false)
@@ -27,6 +27,16 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchResults, setShowSearchResults] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+
+  // 지역 필터 상태
+  const [selectedRegionFilter, setSelectedRegionFilter] = useState<string>('all')
+
+  // 선택된 지역에 따라 인기 섹션 필터링
+  const filteredPopularSections = selectedRegionFilter === 'all'
+    ? popularSections
+    : popularSections.filter(section =>
+        section.region === selectedRegionFilter || section.cityName === selectedRegionFilter
+      )
 
 
   // 사용자 정보 및 여행 취향 로드 함수
@@ -251,44 +261,40 @@ export default function Home() {
     }
   }, [session]) // userInfo 의존성 제거
 
-  // 지역별 인기순 섹션 로드 함수 (모든 사용자용)
-  const loadPopularSection = useCallback(async (region: string = selectedRegion) => {
-
-      // console.log(`인기순 섹션 로드 시작: 지역=${region}`)
+  // 모든 지역 모든 카테고리 섹션 로드 함수
+  const loadAllRegionsAllCategories = useCallback(async () => {
+    console.log('모든 지역 모든 카테고리 섹션 로드 시작')
 
     try {
-      const result = await fetchPopularSectionByRegion(region, 6, 6)
-      setPopularSection(result.data)
+      const result = await fetchAllRegionsAllCategories(10, 6)
+      setPopularSections(result.data)
       setAvailableRegions(result.availableRegions)
 
-      // console.log(`인기순 섹션 로드 완료: ${region}, 카테고리=${result.data?.categorySections?.length || 0}개`)
+      console.log(`모든 지역 모든 카테고리 섹션 로드 완료: ${result.data.length}개 지역`)
     } catch (error) {
-      console.warn('인기순 섹션 로드 오류:', error)
-      setPopularSection(null)
+      console.warn('모든 지역 모든 카테고리 섹션 로드 오류:', error)
+      setPopularSections([])
     }
-  }, [selectedRegion])
+  }, [])
 
 
 
-  // 지역 변경 핸들러
+  // 지역 변경 핸들러 (맛집 섹션은 모든 지역을 보여주므로 불필요하지만 호환성 유지)
   const handleRegionChange = useCallback(async (region: string) => {
     console.log('🏷️ 지역 변경 요청:', region)
     setSelectedRegion(region)
     setShowRegionModal(false) // 모달 닫기
 
-    console.log('🔄 추천 데이터 및 인기 섹션 다시 로드 시작...')
+    console.log('🔄 추천 데이터 다시 로드 시작...')
 
-    // 인기 섹션과 추천 데이터 모두 다시 로드
+    // 추천 데이터만 다시 로드 (맛집 섹션은 모든 지역을 표시하므로 지역별 로드 불필요)
     try {
-      await Promise.all([
-        loadPopularSection(region),
-        loadRecommendedCities(userInfo, region)
-      ])
-      console.log('✅ 모든 데이터 다시 로드 완료')
+      await loadRecommendedCities(userInfo, region)
+      console.log('✅ 추천 데이터 다시 로드 완료')
     } catch (error) {
       console.error('❌ 데이터 다시 로드 실패:', error)
     }
-  }, [loadPopularSection, loadRecommendedCities, userInfo])
+  }, [loadRecommendedCities, userInfo])
 
   // 사용자 선호도 체크 (profile API 데이터 기반)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
@@ -370,8 +376,8 @@ export default function Home() {
             // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
             await loadRecommendedCities(loadedUserInfo, selectedRegion)
 
-            // 인기순 섹션 로드 (모든 로그인 사용자)
-            await loadPopularSection(selectedRegion)
+            // 모든 지역 모든 카테고리 섹션 로드 (모든 로그인 사용자)
+            await loadAllRegionsAllCategories()
 
             // console.log('로그인 사용자 초기화 완료')
           } catch (error) {
@@ -381,10 +387,10 @@ export default function Home() {
 
         initializeUser()
       } else {
-        // 비로그인 상태: 추천 데이터와 인기순 섹션 로드
+        // 비로그인 상태: 추천 데이터와 모든 지역 모든 카테고리 섹션 로드
         Promise.all([
           loadRecommendedCities(null, selectedRegion),
-          loadPopularSection(selectedRegion)
+          loadAllRegionsAllCategories()
         ]).then(() => {
           // console.log('비로그인 사용자 초기화 완료')
         }).catch(error => {
@@ -566,14 +572,13 @@ export default function Home() {
       )}
 
       {/* Main Card 섹션 - 로그인/비로그인 모두 표시 (검색 결과가 표시될 때는 숨김) */}
-      {!showSearchResults && (citySections.length > 0 || popularSection) && (
+      {!showSearchResults && (citySections.length > 0 || popularSections.length > 0) && (
         <div className="px-5 mb-12">
           <MainCard
             attraction={
               citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
               citySections[0]?.attractions?.[0] ||
-              popularSection?.categorySections?.[0]?.attractions?.[0] ||
-              popularSection?.attractions?.[0]
+              popularSections[0]?.attractions?.[0]
             }
             onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
           />
@@ -633,20 +638,23 @@ export default function Home() {
           </div>
         )}
 
-          {/* 지역별 인기순 섹션 (필터 기능 포함) */}
-          {popularSection && (
+          {/* 모든 지역 카테고리별 섹션 */}
+          {popularSections.length > 0 && (
           <div className="space-y-6">
-            {/* 제목과 필터 버튼 */}
+            {/* 제목과 카테고리 필터 버튼 */}
             <div className="pl-[10px] pr-5 flex items-center justify-between">
               <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
-                {selectedRegion} 인기 추천
+                지역별 추천
               </h2>
 
-              {/* 필터 버튼 */}
+              {/* 지역 필터 버튼 */}
               <button
                 onClick={() => setShowRegionModal(true)}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1A2332] text-[#94A9C9] hover:bg-[#252F42] hover:text-[#9CA8FF] transition-all duration-200"
               >
+                <span className="text-sm font-medium">
+                  {selectedRegionFilter === 'all' ? '전체' : selectedRegionFilter}
+                </span>
                 <svg
                   width="16"
                   height="16"
@@ -656,37 +664,74 @@ export default function Home() {
                   strokeWidth="2"
                   className="text-current"
                 >
-                  <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+                  <path d="M6 9l6 6 6-6" />
                 </svg>
-                <span className="text-sm font-medium">필터</span>
               </button>
             </div>
 
-            {/* 카테고리별 인기순 섹션 */}
-            <SectionCarousel
-              title={popularSection.description}
-              cityName={popularSection.cityName}
-              attractions={popularSection.attractions}
-              categorySections={popularSection.categorySections}
-              hideTitle={true}
-              onAttractionClick={(attractionId) => {
-                // 🎯 인기순 카드 클릭 추적
-                const attraction = popularSection.attractions?.find(a => a.id === attractionId) ||
-                  popularSection.categorySections?.flatMap(cs => cs.attractions || [])
-                    .find(a => a.id === attractionId)
 
-                trackClick(attractionId, {
-                  attraction_name: attraction?.name || 'Unknown',
-                  category: attraction?.category || popularSection.cityName,
-                  region: popularSection.region || popularSection.cityName,
-                  source: 'home_popular_filtered',
-                  city_section: popularSection.cityName,
-                  recommendation_type: 'popular',
-                  selected_region: selectedRegion
-                })
-                router.push(`/attraction/${attractionId}`)
-              }}
-            />
+            {/* 필터링된 지역 섹션들 */}
+            <div className="space-y-8">
+              {filteredPopularSections.length > 0 ? (
+                filteredPopularSections.map((section) => (
+                <div key={section.id}>
+                  {/* 지역명 */}
+                  <div className="pl-[10px] pr-5 mb-4">
+                    <h3 className="text-[18px] font-medium text-[#9CA8FF]">
+                      {section.cityName}
+                    </h3>
+                  </div>
+
+                  {/* 카테고리별 캐러셀 */}
+                  <div className="relative -ml-[21px] pl-[21px] pr-0">
+                    <div
+                      className="
+                        flex items-stretch gap-4
+                        overflow-x-auto no-scrollbar
+                        snap-x snap-mandatory scroll-smooth
+                        pb-2
+                      "
+                      style={{ scrollBehavior: 'smooth' }}
+                    >
+                      {section.attractions.map((attraction) => (
+                        <AttractionCard
+                          key={attraction.id}
+                          attraction={attraction}
+                          onAttractionClick={(attractionId) => {
+                            // 🎯 지역별 필터링 카드 클릭 추적
+                            trackClick(attractionId, {
+                              attraction_name: attraction.name || 'Unknown',
+                              category: attraction.category,
+                              region: section.region,
+                              source: 'home_regional_filter',
+                              city_section: section.cityName,
+                              recommendation_type: 'regional_filter',
+                              selected_region_filter: selectedRegionFilter
+                            })
+                            router.push(`/attraction/${attractionId}`)
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    {/* 좌쪽 가장자리 페이드 */}
+                    <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
+                  </div>
+                </div>
+                ))
+              ) : (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4">🏙️</div>
+                  <p className="text-[#94A9C9] text-lg mb-2">
+                    {selectedRegionFilter !== 'all'
+                      ? `${selectedRegionFilter} 지역의 장소가 없습니다`
+                      : '장소가 없습니다'
+                    }
+                  </p>
+                  <p className="text-[#6FA0E6] text-sm">다른 지역을 선택해보세요</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -719,13 +764,32 @@ export default function Home() {
               {/* 지역 목록 */}
               <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-3">
+                  <button
+                    key="all"
+                    onClick={() => {
+                      setSelectedRegionFilter('all')
+                      setShowRegionModal(false)
+                    }}
+                    className={`
+                      p-4 rounded-xl text-center font-medium transition-all duration-200
+                      ${selectedRegionFilter === 'all'
+                        ? 'bg-[#3E68FF] text-white'
+                        : 'bg-[#1A2332] text-[#94A9C9] hover:bg-[#252F42] hover:text-[#9CA8FF]'
+                      }
+                    `}
+                  >
+                    전체
+                  </button>
                   {availableRegions.map((region) => (
                     <button
                       key={region}
-                      onClick={() => handleRegionChange(region)}
+                      onClick={() => {
+                        setSelectedRegionFilter(region)
+                        setShowRegionModal(false)
+                      }}
                       className={`
                         p-4 rounded-xl text-center font-medium transition-all duration-200
-                        ${selectedRegion === region
+                        ${selectedRegionFilter === region
                           ? 'bg-[#3E68FF] text-white'
                           : 'bg-[#1A2332] text-[#94A9C9] hover:bg-[#252F42] hover:text-[#9CA8FF]'
                         }
@@ -741,6 +805,7 @@ export default function Home() {
         )}
 
 
+
           {/* 로딩 인디케이터 */}
           {loading && (
             <div className="flex justify-center items-center py-8">
@@ -750,7 +815,7 @@ export default function Home() {
           )}
 
           {/* 데이터가 없을 때 */}
-          {!loading && citySections.length === 0 && (
+          {!loading && citySections.length === 0 && popularSections.length === 0 && (
             <div className="text-center py-16">
               {session ? (
                 <>
@@ -772,107 +837,6 @@ export default function Home() {
   )
 }
 
-/** 추천 도시별 명소 섹션 컴포넌트 */
-function SectionCarousel({
-  title,
-  cityName,
-  attractions,
-  categorySections,
-  hideTitle = false,
-  onAttractionClick,
-}: {
-  title: string
-  cityName: string
-  attractions: { id: string; name: string; description: string; imageUrl: string; category: string }[]
-  categorySections?: Array<{ category: string; categoryName: string; attractions: any[]; total: number }>
-  hideTitle?: boolean
-  onAttractionClick: (attractionId: string) => void
-}) {
-  return (
-    <section aria-label={`${cityName} ${title}`} className="w-full">
-      {/* 도시 제목과 추천 점수 */}
-      {!hideTitle && (
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-[20px] font-semibold text-[#9CA8FF]">
-              {title}
-            </h2>
-            {/* <div className="flex items-center mt-2 space-x-2">
-              <span className="text-[#3E68FF] font-bold text-lg">{cityName}</span>
-            </div> */}
-          </div>
-        </div>
-      )}
-
-      {/* 카테고리별 섹션이 있는 경우 */}
-      {categorySections && categorySections.length > 0 ? (
-        <div className="space-y-8">
-          {categorySections.map((categorySection, categoryIndex) => (
-            <div key={`${categorySection.category}-${categoryIndex}`}>
-              {/* 카테고리 제목 */}
-              {/* <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-[#3E68FF]">
-                  {categorySection.categoryName}
-                </h3>
-                <span className="text-sm text-[#6FA0E6]">
-                  {categorySection.total}개 장소
-                </span>
-              </div> */}
-
-              {/* 카테고리별 장소 캐러셀 */}
-              <div className="relative -ml-[21px] pl-[21px] pr-0">
-                <div
-                  className="
-                    flex items-stretch gap-4
-                    overflow-x-auto no-scrollbar
-                    snap-x snap-mandatory scroll-smooth
-                    pb-2
-                  "
-                  style={{ scrollBehavior: 'smooth' }}
-                >
-                  {categorySection.attractions.map((attraction) => (
-                    <AttractionCard
-                      key={attraction.id}
-                      attraction={attraction}
-                      onAttractionClick={onAttractionClick}
-                    />
-                  ))}
-                </div>
-
-                {/* 좌쪽 가장자리 페이드 */}
-                <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* 기존 방식: 모든 장소를 하나의 캐러셀로 표시 */
-        <div className="relative -ml-[21px] pl-[21px] pr-0">
-          <div
-            className="
-              flex items-stretch gap-4
-              overflow-x-auto no-scrollbar
-              snap-x snap-mandatory scroll-smooth
-              pb-2
-            "
-            style={{ scrollBehavior: 'smooth' }}
-          >
-            {attractions.map((attraction) => (
-              <AttractionCard
-                key={attraction.id}
-                attraction={attraction}
-                onAttractionClick={onAttractionClick}
-              />
-            ))}
-          </div>
-
-          {/* 좌쪽 가장자리 페이드 */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#0B1220] to-transparent" />
-        </div>
-      )}
-    </section>
-  )
-}
 
 /** 관광지 카드 컴포넌트 */
 function AttractionCard({
@@ -883,11 +847,6 @@ function AttractionCard({
   onAttractionClick: (attractionId: string) => void
 }) {
   const categoryColor = getCategoryColor(attraction.category?.trim())
-
-  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
-  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
-    ? '#E8EAFF'
-    : '#0D121C'
 
   // 이미지 URL 및 카테고리 디버깅
   console.log(`🖼️ AttractionCard - ${attraction.name}:`, {
@@ -963,10 +922,11 @@ function AttractionCard({
         {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
           <span
-            className="px-3 py-1 text-xs rounded-full font-medium"
+            className="px-3 py-1 text-xs rounded-full font-medium border"
             style={{
-              backgroundColor: categoryColor,
-              color: textColor
+              backgroundColor: 'rgba(0, 0, 0, 0.45)',
+              color: 'white',
+              borderColor: categoryColor
             }}
           >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
@@ -976,14 +936,14 @@ function AttractionCard({
       </div>
 
       {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
-      <div className="absolute bottom-4 left-4 right-4">
+      <div className="absolute bottom-0 left-0 right-0">
         <div
-          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          className="px-4 py-3 flex items-center justify-center"
           style={{
-            backgroundColor: categoryColor
+            backgroundColor: '#0F1A31'
           }}
         >
-          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: "#9CA8FF" }}>
             {attraction.name}
           </h3>
         </div>
@@ -1140,10 +1100,6 @@ function MainCard({
 
   const categoryColor = getCategoryColor(attraction.category?.trim())
 
-  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
-  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
-    ? '#E8EAFF'
-    : '#0D121C'
   return (
     <figure
       className="
@@ -1209,10 +1165,11 @@ function MainCard({
         {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
           <span
-            className="px-3 py-1 text-xs rounded-full font-medium"
+            className="px-3 py-1 text-xs rounded-full font-medium border"
             style={{
-              backgroundColor: categoryColor,
-              color: textColor
+              backgroundColor: 'rgba(0, 0, 0, 0.45)',
+              color: 'white',
+              borderColor: categoryColor
             }}
           >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
@@ -1222,14 +1179,14 @@ function MainCard({
       </div>
 
       {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
-      <div className="absolute bottom-4 left-4 right-4">
+      <div className="absolute bottom-0 left-0 right-0">
         <div
-          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          className="px-4 py-3 flex items-center justify-center"
           style={{
-            backgroundColor: categoryColor
+            backgroundColor: '#0F1A31'
           }}
         >
-          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: "#9CA8FF" }}>
             {attraction.name}
           </h3>
         </div>

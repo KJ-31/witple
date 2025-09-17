@@ -708,6 +708,155 @@ const getCategoryDisplayName = (category: string): string => {
   return categoryDisplayMap[category] || category
 }
 
+// 모든 지역의 모든 카테고리 데이터를 가져오는 함수
+export const fetchAllRegionsAllCategories = async (
+  maxRegions: number = 10,
+  maxItemsPerCategory: number = 6
+): Promise<{ data: CitySection[], availableRegions: string[] }> => {
+  try {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+
+    // v2 탐색 피드 API를 사용해서 모든 지역 데이터 가져오기
+    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    console.log('모든 지역 모든 카테고리 섹션 API 호출:', url)
+
+    const response = await fetch(url, { headers })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+
+    if (result && result.data) {
+      const availableRegions = Object.keys(result.data)
+      const sections: CitySection[] = []
+
+      // 모든 지역을 순회하면서 모든 카테고리 데이터 추출
+      for (const region of availableRegions.slice(0, maxRegions)) {
+        const categories = result.data[region]
+        const allAttractions: Attraction[] = []
+
+        // 각 카테고리별로 데이터 추출
+        Object.entries(categories).forEach(([categoryName, items]: [string, any]) => {
+          if (Array.isArray(items) && items.length > 0) {
+            // 북마크 수 기준으로 정렬해서 상위 아이템들만 선택
+            const sortedItems = items.sort((a: any, b: any) => (b.bookmark_cnt || 0) - (a.bookmark_cnt || 0))
+            const topItems = sortedItems.slice(0, maxItemsPerCategory)
+
+            const categoryAttractions: Attraction[] = topItems.map(item => ({
+              id: item.id || `${item.table_name}_${item.place_id}`,
+              name: item.name || '이름 없음',
+              description: item.description || '설명 없음',
+              imageUrl: getImageUrl(item.image_urls),
+              rating: 4.5,
+              category: getCategoryFromTableName(item.table_name || categoryName)
+            }))
+
+            allAttractions.push(...categoryAttractions)
+          }
+        })
+
+        if (allAttractions.length > 0) {
+          sections.push({
+            id: `all-categories-${region}`,
+            cityName: region,
+            description: `${region} 추천 장소`,
+            region: region,
+            attractions: allAttractions,
+            recommendationScore: 90
+          })
+        }
+      }
+
+      console.log(`모든 지역 모든 카테고리 섹션 완료: ${sections.length}개 지역`)
+      return { data: sections, availableRegions }
+    }
+
+    return { data: [], availableRegions: [] }
+  } catch (error) {
+    console.error('모든 지역 모든 카테고리 섹션 호출 오류:', error)
+    return { data: [], availableRegions: [] }
+  }
+}
+
+// 모든 지역의 맛집 카테고리만 가져오는 함수 (호환성 유지)
+export const fetchAllRegionsRestaurants = async (
+  maxRegions: number = 10,
+  maxItemsPerRegion: number = 6
+): Promise<{ data: CitySection[], availableRegions: string[] }> => {
+  try {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+
+    // v2 탐색 피드 API를 사용해서 모든 지역 데이터 가져오기
+    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    console.log('모든 지역 맛집 섹션 API 호출:', url)
+
+    const response = await fetch(url, { headers })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const result = await response.json()
+
+    if (result && result.data) {
+      const availableRegions = Object.keys(result.data)
+      const sections: CitySection[] = []
+
+      // 모든 지역을 순회하면서 맛집 카테고리만 추출
+      for (const region of availableRegions.slice(0, maxRegions)) {
+        const categories = result.data[region]
+        const restaurantItems = categories.restaurants || categories.restaurant
+
+        if (restaurantItems && Array.isArray(restaurantItems) && restaurantItems.length > 0) {
+          // 북마크 수 기준으로 정렬해서 상위 아이템들만 선택
+          const sortedItems = restaurantItems.sort((a: any, b: any) => (b.bookmark_cnt || 0) - (a.bookmark_cnt || 0))
+          const topItems = sortedItems.slice(0, maxItemsPerRegion)
+
+          const attractions: Attraction[] = topItems.map(item => ({
+            id: item.id || `${item.table_name}_${item.place_id}`,
+            name: item.name || '이름 없음',
+            description: item.description || '설명 없음',
+            imageUrl: getImageUrl(item.image_urls),
+            rating: 4.5,
+            category: 'restaurants'
+          }))
+
+          if (attractions.length > 0) {
+            sections.push({
+              id: `restaurants-${region}`,
+              cityName: region,
+              description: `${region} 맛집`,
+              region: region,
+              attractions: attractions,
+              recommendationScore: 90
+            })
+          }
+        }
+      }
+
+      console.log(`모든 지역 맛집 섹션 완료: ${sections.length}개 지역`)
+      return { data: sections, availableRegions }
+    }
+
+    return { data: [], availableRegions: [] }
+  } catch (error) {
+    console.error('모든 지역 맛집 섹션 호출 오류:', error)
+    return { data: [], availableRegions: [] }
+  }
+}
+
 // 지역별 카테고리 인기순 섹션 API 호출 (필터 기능용)
 export const fetchPopularSectionByRegion = async (
   region: string = '서울',
