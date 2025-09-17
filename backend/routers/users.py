@@ -89,13 +89,39 @@ async def save_user_preferences(
             for tag in tags:
                 all_tags.append(tag)
     
-    # 중복 제거하고 태그 저장
+    # 중복 제거하고 태그 저장 (우선순위 기반 가중치 적용)
     unique_tags = list(set(all_tags))
+
+    # 우선순위별 태그 가중치 매핑 (초강력 편향)
+    priority_weights = {
+        'restaurants': {'맛집': 10, '음식': 9, '레스토랑': 10, '카페': 8, '요리': 8,
+                       '전통음식': 9, '고급음식': 9, '미식': 10, '다이닝': 8, '음식투자': 7},
+        'nature': {'자연': 10, '산': 9, '바다': 9, '호수': 8, '공원': 7, '숲': 8,
+                  '하이킹': 8, '트레킹': 9, '경치': 7, '풍경': 7},
+        'culture': {'문화': 10, '역사': 9, '박물관': 9, '미술관': 8, '전통': 9,
+                   '절': 8, '궁궐': 9, '문화체험': 8, '유적': 7, '예술': 7},
+        'shopping': {'쇼핑': 10, '마트': 6, '백화점': 8, '아울렛': 9, '시장': 7,
+                    '상가': 6, '패션': 7, '브랜드': 8},
+        'accommodation': {'숙박': 10, '호텔': 9, '리조트': 8, '펜션': 7, '한옥': 9,
+                         '전통': 8, '럭셔리': 8, '편안한': 7}
+    }
+
+    # 현재 사용자의 우선순위 가져오기
+    user_priority = preferences.priority.value
+    priority_tag_weights = priority_weights.get(user_priority, {})
+
     for tag in unique_tags:
+        # 우선순위와 일치하는 태그는 높은 가중치, 나머지는 기본값
+        if tag in priority_tag_weights:
+            weight = priority_tag_weights[tag]
+            logger.info(f"우선순위 태그 '{tag}' -> weight={weight} (사용자 우선순위: {user_priority})")
+        else:
+            weight = 1  # 기본 가중치
+
         tag_obj = UserPreferenceTag(
             user_id=current_user.user_id,
             tag=tag,
-            weight=1,
+            weight=weight,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )

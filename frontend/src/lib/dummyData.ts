@@ -5,7 +5,7 @@ export interface Attraction {
   description: string
   imageUrl: string
   rating: number
-  category: 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping'
+  category: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 }
 
 export interface CitySection {
@@ -265,8 +265,10 @@ export const fetchRecommendations = async (
           allItems.push(...recommendations.feed)
         }
 
+
         // console.log('v2 API 응답 아이템 수:', allItems.length)
         transformedData = transformRecommendationsToSections(allItems, maxSections, maxItemsPerSection)
+        console.log('변환된 섹션 데이터:', transformedData)
       } else {
         console.warn('v2 API 응답 형식이 예상과 다름:', Object.keys(recommendations))
         return { data: [], hasMore: false }
@@ -532,10 +534,38 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
     return []
   }
 
-  const MAX_SECTIONS = maxSections // 동적 설정 사용
-  const MIN_ITEMS_PER_SECTION = 1 // 섹션당 최소 1개 아이템으로 완화
+  console.log('🔄 Transform 시작 - 원본 추천 데이터:', recommendations.length, '개')
+  console.log('🔄 원본 데이터 카테고리 분포:', recommendations.map(r => r.category || r.table_name))
 
-  // 지역별로 그룹핑
+  // 개인화 추천의 경우 지역별 그룹핑하지 않고 단일 섹션으로 처리
+  const isPersonalized = recommendations.some(place => place.source === 'preference' || place.source === 'hybrid')
+
+  if (isPersonalized) {
+    console.log('🎯 개인화 추천 감지 - 지역별 그룹핑 없이 단일 섹션으로 처리')
+
+    // 개인화 추천은 순서를 유지하면서 단일 섹션으로 생성
+    const attractions: Attraction[] = recommendations.slice(0, maxItemsPerSection * maxSections).map(place => ({
+      id: `${place.table_name}_${place.place_id}`,
+      name: place.name || '이름 없음',
+      description: place.description || '설명 없음',
+      imageUrl: getImageUrl(place.image_urls),
+      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10,
+      category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name)
+    }))
+
+    console.log('🎯 변환된 개인화 추천:', attractions.map(a => `${a.name} (${a.category})`))
+
+    return [{
+      id: 'personalized-recommendations',
+      cityName: '맞춤 추천',
+      description: '당신을 위한 맞춤 추천 여행지',
+      region: '전국',
+      attractions,
+      recommendationScore: 100
+    }]
+  }
+
+  // 기존 지역별 그룹핑 로직 (비개인화 추천용)
   const regionGroups: { [key: string]: any[] } = {}
   recommendations.forEach(place => {
     const region = place.region || '기타'
@@ -545,25 +575,23 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
     regionGroups[region].push(place)
   })
 
-  // 지역별 그룹을 섹션으로 변환
   const sections: CitySection[] = []
   const sortedRegions = Object.entries(regionGroups)
-    .sort(([,a], [,b]) => b.length - a.length) // 아이템 개수가 많은 지역 순으로 정렬
+    .sort(([,a], [,b]) => b.length - a.length)
 
   for (const [region, places] of sortedRegions) {
-    if (sections.length >= MAX_SECTIONS) break
-    if (places.length < MIN_ITEMS_PER_SECTION) continue // 너무 적은 아이템은 제외
+    if (sections.length >= maxSections) break
+    if (places.length < 1) continue
 
-    // 동적 설정에 따른 아이템 수 제한
     const sectionPlaces = places.slice(0, maxItemsPerSection)
 
     const attractions: Attraction[] = sectionPlaces.map(place => ({
-      id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
+      id: `${place.table_name}_${place.place_id}`,
       name: place.name || '이름 없음',
       description: place.description || '설명 없음',
-      imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
-      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
-      category: getCategoryFromTableName(place.table_name)
+      imageUrl: getImageUrl(place.image_urls),
+      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10,
+      category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name)
     }))
 
     const firstPlace = sectionPlaces[0]
@@ -580,7 +608,7 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
   }
 
   // 섹션이 부족한 경우 남은 장소들로 혼합 섹션 생성
-  if (sections.length < MAX_SECTIONS) {
+  if (sections.length < maxSections) {
     const usedPlaces = new Set()
     sections.forEach(section => {
       section.attractions.forEach(attraction => {
@@ -600,7 +628,7 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
         description: place.description || '설명 없음',
         imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
         rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
-        category: getCategoryFromTableName(place.table_name)
+        category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name) // 백엔드 category 우선 사용
       }))
 
       sections.push({
@@ -638,11 +666,28 @@ const getImageUrl = (imageUrls: any): string => {
 };
 
 // 테이블명을 카테고리로 변환
-const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping' => {
-  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping' } = {
+// 백엔드 카테고리 값을 프론트엔드 카테고리로 변환
+const normalizeCategoryName = (backendCategory: string | undefined): 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' | undefined => {
+  if (!backendCategory) return undefined
+
+  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' } = {
+    accommodation: 'accommodation',
+    restaurants: 'restaurants',
+    shopping: 'shopping',
+    nature: 'nature',
+    culture: 'humanities',
+    leisure: 'leisure_sports',
+    humanities: 'humanities'
+  }
+
+  return categoryMap[backendCategory]
+}
+
+const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' => {
+  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' } = {
     accommodation: 'accommodation',
     humanities: 'humanities',
-    leisure_sports: 'leisure_sport',
+    leisure_sports: 'leisure_sports',
     nature: 'nature',
     restaurants: 'restaurants',
     shopping: 'shopping'
@@ -996,3 +1041,5 @@ export const fetchCitiesByCategory = async (
   }
 }
 */
+
+// File end

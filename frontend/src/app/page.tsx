@@ -128,6 +128,7 @@ export default function Home() {
       return
     }
 
+
       // console.log('추천 데이터 로드 시작 - 세션:', !!session, ', 지역:', region)
     setLoading(true)
 
@@ -183,6 +184,10 @@ export default function Home() {
           // 각 카테고리의 attractions 수 로깅
           section.categorySections.forEach(cat => {
             console.log(`  - ${cat.categoryName}: ${cat.attractions?.length || 0}개`)
+            // 🔥 각 attraction의 카테고리 정보도 로깅
+            cat.attractions?.slice(0, 3).forEach(attraction => {
+              console.log(`    • ${attraction.name} (${attraction.category})`)
+            })
           })
 
           return {
@@ -884,6 +889,15 @@ function AttractionCard({
     ? '#E8EAFF'
     : '#0D121C'
 
+  // 이미지 URL 및 카테고리 디버깅
+  console.log(`🖼️ AttractionCard - ${attraction.name}:`, {
+    imageUrl: attraction.imageUrl,
+    imageUrlType: typeof attraction.imageUrl,
+    imageUrlLength: attraction.imageUrl?.length,
+    category: attraction.category,
+    fullData: attraction
+  })
+
   return (
     <figure
       className="
@@ -914,6 +928,7 @@ function AttractionCard({
                 target.style.opacity = '1';
                 const loadingIndicator = target.previousElementSibling as HTMLElement;
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
+                console.log(`✅ 이미지 로드 성공: ${attraction.name} - ${attraction.imageUrl}`);
               }}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -922,6 +937,7 @@ function AttractionCard({
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
                 const fallback = target.nextElementSibling as HTMLElement;
                 if (fallback) fallback.style.display = 'flex';
+                console.error(`❌ 이미지 로드 실패: ${attraction.name} - ${attraction.imageUrl}`);
               }}
             />
 
@@ -1158,6 +1174,7 @@ function MainCard({
                 target.style.opacity = '1';
                 const loadingIndicator = target.previousElementSibling as HTMLElement;
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
+                console.log(`✅ 이미지 로드 성공: ${attraction.name} - ${attraction.imageUrl}`);
               }}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -1166,6 +1183,7 @@ function MainCard({
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
                 const fallback = target.nextElementSibling as HTMLElement;
                 if (fallback) fallback.style.display = 'flex';
+                console.error(`❌ 이미지 로드 실패: ${attraction.name} - ${attraction.imageUrl}`);
               }}
             />
 
