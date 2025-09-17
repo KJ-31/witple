@@ -902,11 +902,7 @@ function AttractionCard({
         w-[200px] h-[200px]
         cursor-pointer transition-all duration-300
         group relative
-        border-2
       "
-      style={{
-        borderColor: categoryColor
-      }}
       onClick={() => onAttractionClick(attraction.id)}
     >
       {/* 이미지 영역 */}
@@ -962,7 +958,7 @@ function AttractionCard({
         {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
           <span
-            className="px-3 py-1 text-xs rounded-full font-medium"
+            className="px-3 py-1 text-xs rounded-full font-medium border"
             style={{
               backgroundColor: 'rgba(0, 0, 0, 0.45)',
               color: 'white',
@@ -1149,11 +1145,7 @@ function MainCard({
         w-full max-w-lg h-[200px]
         cursor-pointer transition-all duration-300
         group relative
-        border-2
       "
-      style={{
-        borderColor: categoryColor
-      }}
       onClick={() => onAttractionClick(attraction.id)}
     >
       {/* 이미지 영역 */}
@@ -1209,7 +1201,7 @@ function MainCard({
         {/* 카테고리 배지 - 좌상단 */}
         <div className="absolute top-3 left-3">
           <span
-            className="px-3 py-1 text-xs rounded-full font-medium"
+            className="px-3 py-1 text-xs rounded-full font-medium border"
             style={{
               backgroundColor: 'rgba(0, 0, 0, 0.45)',
               color: 'white',
