@@ -1497,6 +1497,21 @@ class UnifiedRecommendationEngine:
             logger.error(f"❌ Failed to get user preferences for {user_id}: {e}")
             return {}
 
+    async def get_user_priority_tag(self, user_id: str) -> Optional[str]:
+        """사용자의 여행 우선순위 태그 조회"""
+        try:
+            async with self.db_manager.get_connection() as conn:
+                query = """
+                    SELECT priority
+                    FROM user_preferences
+                    WHERE user_id = $1
+                """
+                result = await conn.fetchval(query, user_id)
+                return result
+        except Exception as e:
+            logger.error(f"❌ Failed to get user priority tag for {user_id}: {e}")
+            return None
+
     async def _calculate_preference_scores(
         self,
         user_preferences: Dict[str, Any],

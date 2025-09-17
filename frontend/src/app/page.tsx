@@ -261,12 +261,13 @@ export default function Home() {
     }
   }, [session]) // userInfo 의존성 제거
 
-  // 모든 지역 모든 카테고리 섹션 로드 함수
+  // 모든 지역 모든 카테고리 섹션 로드 함수 (개별 API 호출 방식, 우선순위 태그 필터링 포함)
   const loadAllRegionsAllCategories = useCallback(async () => {
     console.log('모든 지역 모든 카테고리 섹션 로드 시작')
 
     try {
-      const result = await fetchAllRegionsAllCategories(10, 6)
+      // 🔑 세션을 전달하여 우선순위 태그 필터링 적용
+      const result = await fetchAllRegionsAllCategories(10, 6, session)
       setPopularSections(result.data)
       setAvailableRegions(result.availableRegions)
 
