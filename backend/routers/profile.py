@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from database import get_db
-from models import User, UserPreference
+from models import User, UserPreference, UserPreferenceTag
+from sqlalchemy import text
 from schemas import (
     UserResponse,
     ProfileImageUpdate,
@@ -85,41 +86,67 @@ async def get_current_user_profile(
     current_user: User = Depends(get_current_user)
 ):
     """현재 사용자의 프로필 정보를 가져옵니다."""
-    # 캐시 키 생성
-    cache_key = f"profile:{current_user.user_id}"
+    try:
+        # 캐시 키 생성
+        cache_key = f"profile:{current_user.user_id}"
 
-    # 캐시에서 조회 시도
-    cached_result = cache.get(cache_key)
-    if cached_result is not None:
-        logger.info(f"Cache hit for profile: {cache_key}")
-        return UserResponse(**cached_result)
+        # 캐시에서 조회 시도
+        try:
+            cached_result = cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Cache hit for profile: {cache_key}")
+                return UserResponse(**cached_result)
+        except Exception as cache_error:
+            logger.warning(f"Cache retrieval failed: {cache_error}")
 
-    logger.info(f"Cache miss for profile: {cache_key}")
+        logger.info(f"Cache miss for profile: {cache_key}")
 
-    # 사용자의 여행 취향 정보도 함께 가져오기
-    user_preference = db.query(UserPreference).filter(
-        UserPreference.user_id == current_user.user_id
-    ).first()
+        # 사용자의 여행 취향 정보도 함께 가져오기
+        user_preference = db.query(UserPreference).filter(
+            UserPreference.user_id == current_user.user_id
+        ).first()
 
-    # UserResponse 객체 생성 시 여행 취향 정보 포함
-    user_data = {
-        "user_id": current_user.user_id,
-        "email": current_user.email,
-        "name": current_user.name,
-        "age": current_user.age,
-        "nationality": current_user.nationality,
-        "profile_image": current_user.profile_image,
-        "created_at": current_user.created_at.isoformat() if hasattr(current_user.created_at, 'isoformat') and current_user.created_at else str(current_user.created_at) if current_user.created_at else None,
-        "persona": user_preference.persona if user_preference else None,
-        "priority": user_preference.priority if user_preference else None,
-        "accommodation": user_preference.accommodation if user_preference else None,
-        "exploration": user_preference.exploration if user_preference else None
-    }
+        # UserResponse 객체 생성 시 여행 취향 정보 포함 (안전한 처리)
+        user_data = {
+            "user_id": str(current_user.user_id) if current_user.user_id else "",
+            "email": str(current_user.email) if current_user.email else "",
+            "name": current_user.name,
+            "age": current_user.age,
+            "nationality": current_user.nationality,
+            "profile_image": current_user.profile_image,
+            "created_at": None,
+            "persona": user_preference.persona if user_preference else None,
+            "priority": user_preference.priority if user_preference else None,
+            "accommodation": user_preference.accommodation if user_preference else None,
+            "exploration": user_preference.exploration if user_preference else None
+        }
 
-    # 결과를 캐시에 저장 (20분)
-    cache.set(cache_key, user_data, expire=1200)
+        # created_at 안전한 처리
+        try:
+            if current_user.created_at:
+                if hasattr(current_user.created_at, 'isoformat'):
+                    user_data["created_at"] = current_user.created_at.isoformat()
+                else:
+                    user_data["created_at"] = str(current_user.created_at)
+        except Exception as date_error:
+            logger.warning(f"Date conversion failed: {date_error}")
 
-    return UserResponse(**user_data)
+        # 결과를 캐시에 저장 (20분)
+        try:
+            cache.set(cache_key, user_data, timeout=1200)
+        except Exception as cache_error:
+            logger.warning(f"Cache storage failed: {cache_error}")
+
+        return UserResponse(**user_data)
+
+    except Exception as e:
+        logger.error(f"❌ Error in get_current_user_profile: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"프로필 정보를 가져오는 중 오류가 발생했습니다: {str(e)}"
+        )
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -294,6 +321,73 @@ async def update_profile_preferences(
 
         user_preference.updated_at = datetime.utcnow()
         user.updated_at = datetime.utcnow()
+
+        # 우선순위가 변경된 경우 태그 가중치 재생성
+        if preferences_data.priority is not None:
+            # 기존 사용자 태그 삭제
+            db.query(UserPreferenceTag).filter(UserPreferenceTag.user_id == current_user.user_id).delete()
+
+            # preference_definitions에서 모든 선호도 옵션의 태그 조회
+            preference_options = [
+                ('persona', preferences_data.persona or user_preference.persona),
+                ('priority', preferences_data.priority or user_preference.priority),
+                ('accommodation', preferences_data.accommodation or user_preference.accommodation),
+                ('exploration', preferences_data.exploration or user_preference.exploration)
+            ]
+
+            all_tags = []
+            for category, option_key in preference_options:
+                if option_key:  # None이 아닌 경우만
+                    # preference_definitions 테이블에서 태그 조회
+                    result = db.execute(
+                        text("SELECT tags FROM preference_definitions WHERE category = :category AND option_key = :option_key"),
+                        {"category": category, "option_key": option_key}
+                    ).fetchone()
+
+                    if result and result[0]:  # tags 배열이 존재하면
+                        tags = result[0]  # PostgreSQL array
+                        for tag in tags:
+                            all_tags.append(tag)
+
+            # 중복 제거하고 우선순위 기반 가중치로 태그 저장
+            unique_tags = list(set(all_tags))
+
+            # 우선순위별 태그 가중치 매핑 (초강력 편향)
+            priority_weights = {
+                'restaurants': {'맛집': 10, '음식': 9, '레스토랑': 10, '카페': 8, '요리': 8,
+                               '전통음식': 9, '고급음식': 9, '미식': 10, '다이닝': 8, '음식투자': 7},
+                'nature': {'자연': 10, '산': 9, '바다': 9, '호수': 8, '공원': 7, '숲': 8,
+                          '하이킹': 8, '트레킹': 9, '경치': 7, '풍경': 7},
+                'culture': {'문화': 10, '역사': 9, '박물관': 9, '미술관': 8, '전통': 9,
+                           '절': 8, '궁궐': 9, '문화체험': 8, '유적': 7, '예술': 7},
+                'shopping': {'쇼핑': 10, '마트': 6, '백화점': 8, '아울렛': 9, '시장': 7,
+                            '상가': 6, '패션': 7, '브랜드': 8},
+                'accommodation': {'숙박': 10, '호텔': 9, '리조트': 8, '펜션': 7, '한옥': 9,
+                                 '전통': 8, '럭셔리': 8, '편안한': 7}
+            }
+
+            # 현재 사용자의 우선순위 가져오기
+            user_priority = preferences_data.priority or user_preference.priority
+            priority_tag_weights = priority_weights.get(user_priority, {})
+
+            for tag in unique_tags:
+                # 우선순위와 일치하는 태그는 높은 가중치, 나머지는 기본값
+                if tag in priority_tag_weights:
+                    weight = priority_tag_weights[tag]
+                    logger.info(f"Profile: 우선순위 태그 '{tag}' -> weight={weight} (사용자 우선순위: {user_priority})")
+                else:
+                    weight = 1  # 기본 가중치
+
+                tag_obj = UserPreferenceTag(
+                    user_id=current_user.user_id,
+                    tag=tag,
+                    weight=weight,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                db.add(tag_obj)
+
+            logger.info(f"Profile: 사용자 {current_user.user_id} 태그 가중치 재생성 완료 - {len(unique_tags)}개 태그")
 
         db.commit()
         db.refresh(user)

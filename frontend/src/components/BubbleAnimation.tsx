@@ -101,11 +101,23 @@ export default function BubbleAnimation() {
           // DB user_preference 테이블에서 사용자 취향 정보 가져오기
           // console.log('🔄 API 호출 시작 - 취향 정보 조회')
           const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+          // 인증 토큰 가져오기
+          const { getSession } = await import('next-auth/react')
+          const session = await getSession()
+
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          }
+
+          // 토큰이 있으면 Authorization 헤더 추가
+          if (session && (session as any).backendToken) {
+            headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+          }
+
           const response = await fetch(`${API_BASE_URL}/api/v1/profile/me`, {
             method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers,
             credentials: 'include'
           })
 

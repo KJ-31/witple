@@ -57,7 +57,8 @@ async def fetch_recommendations_with_fallback(
     user_id: Optional[str],
     region: Optional[str],
     category: Optional[str],
-    limit: int
+    limit: int,
+    fast_mode: bool = False  # 메인 페이지용 고속 모드
 ) -> List[Dict[str, Any]]:
     """
     안전한 추천 데이터 조회 (통합 엔진 사용)
@@ -73,7 +74,8 @@ async def fetch_recommendations_with_fallback(
                     user_id=user_id,
                     region=region,
                     category=category,
-                    limit=limit
+                    limit=limit,
+                    fast_mode=fast_mode  # fast_mode 전달
                 ),
                 timeout=RECOMMENDATION_TIMEOUT
             )
@@ -90,7 +92,8 @@ async def fetch_recommendations_with_fallback(
 async def fetch_explore_data_parallel(
     user_id: Optional[str],
     regions: List[str],
-    categories: List[str]
+    categories: List[str],
+    fast_mode: bool = True  # explore는 기본적으로 fast_mode
 ) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
     """
     탐색 데이터를 병렬로 안전하게 조회
@@ -101,7 +104,8 @@ async def fetch_explore_data_parallel(
             user_id=user_id,
             region=region,
             category=category,
-            limit=5  # 성능 개선을 위해 감소
+            limit=5,  # 성능 개선을 위해 감소
+            fast_mode=fast_mode  # fast_mode 전달
         )
         for region in regions
         for category in categories
@@ -141,7 +145,8 @@ async def fetch_explore_data_parallel(
 @router.get("/main-feed/personalized", response_model=dict)
 async def get_main_personalized_feed(
     current_user=Depends(get_current_user_optional),
-    limit: int = Query(21, ge=1, le=50, description="대표 카드 1개 + 목록 20개 (최대 50개)")
+    limit: int = Query(21, ge=1, le=50, description="대표 카드 1개 + 목록 20개 (최대 50개)"),
+    region: Optional[str] = Query(None, description="지역 필터 (선택사항)")
 ):
     """
     메인 상단 'For You' 섹션 - 개인화 추천
@@ -153,12 +158,13 @@ async def get_main_personalized_feed(
 
         logger.info(f"Getting personalized feed for user: {user_id}, limit: {limit}")
 
-        # 통합 엔진 호출 (필터 없음, user_id 유무에 따라 자동 분기)
+        # 통합 엔진 호출 (메인 페이지용 fast_mode 적용)
         recommendations = await fetch_recommendations_with_fallback(
             user_id=user_id,
-            region=None,
+            region=region,  # 지역 필터 적용
             category=None,
-            limit=limit
+            limit=limit,
+            fast_mode=True  # 메인 피드는 항상 고속 모드
         )
 
         if not recommendations:
@@ -168,10 +174,27 @@ async def get_main_personalized_feed(
                 "message": "추천할 콘텐츠가 없습니다."
             }
 
+        # 응답 데이터에 category 필드 추가
+        processed_recommendations = []
+        for rec in recommendations:
+            processed_rec = dict(rec)  # 딕셔너리 복사
+            # table_name을 category로 매핑
+            table_name = rec.get('table_name', '')
+            category_mapping = {
+                'accommodation': 'accommodation',
+                'restaurants': 'restaurants',
+                'shopping': 'shopping',
+                'nature': 'nature',
+                'humanities': 'culture',
+                'leisure_sports': 'leisure'
+            }
+            processed_rec['category'] = category_mapping.get(table_name, table_name)
+            processed_recommendations.append(processed_rec)
+
         return {
-            "featured": recommendations[0],  # 가장 추천도 높은 카드
-            "feed": recommendations[1:],     # 나머지 목록
-            "total_count": len(recommendations)
+            "featured": processed_recommendations[0] if processed_recommendations else None,
+            "feed": processed_recommendations[1:] if len(processed_recommendations) > 1 else [],
+            "total_count": len(processed_recommendations)
         }
 
     except Exception as e:
@@ -279,18 +302,57 @@ async def get_explore_section(
     offset: int = Query(0, ge=0, description="페이징 오프셋")
 ):
     """
-    특정 지역/카테고리 섹션 데이터 조회 (지연 로딩, 페이징 지원)
+    특정 지역/카테고리 섹션 데이터 조회 (우선순위 태그 기반 필터링, 지연 로딩, 페이징 지원)
     """
     try:
         user_id = str(current_user.user_id) if current_user else None
 
         logger.info(f"Getting section data: {region}/{category} for user: {user_id}")
 
+        # 🎯 로그인된 사용자의 경우 우선순위 태그 기반으로 카테고리 결정
+        target_category = category
+        if current_user and user_id:
+            try:
+                engine = await get_engine()
+                user_priority = await engine.get_user_priority_tag(user_id)
+
+                if user_priority:
+                    logger.info(f"User {user_id} priority tag: {user_priority}")
+
+                    # 우선순위 태그에 따른 카테고리 매핑
+                    priority_category_map = {
+                        'accommodation': 'accommodation',
+                        'restaurants': 'restaurants',
+                        'shopping': 'shopping',
+                        'experience': category  # 체험은 요청된 카테고리 그대로 사용
+                    }
+
+                    # 체험 태그인 경우 nature/humanities/leisure_sports 중에서만 허용
+                    if user_priority == 'experience':
+                        experience_categories = ['nature', 'humanities', 'leisure_sports']
+                        if category in experience_categories:
+                            target_category = category
+                        else:
+                            # 요청된 카테고리가 체험 카테고리가 아니면 nature로 기본 설정
+                            target_category = 'nature'
+                    else:
+                        # 다른 우선순위 태그의 경우 해당 카테고리로 고정
+                        if user_priority in priority_category_map:
+                            target_category = priority_category_map[user_priority]
+
+                    logger.info(f"Target category for region {region}: {target_category} (based on priority: {user_priority})")
+
+            except Exception as e:
+                logger.warning(f"Failed to get user priority for {user_id}: {e}")
+                # 실패 시 원래 카테고리 사용
+                target_category = category
+
         recommendations = await fetch_recommendations_with_fallback(
             user_id=user_id,
             region=region,
-            category=category,
-            limit=limit + offset  # offset 만큼 더 조회
+            category=target_category,
+            limit=limit + offset,  # offset 만큼 더 조회
+            fast_mode=False  # 상세 섭션은 전체 기능 사용
         )
 
         # 오프셋 적용
@@ -298,7 +360,8 @@ async def get_explore_section(
 
         return {
             "region": region,
-            "category": category,
+            "category": target_category,  # 실제 사용된 카테고리 반환
+            "original_category": category,  # 원래 요청된 카테고리
             "data": paginated_recommendations,
             "pagination": {
                 "offset": offset,
@@ -331,7 +394,8 @@ async def health_check():
             user_id=None,
             region=None,
             category=None,
-            limit=1
+            limit=1,
+            fast_mode=True  # 헬스체크는 빠르게
         )
 
         return {
@@ -354,6 +418,26 @@ async def health_check():
 # ============================================================================
 # 📝 설정 정보 조회 API (디버깅/모니터링용)
 # ============================================================================
+
+@router.get("/regions", response_model=dict)
+async def get_available_regions():
+    """
+    추천 시스템에서 사용 가능한 지역 목록 조회
+    """
+    try:
+        engine = await get_engine()
+        regions_data = await engine.get_popular_regions_and_categories()
+
+        return {
+            "regions": regions_data.get("regions", []),
+            "categories": regions_data.get("categories", [])
+        }
+    except Exception as e:
+        logger.error(f"❌ Regions retrieval failed: {e}")
+        return {
+            "regions": EXPLORE_REGIONS,
+            "categories": EXPLORE_CATEGORIES
+        }
 
 @router.get("/config", response_model=dict)
 async def get_recommendation_config():

@@ -5,7 +5,7 @@ export interface Attraction {
   description: string
   imageUrl: string
   rating: number
-  category: 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping'
+  category: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping'
 }
 
 export interface CitySection {
@@ -265,8 +265,10 @@ export const fetchRecommendations = async (
           allItems.push(...recommendations.feed)
         }
 
+
         // console.log('v2 API 응답 아이템 수:', allItems.length)
         transformedData = transformRecommendationsToSections(allItems, maxSections, maxItemsPerSection)
+        console.log('변환된 섹션 데이터:', transformedData)
       } else {
         console.warn('v2 API 응답 형식이 예상과 다름:', Object.keys(recommendations))
         return { data: [], hasMore: false }
@@ -532,10 +534,38 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
     return []
   }
 
-  const MAX_SECTIONS = maxSections // 동적 설정 사용
-  const MIN_ITEMS_PER_SECTION = 1 // 섹션당 최소 1개 아이템으로 완화
+  console.log('🔄 Transform 시작 - 원본 추천 데이터:', recommendations.length, '개')
+  console.log('🔄 원본 데이터 카테고리 분포:', recommendations.map(r => r.category || r.table_name))
 
-  // 지역별로 그룹핑
+  // 개인화 추천의 경우 지역별 그룹핑하지 않고 단일 섹션으로 처리
+  const isPersonalized = recommendations.some(place => place.source === 'preference' || place.source === 'hybrid')
+
+  if (isPersonalized) {
+    console.log('🎯 개인화 추천 감지 - 지역별 그룹핑 없이 단일 섹션으로 처리')
+
+    // 개인화 추천은 순서를 유지하면서 단일 섹션으로 생성
+    const attractions: Attraction[] = recommendations.slice(0, maxItemsPerSection * maxSections).map(place => ({
+      id: `${place.table_name}_${place.place_id}`,
+      name: place.name || '이름 없음',
+      description: place.description || '설명 없음',
+      imageUrl: getImageUrl(place.image_urls),
+      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10,
+      category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name)
+    }))
+
+    console.log('🎯 변환된 개인화 추천:', attractions.map(a => `${a.name} (${a.category})`))
+
+    return [{
+      id: 'personalized-recommendations',
+      cityName: '맞춤 추천',
+      description: '당신을 위한 맞춤 추천 여행지',
+      region: '전국',
+      attractions,
+      recommendationScore: 100
+    }]
+  }
+
+  // 기존 지역별 그룹핑 로직 (비개인화 추천용)
   const regionGroups: { [key: string]: any[] } = {}
   recommendations.forEach(place => {
     const region = place.region || '기타'
@@ -545,25 +575,23 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
     regionGroups[region].push(place)
   })
 
-  // 지역별 그룹을 섹션으로 변환
   const sections: CitySection[] = []
   const sortedRegions = Object.entries(regionGroups)
-    .sort(([,a], [,b]) => b.length - a.length) // 아이템 개수가 많은 지역 순으로 정렬
+    .sort(([,a], [,b]) => b.length - a.length)
 
   for (const [region, places] of sortedRegions) {
-    if (sections.length >= MAX_SECTIONS) break
-    if (places.length < MIN_ITEMS_PER_SECTION) continue // 너무 적은 아이템은 제외
+    if (sections.length >= maxSections) break
+    if (places.length < 1) continue
 
-    // 동적 설정에 따른 아이템 수 제한
     const sectionPlaces = places.slice(0, maxItemsPerSection)
 
     const attractions: Attraction[] = sectionPlaces.map(place => ({
-      id: `${place.table_name}_${place.place_id}`, // 테이블명과 ID를 조합
+      id: `${place.table_name}_${place.place_id}`,
       name: place.name || '이름 없음',
       description: place.description || '설명 없음',
-      imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
-      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
-      category: getCategoryFromTableName(place.table_name)
+      imageUrl: getImageUrl(place.image_urls),
+      rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10,
+      category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name)
     }))
 
     const firstPlace = sectionPlaces[0]
@@ -580,7 +608,7 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
   }
 
   // 섹션이 부족한 경우 남은 장소들로 혼합 섹션 생성
-  if (sections.length < MAX_SECTIONS) {
+  if (sections.length < maxSections) {
     const usedPlaces = new Set()
     sections.forEach(section => {
       section.attractions.forEach(attraction => {
@@ -600,7 +628,7 @@ const transformRecommendationsToSections = (recommendations: any[], maxSections:
         description: place.description || '설명 없음',
         imageUrl: getImageUrl(place.image_urls), // 이미지 URL 추출
         rating: Math.round((place.similarity_score + 0.3) * 5 * 10) / 10, // 점수 기반 평점
-        category: getCategoryFromTableName(place.table_name)
+        category: normalizeCategoryName(place.category) || getCategoryFromTableName(place.table_name) // 백엔드 category 우선 사용
       }))
 
       sections.push({
@@ -638,11 +666,28 @@ const getImageUrl = (imageUrls: any): string => {
 };
 
 // 테이블명을 카테고리로 변환
-const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping' => {
-  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sport' | 'nature' | 'restaurants' | 'shopping' } = {
+// 백엔드 카테고리 값을 프론트엔드 카테고리로 변환
+const normalizeCategoryName = (backendCategory: string | undefined): 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' | undefined => {
+  if (!backendCategory) return undefined
+
+  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' } = {
+    accommodation: 'accommodation',
+    restaurants: 'restaurants',
+    shopping: 'shopping',
+    nature: 'nature',
+    culture: 'humanities',
+    leisure: 'leisure_sports',
+    humanities: 'humanities'
+  }
+
+  return categoryMap[backendCategory]
+}
+
+const getCategoryFromTableName = (tableName: string): 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' => {
+  const categoryMap: { [key: string]: 'accommodation' | 'humanities' | 'leisure_sports' | 'nature' | 'restaurants' | 'shopping' } = {
     accommodation: 'accommodation',
     humanities: 'humanities',
-    leisure_sports: 'leisure_sport',
+    leisure_sports: 'leisure_sports',
     nature: 'nature',
     restaurants: 'restaurants',
     shopping: 'shopping'
@@ -662,6 +707,144 @@ const getCategoryDisplayName = (category: string): string => {
   }
   return categoryDisplayMap[category] || category
 }
+
+// 개별 지역/카테고리 섹션 API 호출 함수 (우선순위 태그 필터링 포함)
+const fetchRegionCategorySection = async (
+  region: string,
+  category: string,
+  limit: number = 10,
+  headers: Record<string, string>
+): Promise<Attraction[]> => {
+  try {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+    // 🎯 개별 지역 섹션 API 사용 (우선순위 태그 필터링 적용됨)
+    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?limit=${limit}`
+
+    console.log(`🔧 개별 섹션 API 호출: ${region}/${category}`)
+
+    const response = await fetch(url, { headers })
+
+    if (!response.ok) {
+      console.warn(`⚠️ 개별 섹션 API 실패: ${region}/${category} (${response.status})`)
+      return []
+    }
+
+    const result = await response.json()
+
+    if (result && result.data && Array.isArray(result.data)) {
+      return result.data.map((item: any) => ({
+        id: item.id || `${item.table_name}_${item.place_id}`,
+        name: item.name || '이름 없음',
+        description: item.description || '설명 없음',
+        imageUrl: getImageUrl(item.image_urls),
+        rating: 4.5,
+        category: getCategoryFromTableName(item.table_name || category)
+      }))
+    }
+
+    return []
+  } catch (error) {
+    console.error(`❌ 개별 섹션 API 오류: ${region}/${category}:`, error)
+    return []
+  }
+}
+
+// 모든 지역의 모든 카테고리 데이터를 가져오는 함수 (개별 API 호출 방식으로 변경)
+export const fetchAllRegionsAllCategories = async (
+  maxRegions: number = 10,
+  maxItemsPerCategory: number = 6,
+  session?: any  // 세션 매개변수 추가
+): Promise<{ data: CitySection[], availableRegions: string[] }> => {
+  try {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    }
+
+    // 🔑 JWT 토큰이 있으면 Authorization 헤더 추가 (우선순위 태그 필터링을 위해 필요)
+    if (session && (session as any).backendToken) {
+      headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      console.log('🔐 JWT 토큰으로 개별 섹션 API 호출 (우선순위 태그 필터링 적용)')
+    } else {
+      console.log('🔓 비로그인 상태로 개별 섹션 API 호출 (일반 추천)')
+    }
+
+    // 백엔드 설정에서 사용 가능한 지역과 카테고리 가져오기
+    const configResponse = await fetch(`${API_BASE_URL}/proxy/api/v2/recommendations/regions`, { headers })
+    let availableRegions: string[] = []
+    let availableCategories: string[] = []
+
+    if (configResponse.ok) {
+      const configData = await configResponse.json()
+      availableRegions = configData.regions || []
+      availableCategories = configData.categories || []
+    }
+
+    // 설정 로드 실패 시 기본값 사용
+    if (availableRegions.length === 0) {
+      availableRegions = ["서울특별시", "부산광역시", "제주특별자치도", "강원특별자치도", "경기도", "전라남도", "경상남도", "인천광역시"]
+    }
+    if (availableCategories.length === 0) {
+      availableCategories = ["restaurants", "accommodation", "nature", "shopping", "culture", "activity"]
+    }
+
+    console.log(`🚀 개별 섹션 API 방식으로 데이터 로드: ${Math.min(maxRegions, availableRegions.length)}개 지역, ${availableCategories.length}개 카테고리`)
+
+    const sections: CitySection[] = []
+    const targetRegions = availableRegions.slice(0, maxRegions)
+
+    // 🔄 각 지역별로 우선순위 태그 기반 추천 가져오기 (병렬 처리)
+    const regionPromises = targetRegions.map(async (region) => {
+      const allAttractions: Attraction[] = []
+
+      // 각 카테고리별로 개별 API 호출 (사용자 우선순위 태그 필터링 적용됨)
+      const categoryPromises = availableCategories.map(async (category) => {
+        const attractions = await fetchRegionCategorySection(region, category, maxItemsPerCategory, headers)
+        return { category, attractions }
+      })
+
+      const categoryResults = await Promise.all(categoryPromises)
+
+      // 모든 카테고리의 결과를 합치기
+      categoryResults.forEach(({ attractions }) => {
+        allAttractions.push(...attractions)
+      })
+
+      if (allAttractions.length > 0) {
+        return {
+          id: `priority-filtered-${region}`,
+          cityName: region,
+          description: `${region} 우선순위 기반 추천 장소`,
+          region: region,
+          attractions: allAttractions,
+          recommendationScore: 95 // 우선순위 필터링으로 높은 점수
+        }
+      }
+
+      return null
+    })
+
+    const regionResults = await Promise.all(regionPromises)
+
+    // null이 아닌 결과만 필터링
+    regionResults.forEach(section => {
+      if (section) {
+        sections.push(section)
+      }
+    })
+
+    console.log(`✅ 우선순위 태그 기반 지역 섹션 완료: ${sections.length}개 지역`)
+    return { data: sections, availableRegions: targetRegions }
+
+  } catch (error) {
+    console.error('❌ 개별 섹션 API 방식 호출 오류:', error)
+    return { data: [], availableRegions: [] }
+  }
+}
+
+
 
 // 지역별 카테고리 인기순 섹션 API 호출 (필터 기능용)
 export const fetchPopularSectionByRegion = async (
@@ -996,3 +1179,5 @@ export const fetchCitiesByCategory = async (
   }
 }
 */
+
+// File end
