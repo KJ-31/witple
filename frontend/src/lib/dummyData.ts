@@ -36,7 +36,7 @@ const getRecommendationConfig = async (): Promise<any> => {
 
     if (response.ok) {
       const config = await response.json()
-      console.log('백엔드 추천 설정 로드:', config)
+      // console.log('백엔드 추천 설정 로드:', config)
       return config
     }
   } catch (error) {
@@ -81,12 +81,12 @@ const calculateRecommendationSettings = (userType: string, config: any) => {
     }
 
     // 백엔드 config 구조 분석
-    console.log('백엔드 config 분석:', {
-      regions: config.explore_regions?.length || 0,
-      categories: config.explore_categories?.length || 0,
-      maxRequests: config.max_parallel_requests || 0,
-      weights: config.weights
-    })
+    // console.log('백엔드 config 분석:', {
+    //   regions: config.explore_regions?.length || 0,
+    //   categories: config.explore_categories?.length || 0,
+    //   maxRequests: config.max_parallel_requests || 0,
+    //   weights: config.weights
+    // })
 
     // 백엔드 성능 설정을 고려한 동적 계산
     const maxRegions = Math.min(config.explore_regions?.length || 17, config.max_parallel_requests || 8)
@@ -217,7 +217,7 @@ export const fetchRecommendations = async (
     }
 
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
-    console.log('v2 추천 API 호출:', url)
+    // console.log('v2 추천 API 호출:', url)
 
     // 3초 타임아웃으로 빠른 실패 처리
     const timeoutPromise = new Promise((_, reject) =>
@@ -247,7 +247,7 @@ export const fetchRecommendations = async (
     let recommendations
     try {
       recommendations = await response.json()
-      console.log('v2 API 응답:', recommendations)
+      // console.log('v2 API 응답:', recommendations)
     } catch (jsonError) {
       console.error('v2 추천 API 응답 JSON 파싱 오류:', jsonError)
       throw new Error('v2 API 응답 데이터 형식 오류')
@@ -265,8 +265,8 @@ export const fetchRecommendations = async (
           allItems.push(...recommendations.feed)
         }
 
-        console.log('v2 API 응답 아이템 수:', allItems.length)
-        console.log('v2 API 응답 샘플 아이템:', allItems[0])
+
+        // console.log('v2 API 응답 아이템 수:', allItems.length)
         transformedData = transformRecommendationsToSections(allItems, maxSections, maxItemsPerSection)
         console.log('변환된 섹션 데이터:', transformedData)
       } else {
@@ -286,7 +286,7 @@ export const fetchRecommendations = async (
     console.error('v2 추천 API 호출 오류:', error instanceof Error ? error.message : String(error))
     // v2 API 실패 시 탐색 피드로 fallback
     try {
-      console.log('v2 탐색 피드로 fallback 시도')
+      // console.log('v2 탐색 피드로 fallback 시도')
       return await fetchV2ExploreFeedWithCategories(maxSections, maxItemsPerSection)
     } catch (fallbackError) {
       console.warn('v2 탐색 피드도 실패:', fallbackError)
@@ -309,7 +309,7 @@ const fetchV2ExploreFeedWithCategories = async (
     }
 
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
-    console.log('v2 탐색 피드 API 호출 (카테고리별):', url)
+    // console.log('v2 탐색 피드 API 호출 (카테고리별):', url)
 
     const response = await fetch(url, { headers })
 
@@ -363,7 +363,7 @@ const fetchV2ExploreFeedWithCategories = async (
         }
       }
 
-      console.log(`v2 탐색 피드 완료: ${sections.length}개 지역, 카테고리별 구조`)
+      // console.log(`v2 탐색 피드 완료: ${sections.length}개 지역, 카테고리별 구조`)
       return { data: sections, hasMore: false }
     }
 
@@ -398,7 +398,7 @@ const fetchPopularPlacesByBookmarks = async (
     }
 
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
-    console.log('인기 장소 API 호출 (bookmark_cnt 기준):', url)
+    // console.log('인기 장소 API 호출 (bookmark_cnt 기준):', url)
 
     const response = await fetch(url, { headers })
 
@@ -407,7 +407,7 @@ const fetchPopularPlacesByBookmarks = async (
     }
 
     const result = await response.json()
-    console.log('v2 API 응답 (인기 장소):', result)
+    // console.log('v2 API 응답 (인기 장소):', result)
 
     // v2 API 응답 처리 { featured, feed, total_count }
     let allItems = []
@@ -457,7 +457,7 @@ const fetchPopularPlacesByBookmarks = async (
         }
       }
 
-      console.log(`북마크 기반 인기 장소 완료: ${sections.length}개 지역`)
+      // console.log(`북마크 기반 인기 장소 완료: ${sections.length}개 지역`)
       return { data: sections, hasMore: false }
     }
 
@@ -480,7 +480,7 @@ const fetchV2ExploreFeed = async (): Promise<{ data: CitySection[], hasMore: boo
     }
 
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
-    console.log('v2 탐색 피드 API 호출:', url)
+    // console.log('v2 탐색 피드 API 호출:', url)
 
     const response = await fetch(url, { headers })
 
@@ -724,7 +724,7 @@ export const fetchPopularSectionByRegion = async (
 
     // v2 탐색 피드 API를 사용해서 인기순 데이터 가져오기
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
-    console.log('지역별 인기순 섹션 API 호출:', url, 'region:', region)
+    // console.log('지역별 인기순 섹션 API 호출:', url, 'region:', region)
 
     const response = await fetch(url, { headers })
 
@@ -788,7 +788,7 @@ export const fetchPopularSectionByRegion = async (
         recommendationScore: 90
       }
 
-      console.log(`지역별 인기순 섹션 완료: ${targetRegion}, ${categorySections.length}개 카테고리`)
+      // console.log(`지역별 인기순 섹션 완료: ${targetRegion}, ${categorySections.length}개 카테고리`)
       return { data: citySection, availableRegions }
     }
 
@@ -814,7 +814,7 @@ export const fetchPopularSectionsForNewUsers = async (
 
     // v2 탐색 피드 API를 사용해서 인기순 데이터 가져오기
     const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
-    console.log('신규 사용자 인기순 섹션 API 호출:', url)
+    // console.log('신규 사용자 인기순 섹션 API 호출:', url)
 
     const response = await fetch(url, { headers })
 
@@ -867,7 +867,7 @@ export const fetchPopularSectionsForNewUsers = async (
         }
       }
 
-      console.log(`신규 사용자 인기순 섹션 완료: ${sections.length}개 지역`)
+      // console.log(`신규 사용자 인기순 섹션 완료: ${sections.length}개 지역`)
       return { data: sections, hasMore: false }
     }
 
@@ -947,7 +947,7 @@ export const fetchPersonalizedRegionCategories = async (
         : await fetchPopularPlacesByBookmarks(fallbackSettings.sectionCount, fallbackSettings.itemsPerSection, region)
     }
 
-    console.log(`v2 API 통합 추천: 사용자타입=${userType}, 로그인=${!!session}, 제한=${settings.totalRecommendations}, 섹션=${settings.sectionCount}, 아이템=${settings.itemsPerSection}`)
+    // console.log(`v2 API 통합 추천: 사용자타입=${userType}, 로그인=${!!session}, 제한=${settings.totalRecommendations}, 섹션=${settings.sectionCount}, 아이템=${settings.itemsPerSection}`)
 
     // 로그인 사용자: 개인화 추천, 비로그인 사용자: 북마크 기반 인기 장소
     if (session) {
@@ -990,7 +990,7 @@ export const fetchCitiesByCategory = async (
     const config = await getRecommendationConfig()
     const settings = calculateRecommendationSettings('guest', config)
 
-    console.log(`비로그인 백엔드 설정: 섹션=${settings.sectionCount}, 아이템=${settings.itemsPerSection}`)
+    // console.log(`비로그인 백엔드 설정: 섹션=${settings.sectionCount}, 아이템=${settings.itemsPerSection}`)
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
@@ -1029,7 +1029,7 @@ export const fetchCitiesByCategory = async (
       attractions: (section.attractions || []).slice(0, settings.itemsPerSection)
     }))
 
-    console.log(`비로그인 추천 완료: ${limitedData.length}개 섹션, 섹션당 최대 ${settings.itemsPerSection}개 아이템`)
+    // console.log(`비로그인 추천 완료: ${limitedData.length}개 섹션, 섹션당 최대 ${settings.itemsPerSection}개 아이템`)
 
     return {
       data: processedData,

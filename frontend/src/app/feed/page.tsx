@@ -95,6 +95,13 @@ export default function FeedPage() {
     fetchPosts()
   }, [])
 
+  // 세션이 로드된 후 좋아요 상태 업데이트
+  useEffect(() => {
+    if (session?.user?.id && posts.length > 0) {
+      updateLikeStates(session.user.id)
+    }
+  }, [session?.user?.id, posts.length])
+
   const handleLike = async (postId: number) => {
     try {
       // 현재 좋아요 상태 확인
