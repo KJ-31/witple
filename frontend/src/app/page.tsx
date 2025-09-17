@@ -884,11 +884,6 @@ function AttractionCard({
 }) {
   const categoryColor = getCategoryColor(attraction.category?.trim())
 
-  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
-  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
-    ? '#E8EAFF'
-    : '#0D121C'
-
   // 이미지 URL 및 카테고리 디버깅
   console.log(`🖼️ AttractionCard - ${attraction.name}:`, {
     imageUrl: attraction.imageUrl,
@@ -907,7 +902,11 @@ function AttractionCard({
         w-[200px] h-[200px]
         cursor-pointer transition-all duration-300
         group relative
+        border-2
       "
+      style={{
+        borderColor: categoryColor
+      }}
       onClick={() => onAttractionClick(attraction.id)}
     >
       {/* 이미지 영역 */}
@@ -965,8 +964,9 @@ function AttractionCard({
           <span
             className="px-3 py-1 text-xs rounded-full font-medium"
             style={{
-              backgroundColor: categoryColor,
-              color: textColor
+              backgroundColor: 'rgba(0, 0, 0, 0.45)',
+              color: 'white',
+              borderColor: categoryColor
             }}
           >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
@@ -976,14 +976,14 @@ function AttractionCard({
       </div>
 
       {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
-      <div className="absolute bottom-4 left-4 right-4">
+      <div className="absolute bottom-0 left-0 right-0">
         <div
-          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          className="px-4 py-3 flex items-center justify-center"
           style={{
-            backgroundColor: categoryColor
+            backgroundColor: '#0F1A31'
           }}
         >
-          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: "#9CA8FF" }}>
             {attraction.name}
           </h3>
         </div>
@@ -1140,10 +1140,6 @@ function MainCard({
 
   const categoryColor = getCategoryColor(attraction.category?.trim())
 
-  // 맛집과 쇼핑 카테고리는 밝은 색상, 나머지는 어두운 색상
-  const textColor = (attraction.category === 'restaurants' || attraction.category === 'shopping')
-    ? '#E8EAFF'
-    : '#0D121C'
   return (
     <figure
       className="
@@ -1153,7 +1149,11 @@ function MainCard({
         w-full max-w-lg h-[200px]
         cursor-pointer transition-all duration-300
         group relative
+        border-2
       "
+      style={{
+        borderColor: categoryColor
+      }}
       onClick={() => onAttractionClick(attraction.id)}
     >
       {/* 이미지 영역 */}
@@ -1211,8 +1211,9 @@ function MainCard({
           <span
             className="px-3 py-1 text-xs rounded-full font-medium"
             style={{
-              backgroundColor: categoryColor,
-              color: textColor
+              backgroundColor: 'rgba(0, 0, 0, 0.45)',
+              color: 'white',
+              borderColor: categoryColor
             }}
           >
             {getCategoryName(attraction.category?.trim()) || attraction.category}
@@ -1222,14 +1223,14 @@ function MainCard({
       </div>
 
       {/* 하단 제목 영역 - 카테고리 색상과 동일한 배경 */}
-      <div className="absolute bottom-4 left-4 right-4">
+      <div className="absolute bottom-0 left-0 right-0">
         <div
-          className="rounded-xl px-4 py-3 flex items-center justify-center"
+          className="px-4 py-3 flex items-center justify-center"
           style={{
-            backgroundColor: categoryColor
+            backgroundColor: '#0F1A31'
           }}
         >
-          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: textColor }}>
+          <h3 className="font-bold text-base text-center leading-tight truncate" style={{ color: "#9CA8FF" }}>
             {attraction.name}
           </h3>
         </div>
