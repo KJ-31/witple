@@ -3036,7 +3036,6 @@ export default function MapPage() {
           markers={mapMarkers}
           onMapLoad={handleMapLoad}
           selectedMarkerIdFromParent={selectedMarkerId}
-          source={sourceParam}
           disableAutoBounds={!showItinerary} // 장소찾기 모드에서는 자동 bounds 비활성화
           onMarkerClick={(markerId, markerType, position) => {
             if (markerType === 'category') {
