@@ -17,6 +17,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from typing import List, Any, Literal, TypedDict, Sequence, Optional
 from sqlalchemy import create_engine, text
+from database import engine as shared_engine
+from cache_utils import RedisCache
 import sys
 import os
 import json
@@ -44,8 +46,8 @@ except Exception as e:
     boto3_session = None
 
 # # 설정 및 초기화
-# 데이터베이스 연결 설정
-CONNECTION_STRING = "postgresql+psycopg://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db"
+# 데이터베이스 연결 설정 (Redis 우선, PGVector 폴백)
+DB_ENABLED = True  # Redis 캐시 우선 + PGVector 폴백
 
 # Redis 캐싱 설정
 print("🔗 Redis 캐싱 시스템 초기화 중...")
@@ -206,6 +208,107 @@ class LLMCache:
         except Exception as e:
             return {"enabled": True, "error": str(e)}
 
+    def preload_region_documents(self, region: str, expire: int = 7200) -> bool:
+        """지역별 문서 사전 로딩 (2시간 캐시)"""
+        if not self.enabled:
+            return False
+
+        try:
+            cache_key = f"llm:region:{region}"
+
+            # 이미 캐시되어 있으면 건너뛰기
+            if self.redis.exists(cache_key):
+                print(f"📦 지역 캐시 존재: {region}")
+                return True
+
+            # DB에서 해당 지역의 모든 문서 조회
+            engine = shared_engine
+            with engine.connect() as conn:
+                query = text("""
+                    SELECT document, cmetadata
+                    FROM langchain_pg_embedding
+                    WHERE cmetadata->>'region' = :region
+                    LIMIT 500
+                """)
+                result = conn.execute(query, {"region": region})
+
+                documents = []
+                for row in result:
+                    documents.append({
+                        'page_content': row.document,
+                        'metadata': json.loads(row.cmetadata) if row.cmetadata else {}
+                    })
+
+                if documents:
+                    docs_json = json.dumps(documents, ensure_ascii=False)
+                    success = self.redis.set(cache_key, docs_json, ex=expire)
+                    print(f"🏗️ 지역 캐시 생성: {region} ({len(documents)}개 문서)")
+                    return success
+
+        except Exception as e:
+            print(f"⚠️ 지역 캐시 오류: {e}")
+            return False
+
+    def get_region_documents(self, region: str) -> List[Document]:
+        """지역별 캐시된 문서 조회"""
+        if not self.enabled:
+            return []
+
+        try:
+            cache_key = f"llm:region:{region}"
+            cached_data = self.redis.get(cache_key)
+
+            if cached_data:
+                print(f"🎯 지역 캐시 히트: {region}")
+                docs_data = json.loads(cached_data)
+                return [Document(page_content=doc['page_content'], metadata=doc['metadata'])
+                       for doc in docs_data]
+
+        except Exception as e:
+            print(f"⚠️ 지역 캐시 조회 오류: {e}")
+
+        return []
+
+    def preload_popular_documents(self, expire: int = 3600) -> bool:
+        """인기 문서 사전 로딩 (1시간 캐시)"""
+        if not self.enabled:
+            return False
+
+        try:
+            cache_key = "llm:hot:popular"
+
+            if self.redis.exists(cache_key):
+                print("📦 인기 문서 캐시 존재")
+                return True
+
+            # 인기 문서 조회 (조회수, 추천수 기반)
+            engine = shared_engine
+            with engine.connect() as conn:
+                query = text("""
+                    SELECT document, cmetadata
+                    FROM langchain_pg_embedding
+                    ORDER BY (cmetadata->>'view_count')::int DESC NULLS LAST
+                    LIMIT 100
+                """)
+                result = conn.execute(query)
+
+                documents = []
+                for row in result:
+                    documents.append({
+                        'page_content': row.document,
+                        'metadata': json.loads(row.cmetadata) if row.cmetadata else {}
+                    })
+
+                if documents:
+                    docs_json = json.dumps(documents, ensure_ascii=False)
+                    success = self.redis.set(cache_key, docs_json, ex=expire)
+                    print(f"🔥 인기 문서 캐시 생성: {len(documents)}개")
+                    return success
+
+        except Exception as e:
+            print(f"⚠️ 인기 문서 캐시 오류: {e}")
+            return False
+
 # 전역 캐시 인스턴스
 llm_cache = LLMCache(redis_client if redis_available else None)
 
@@ -237,15 +340,24 @@ embeddings = HuggingFaceEmbeddings(
 
 
 
-# # 벡터스토어 연결
+# # 벡터스토어 연결 (Redis 캐시 우선 사용으로 비활성화)
 
-print("🔗 벡터스토어 연결 중...")
-vectorstore = PGVector(
-    embeddings=embeddings,
-    collection_name="place_recommendations",  # 이관된 데이터가 있는 collection
-    connection=CONNECTION_STRING,
-    pre_delete_collection=False,  # 기존 데이터 보존
-)
+print("🎯 Redis 캐시 우선 + PGVector 폴백 모드")
+vectorstore = None
+if DB_ENABLED:
+    try:
+        print("🔗 벡터스토어 연결 중...")
+        vectorstore = PGVector(
+            embeddings=embeddings,
+            collection_name="place_recommendations",
+            connection=os.getenv('DATABASE_URL'),
+            pre_delete_collection=False,
+        )
+        print("✅ 벡터스토어 연결 완료 (Redis 우선, PGVector 폴백)")
+    except Exception as e:
+        print(f"⚠️ 벡터스토어 연결 실패: {e}")
+        print("📢 Redis 캐시 전용 모드로 동작")
+        vectorstore = None
 
 # # 지역 및 키워드 인식 시스템
 
@@ -355,7 +467,7 @@ class HybridOptimizedRetriever(BaseRetriever):
     def _sql_filter_candidates(self, query: str, regions: List[str], cities: List[str], categories: List[str]) -> List[Document]:
         """SQL 쿼리로 후보 문서들을 먼저 필터링"""
         try:
-            engine = create_engine(CONNECTION_STRING)
+            engine = shared_engine
             
             # 조건이 없으면 최근 문서나 인기 문서로 제한
             if not regions and not cities and not categories:
@@ -865,10 +977,9 @@ def get_coordinates_for_region(region_name):
 def get_db_regions_and_cities():
     """DB에서 실제 region과 city 데이터 추출"""
     try:
-        from sqlalchemy import create_engine, text
-        CONNECTION_STRING = "postgresql+psycopg://postgres:witple123!@witple-pub-database.cfme8csmytkv.ap-northeast-2.rds.amazonaws.com:5432/witple_db"
+        from sqlalchemy import text
 
-        engine = create_engine(CONNECTION_STRING)
+        engine = shared_engine
         with engine.connect() as conn:
             # Region 데이터 추출
             regions = []
@@ -2532,10 +2643,10 @@ def integrate_response_node(state: TravelState) -> TravelState:
 def get_place_from_recommendations(place_id: str, table_name: str) -> dict:
     """place_recommendations 테이블에서 place_id와 table_name으로 정확한 정보 조회"""
     try:
-        from sqlalchemy import create_engine, text
+        from sqlalchemy import text
 
         # DB 연결
-        engine = create_engine(CONNECTION_STRING)
+        engine = shared_engine
 
         with engine.connect() as conn:
             # place_id와 table_name으로 정확한 조회
@@ -2579,10 +2690,10 @@ def find_place_in_recommendations(place_name: str) -> dict:
     # 벡터 업데이트 후에는 메타데이터에 place_id, table_name이 포함되므로
     # 이 함수는 호환성을 위해서만 유지
     try:
-        from sqlalchemy import create_engine, text
+        from sqlalchemy import text
 
         # DB 연결
-        engine = create_engine(CONNECTION_STRING)
+        engine = shared_engine
 
         with engine.connect() as conn:
             # 유사한 이름으로 검색 (대소문자 구분 없이) - psycopg3 스타일
@@ -3451,7 +3562,21 @@ if __name__ == "__main__":
     print("\n🚀 하이브리드 최적화 RAG 시스템 (Amazon Bedrock) 초기화 완료!")
     print("📊 특징: SQL 1차 필터링 + 벡터 2차 검색으로 고속 정확 검색")
     print("🤖 AI 모델: Amazon Bedrock Claude")
-    
+
+    # 백엔드 시작 시 인기 문서 사전 캐싱
+    print("🔥 인기 문서 사전 캐싱 시작...")
+    if llm_cache.preload_popular_documents():
+        print("✅ 인기 문서 캐싱 완료")
+
+    # 주요 지역 문서 사전 캐싱
+    print("🏗️ 주요 지역 문서 사전 캐싱 시작...")
+    major_regions = ['서울특별시', '부산광역시', '제주특별자치도', '경기도']
+    for region in major_regions:
+        if llm_cache.preload_region_documents(region):
+            print(f"✅ {region} 캐싱 완료")
+
+    print("🎯 Redis 문서 캐시 프리로딩 완료!")
+
     try:
         interactive_mode()
             

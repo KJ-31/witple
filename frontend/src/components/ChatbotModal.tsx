@@ -1,18 +1,50 @@
 'use client'
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useChatbot } from './ChatbotProvider'
 
+// 동적 로딩 텍스트 컴포넌트
+function LoadingAnimation() {
+  const [textIndex, setTextIndex] = useState(0)
+
+  const loadingTexts = [
+    "여행 정보를 검색중입니다",
+    "AI가 최적의 여행 계획을 준비중입니다",
+    "맞춤형 추천을 생성중입니다",
+    "최신 여행 정보를 수집중입니다",
+    "답변을 생성중입니다"
+  ]
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTextIndex((prev) => (prev + 1) % loadingTexts.length)
+    }, 8000) // 5초마다 텍스트 변경
+
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <div className="flex items-center space-x-3 text-sm text-gray-600">
+      <span className="animate-pulse">{loadingTexts[textIndex]}</span>
+      <div className="flex space-x-1">
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+      </div>
+    </div>
+  )
+}
+
 export function ChatbotModal() {
-  const { 
-    showChatbot, 
-    setShowChatbot, 
-    chatMessage, 
-    setChatMessage, 
-    chatMessages, 
+  const {
+    showChatbot,
+    setShowChatbot,
+    chatMessage,
+    setChatMessage,
+    chatMessages,
     handleChatSubmit
   } = useChatbot()
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // 메시지가 업데이트될 때마다 스크롤을 맨 아래로
@@ -21,6 +53,13 @@ export function ChatbotModal() {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [chatMessages])
+
+  // 챗봇 모달이 열릴 때 스크롤을 맨 아래로
+  useEffect(() => {
+    if (showChatbot && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [showChatbot])
 
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -78,9 +117,12 @@ export function ChatbotModal() {
                 ? 'bg-[#3E68FF] text-white'
                 : 'bg-white border border-gray-200'
                 } rounded-2xl px-4 py-2 shadow-sm`}>
-                {msg.type === 'bot' && msg.isHtml ? (
+                {msg.type === 'bot' && (msg.message.includes('생성하고 있습니다') || msg.message.includes('검색하고 있습니다') || msg.message.includes('준비 중입니다') || msg.message.includes('수집하고 있습니다')) ? (
+                  // 개선된 로딩 애니메이션
+                  <LoadingAnimation />
+                ) : msg.type === 'bot' && msg.isHtml ? (
                   // HTML 형태로 렌더링 (개행이 <br>로 변환됨)
-                  <div 
+                  <div
                     className="text-sm text-gray-800"
                     dangerouslySetInnerHTML={{ __html: msg.message }}
                   />
