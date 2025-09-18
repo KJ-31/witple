@@ -17,7 +17,6 @@ interface GoogleMapProps {
   onMapLoad?: (map: any) => void
   onMarkerClick?: (markerId: string, markerType: string, position?: { lat: number; lng: number }) => void
   selectedMarkerIdFromParent?: string | null
-  source?: string | null // GPS 활성화 여부를 결정하는 source 파라미터 추가
   disableAutoBounds?: boolean // 자동 bounds 조정 비활성화 옵션
 }
 
@@ -59,18 +58,12 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   onMapLoad,
   onMarkerClick,
   selectedMarkerIdFromParent = null,
-  source = null,
   disableAutoBounds = false
 }) => {
   const mapRef = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
   const [isLoaded, setIsLoaded] = useState(false)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [userLocationMarker, setUserLocationMarker] = useState<any>(null)
-  const [locationWatchId, setLocationWatchId] = useState<number | null>(null)
-  const [gpsMode, setGpsMode] = useState<'off' | 'location' | 'compass'>('off') // GPS 버튼 모드 상태
-  const [currentHeading, setCurrentHeading] = useState<number | null>(null) // 현재 방향 저장
   const itineraryMarkersRef = useRef<any[]>([])
   const categoryMarkersRef = useRef<any[]>([])
   const markerInstancesRef = useRef<Map<string, { marker: any, category: string }>>(new Map())
@@ -295,171 +288,8 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
     }
   }, [map, markers, disableAutoBounds])
 
-  // GPS 모드별 위치 추적 (profile에서만 가능)
-  useEffect(() => {
-    const shouldEnableGPS = source === 'profile' && (gpsMode === 'location' || gpsMode === 'compass')
 
-    if (shouldEnableGPS && map && (window as any).google && 'geolocation' in navigator) {
-      // 위치 추적 시작
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const newLocation = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          }
 
-          setUserLocation(newLocation)
-
-          // 기존 사용자 위치 마커 제거
-          if (userLocationMarker) {
-            userLocationMarker.setMap(null)
-          }
-
-          // 새 사용자 위치 마커 생성 (방향 표시 화살표)
-          const heading = position.coords.heading // 디바이스가 향하는 방향 (도 단위, 북쪽 기준)
-          setCurrentHeading(heading)
-
-          const locationMarker = new (window as any).google.maps.Marker({
-            position: newLocation,
-            map,
-            title: `현재 위치${heading !== null && heading !== undefined ? ` (방향: ${Math.round(heading)}°)` : ''}`,
-            icon: {
-              path: (window as any).google.maps.SymbolPath.FORWARD_CLOSED_ARROW, // 화살표 모양
-              scale: 8,
-              fillColor: '#4285F4', // 구글 블루
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 2,
-              rotation: heading !== null && heading !== undefined ? heading : 0 // 방향이 있으면 적용, 없으면 북쪽(0도)
-            }
-          })
-
-          setUserLocationMarker(locationMarker)
-
-          // 모드별 처리
-          if (gpsMode === 'location') {
-            // 위치 모드: 지도 회전 없이 위치만 업데이트 (사용자가 지도를 움직일 수 있음)
-            // 지도 중심을 강제로 이동시키지 않음
-          } else if (gpsMode === 'compass') {
-            // 나침반 모드: 위치 중앙 고정 + 지도 회전
-            map.panTo(newLocation) // 위치를 중앙에 고정
-            if (heading !== null && heading !== undefined) {
-              map.setHeading(heading) // 지도를 디바이스 방향에 맞춰 회전
-            }
-          }
-        },
-        (error) => {
-          console.warn('위치 정보를 가져올 수 없습니다:', error)
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 60000
-        }
-      )
-
-      setLocationWatchId(watchId)
-    } else {
-      // GPS 비활성화 - 기존 위치 추적 중지 및 마커 제거
-      if (locationWatchId !== null) {
-        navigator.geolocation.clearWatch(locationWatchId)
-        setLocationWatchId(null)
-      }
-
-      if (userLocationMarker) {
-        userLocationMarker.setMap(null)
-        setUserLocationMarker(null)
-      }
-
-      if (gpsMode === 'off') {
-        setUserLocation(null)
-      }
-    }
-
-    // 컴포넌트 언마운트 시 위치 추적 정리
-    return () => {
-      if (locationWatchId !== null) {
-        navigator.geolocation.clearWatch(locationWatchId)
-      }
-      if (userLocationMarker) {
-        userLocationMarker.setMap(null)
-      }
-    }
-  }, [map, source, gpsMode, userLocationMarker, locationWatchId])
-
-  // 지도 드래그 시 GPS 모드 해제
-  useEffect(() => {
-    if (!map) return
-
-    const dragListener = map.addListener('drag', () => {
-      if (gpsMode !== 'off') {
-        setGpsMode('off')
-        map.setHeading(0) // 지도 회전 초기화
-      }
-    })
-
-    return () => {
-      if (dragListener) {
-        dragListener.remove()
-      }
-    }
-  }, [map, gpsMode])
-
-  // GPS 버튼 클릭 핸들러 - 3단계 모드 (off → location → compass → off)
-  const handleGpsButtonClick = () => {
-    switch (gpsMode) {
-      case 'off':
-        // 첫 번째 클릭: 현재 위치로 이동
-        setGpsMode('location')
-        if (userLocation && map) {
-          map.panTo(userLocation)
-          map.setZoom(16)
-        } else if ('geolocation' in navigator && map) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              const location = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude
-              }
-              map.panTo(location)
-              map.setZoom(16)
-            },
-            (error) => {
-              console.warn('위치 정보를 가져올 수 없습니다:', error)
-              alert('위치 정보를 가져올 수 없습니다. GPS를 활성화해주세요.')
-              setGpsMode('off')
-            },
-            {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 60000
-            }
-          )
-        }
-        break
-
-      case 'location':
-        // 두 번째 클릭: 나침반 모드 활성화
-        setGpsMode('compass')
-        if (userLocation && map) {
-          map.panTo(userLocation)
-          map.setZoom(16)
-          // 현재 방향이 있으면 지도 회전
-          if (currentHeading !== null && currentHeading !== undefined) {
-            map.setHeading(currentHeading)
-          }
-        }
-        break
-
-      case 'compass':
-        // 세 번째 클릭: 일반 모드로 복귀
-        setGpsMode('off')
-        if (map) {
-          map.setHeading(0) // 지도 회전 초기화 (북쪽)
-        }
-        break
-    }
-  }
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   
@@ -483,64 +313,6 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         className="rounded-lg"
       />
 
-      {/* GPS 버튼 - profile에서 온 경우에만 표시 */}
-      {source === 'profile' && (
-        <button
-          onClick={handleGpsButtonClick}
-          className={`absolute bottom-4 right-4 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all z-10 border ${
-            gpsMode === 'off'
-              ? 'bg-white border-gray-200 hover:bg-gray-50'
-              : gpsMode === 'location'
-              ? 'bg-blue-500 border-blue-600 text-white'
-              : 'bg-blue-600 border-blue-700 text-white animate-pulse'
-          }`}
-          title={
-            gpsMode === 'off'
-              ? '현재 위치로 이동'
-              : gpsMode === 'location'
-              ? '나침반 모드 활성화'
-              : '나침반 모드 (탭해서 해제)'
-          }
-        >
-          {gpsMode === 'compass' ? (
-            // 나침반 모드: 나침반 아이콘
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"
-              />
-            </svg>
-          ) : (
-            // 기본/위치 모드: 위치 아이콘
-            <svg
-              className={`w-6 h-6 ${gpsMode === 'off' ? 'text-blue-500' : 'text-white'}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-            </svg>
-          )}
-        </button>
-      )}
 
       {!isLoaded && (
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center rounded-lg">
