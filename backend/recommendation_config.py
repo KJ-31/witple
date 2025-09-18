@@ -56,9 +56,9 @@ class UnifiedRecommendationConfig:
     new_user_preference_weight: float = 1.0  # 100% - 우선순위 태그만 사용 (초강력)
     new_user_behavior_weight: float = 0.0    # 0% - 행동 데이터 없음
 
-    # 행동 데이터 있는 사용자: 95:5 비율 (선호도 최우선)
-    experienced_user_preference_weight: float = 0.95   # 95% - 우선순위 태그 (거의 절대적)
-    experienced_user_behavior_weight: float = 0.05     # 5% - 행동 데이터 (최소한 참고)
+    # 행동 데이터 있는 사용자: 70:30 비율 (행동 패턴 강화)
+    experienced_user_preference_weight: float = 0.7    # 70% - 우선순위 태그
+    experienced_user_behavior_weight: float = 0.3      # 30% - 행동 데이터 (대폭 강화)
 
     # 행동 데이터 임계값 (이 값 이하면 신규 사용자로 간주)
     behavior_data_threshold: int = 3  # 북마크, 좋아요, 클릭 총합

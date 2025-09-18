@@ -1594,16 +1594,27 @@ class UnifiedRecommendationEngine:
                     place_dict = dict(place)
                     popularity_normalized = min(place['popularity_score'] / popularity_normalizer, 1.0)
 
-                    # 🎯 우선순위 태그 내에서 선호도(70%) + 행동패턴(20%) + 인기도(10%) 가중치
-                    priority_weight = 0.7   # 우선순위 태그 기반 선호도
-                    behavior_weight = 0.2   # 북마크 행동 패턴
-                    popularity_weight = 0.1 # 일반적 인기도
+                    # 🎯 행동 데이터 유무에 따른 가중치 차별화
+                    if user_behavior_vector is not None:
+                        # 행동 데이터 있는 사용자: 개인화 중심 (인기도 제외)
+                        priority_weight = 0.7   # 우선순위 태그 기반 선호도
+                        behavior_weight = 0.3   # 북마크 행동 패턴 (강화)
+                        popularity_weight = 0.0 # 인기도 제외
+                    else:
+                        # 행동 데이터 없는 사용자: 인기도 참고
+                        priority_weight = 0.8   # 우선순위 태그 기반 선호도 (강화)
+                        behavior_weight = 0.0   # 행동 패턴 없음
+                        popularity_weight = 0.2 # 인기도 참고
 
                     final_score = (
                         preference_score * priority_weight +
                         behavior_score * behavior_weight +
                         popularity_normalized * popularity_weight
                     )
+
+                    # 상세 점수 로깅 (behavior_score 높은 장소만)
+                    if behavior_score > 0.1:
+                        logger.info(f"🎯 HIGH BEHAVIOR: {place['name']}: pref={preference_score:.3f}, behav={behavior_score:.4f}, pop={popularity_normalized:.3f} → final={final_score:.4f}")
 
                     place_dict['preference_score'] = preference_score
                     place_dict['behavior_score'] = behavior_score
