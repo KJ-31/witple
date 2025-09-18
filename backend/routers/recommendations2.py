@@ -239,15 +239,29 @@ async def get_main_explore_feed(
         limited_regions = target_regions  # 모든 지역 포함
         limited_categories = target_categories[:6]  # 상위 6개 카테고리 (요청사항 반영)
 
-        # 🚀 Redis 캐시 키 생성
-        cache_key = f"explore_feed:{user_id or 'anonymous'}:{':'.join(sorted(limited_regions))}:{':'.join(sorted(limited_categories))}"
-        
+        # 🔑 사용자 우선순위 태그 조회 (캐시 키 생성용)
+        user_priority_tag = "none"
+        if user_id:
+            try:
+                engine = await get_engine()
+                priority = await engine.get_user_priority_tag(user_id)
+                user_priority_tag = priority or "none"
+            except Exception as e:
+                logger.warning(f"Failed to get user priority for cache key: {e}")
+
+        # 🚀 Redis 캐시 키 생성 (우선순위 태그 포함) - v2
+        cache_key = f"explore_feed_v2:{user_id or 'anonymous'}:{user_priority_tag}:{':'.join(sorted(limited_regions))}:{':'.join(sorted(limited_categories))}"
+
+        logger.info(f"🔑 Cache key generated: {cache_key}")
+
         # 캐시에서 조회 시도
         from cache_utils import cache
         cached_result = cache.get(cache_key)
         if cached_result is not None:
             logger.info(f"🎯 Cache hit for explore feed: {cache_key}")
             return cached_result
+        else:
+            logger.info(f"🔍 Cache miss for explore feed: {cache_key}")
 
         # 병렬로 제한된 섹션 데이터 조회
         explore_data = await fetch_explore_data_parallel(
@@ -277,7 +291,7 @@ async def get_main_explore_feed(
 
         # 🚀 Redis 캐시에 저장 (10분 TTL)
         cache.set(cache_key, result, expire=600)
-        logger.info(f"💾 Cached explore feed: {cache_key}")
+        logger.info(f"💾 Cached explore feed with priority tag '{user_priority_tag}': {cache_key}")
 
         return result
 

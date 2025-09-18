@@ -1424,26 +1424,37 @@ class UnifiedRecommendationEngine:
         limit: int = 20
     ) -> List[Dict]:
         """
-        신규 가입자를 위한 선호도 기반 추천
-        user_preferences와 user_preference_tags 테이블을 활용한 여행 선호도 기반 추천
+        우선순위 태그 기반 추천 (behavior_vector 통합)
+        user_preferences, user_preference_tags 테이블과 user_behavior_vectors의 behavior_vector를 활용
         """
         try:
             # 1. 사용자 선호도 정보 조회
+            logger.info(f"🔍 Getting user preferences for user {user_id}")
             user_preferences = await self._get_user_preferences(user_id)
             if not user_preferences:
-                logger.info(f"No preferences found for user {user_id}")
+                logger.info(f"❌ No preferences found for user {user_id}")
                 return []
 
-            # 2. 선호도 기반 장소 필터링 및 점수 계산
-            recommendations = await self._calculate_preference_scores(
-                user_preferences, region, category, limit
+            logger.info(f"✅ Found user preferences for user {user_id}: {list(user_preferences.keys())}")
+
+            # 2. 사용자 행동 벡터 조회 (북마크 패턴 분석용)
+            logger.info(f"🧠 Getting user behavior vector for user {user_id}")
+            user_behavior_vector = await self._get_user_behavior_vector_cached(user_id)
+            if user_behavior_vector is not None:
+                logger.info(f"✅ Found behavior vector for user {user_id}: shape {user_behavior_vector.shape}")
+            else:
+                logger.info(f"❌ No behavior vector found for user {user_id}")
+
+            # 3. 우선순위 태그 내에서 behavior_vector 통합된 점수 계산
+            recommendations = await self._calculate_priority_enhanced_scores(
+                user_preferences, user_behavior_vector, region, category, limit
             )
 
-            logger.info(f"✅ Generated {len(recommendations)} preference-based recommendations for user {user_id}")
+            logger.info(f"✅ Generated {len(recommendations)} priority-enhanced recommendations for user {user_id}")
             return recommendations
 
         except Exception as e:
-            logger.error(f"❌ Preference-based recommendation failed for user {user_id}: {e}")
+            logger.error(f"❌ Priority-enhanced recommendation failed for user {user_id}: {e}")
             return []
 
     async def _get_user_preferences(self, user_id: str) -> Dict[str, Any]:
@@ -1496,6 +1507,139 @@ class UnifiedRecommendationEngine:
         except Exception as e:
             logger.error(f"❌ Failed to get user preferences for {user_id}: {e}")
             return {}
+
+    async def _calculate_priority_enhanced_scores(
+        self,
+        user_preferences: Dict[str, Any],
+        user_behavior_vector: Optional[np.ndarray],
+        region: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict]:
+        """
+        🎯 우선순위 태그 내에서 behavior_vector를 활용한 향상된 점수 계산
+        1. 우선순위 태그로 카테고리 필터링
+        2. 해당 카테고리 내에서 behavior_vector로 개인화
+        3. 선호도 태그와 행동 패턴을 종합한 점수 산출
+        """
+        try:
+            priority = user_preferences.get('priority')
+
+            # 우선순위 태그가 있으면 해당 카테고리로 필터링
+            target_category = category
+            if priority:
+                # 체험 우선순위는 nature/humanities/leisure_sports 중에서 선택
+                if priority == 'experience':
+                    if category not in ['nature', 'humanities', 'leisure_sports']:
+                        target_category = 'nature'  # 기본값
+                else:
+                    # 다른 우선순위는 해당 카테고리로 고정
+                    target_category = priority
+
+            logger.info(f"🎯 Priority filtering: {priority} → target_category: {target_category}")
+
+            # 우선순위 카테고리 내에서 장소 후보군 조회 (벡터 포함)
+            places_query = """
+                SELECT
+                    place_id, table_name, region, name,
+                    latitude, longitude, overview, image_urls, bookmark_cnt,
+                    vector as text_vector,
+                    COALESCE(bookmark_cnt, 0) as popularity_score
+                FROM place_recommendations
+                WHERE name IS NOT NULL
+                    AND ($1::text IS NULL OR region = $1)
+                    AND ($2::text IS NULL OR table_name = $2)
+                ORDER BY bookmark_cnt DESC
+                LIMIT $3
+            """
+
+            async with self.db_manager.get_connection() as conn:
+                places_data = await conn.fetch(
+                    places_query,
+                    region,
+                    target_category,
+                    CONFIG.candidate_limit
+                )
+
+            if not places_data:
+                logger.warning(f"No places found for priority: {priority}, region: {region}, category: {target_category}")
+                return []
+
+            # 우선순위 태그 내에서 behavior_vector 기반 점수 계산
+            scored_places = []
+            popularity_normalizer = CONFIG.preference_weights['popularity_normalizer']
+
+            for place in places_data:
+                # 1. 기본 선호도 점수 (우선순위 태그 매칭)
+                preference_score = self._calculate_place_preference_score(place, user_preferences)
+
+                # 2. behavior_vector 기반 개인화 점수 (우선순위 카테고리 내에서)
+                behavior_score = 0.0
+                if user_behavior_vector is not None and place.get('text_vector'):
+                    place_text_vector = validate_vector_data(place['text_vector'])
+                    if place_text_vector is not None:
+                        similarity = safe_cosine_similarity(user_behavior_vector, place_text_vector)
+                        behavior_score = float(similarity[0]) if len(similarity) > 0 else 0.0
+                        logger.info(f"🧠 {place['name']}: behavior_score={behavior_score:.4f}")
+                    else:
+                        logger.info(f"⚠️ {place['name']}: invalid text_vector")
+                else:
+                    if user_behavior_vector is None:
+                        logger.info(f"❌ {place['name']}: no behavior_vector for user")
+                    else:
+                        logger.info(f"❌ {place['name']}: no text_vector for place")
+
+                # 3. 우선순위 태그 내 종합 점수 계산
+                if preference_score > 0 or behavior_score > 0:
+                    place_dict = dict(place)
+                    popularity_normalized = min(place['popularity_score'] / popularity_normalizer, 1.0)
+
+                    # 🎯 행동 데이터 유무에 따른 가중치 차별화
+                    if user_behavior_vector is not None:
+                        # 행동 데이터 있는 사용자: 개인화 중심 (인기도 제외)
+                        priority_weight = 0.7   # 우선순위 태그 기반 선호도
+                        behavior_weight = 0.3   # 북마크 행동 패턴 (강화)
+                        popularity_weight = 0.0 # 인기도 제외
+                    else:
+                        # 행동 데이터 없는 사용자: 인기도 참고
+                        priority_weight = 0.8   # 우선순위 태그 기반 선호도 (강화)
+                        behavior_weight = 0.0   # 행동 패턴 없음
+                        popularity_weight = 0.2 # 인기도 참고
+
+                    final_score = (
+                        preference_score * priority_weight +
+                        behavior_score * behavior_weight +
+                        popularity_normalized * popularity_weight
+                    )
+
+                    # 상세 점수 로깅 (behavior_score 높은 장소만)
+                    if behavior_score > 0.1:
+                        logger.info(f"🎯 HIGH BEHAVIOR: {place['name']}: pref={preference_score:.3f}, behav={behavior_score:.4f}, pop={popularity_normalized:.3f} → final={final_score:.4f}")
+
+                    place_dict['preference_score'] = preference_score
+                    place_dict['behavior_score'] = behavior_score
+                    place_dict['final_score'] = final_score
+                    place_dict['source'] = 'priority_enhanced'
+                    scored_places.append(place_dict)
+
+            # 점수 기준 정렬
+            scored_places.sort(key=lambda x: x['final_score'], reverse=True)
+
+            # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
+            for place in scored_places[:limit]:
+                if 'text_vector' in place and isinstance(place['text_vector'], np.ndarray):
+                    place['text_vector'] = place['text_vector'].tolist()
+                if 'image_vector' in place and isinstance(place['image_vector'], np.ndarray):
+                    place['image_vector'] = place['image_vector'].tolist()
+
+            behavior_used = user_behavior_vector is not None
+            logger.info(f"🚀 Priority-enhanced scoring completed: {len(scored_places[:limit])} results, behavior_vector: {'✅' if behavior_used else '❌'}")
+
+            return scored_places[:limit]
+
+        except Exception as e:
+            logger.error(f"❌ Failed to calculate priority-enhanced scores: {e}")
+            return []
 
     async def get_user_priority_tag(self, user_id: str) -> Optional[str]:
         """사용자의 여행 우선순위 태그 조회"""
@@ -2334,15 +2478,26 @@ class UnifiedRecommendationEngine:
         """
         try:
             # 1. 사용자 선호도 정보 조회
+            logger.info(f"🔍 [Regional] Getting user preferences for user {user_id}")
             user_preferences = await self._get_user_preferences(user_id)
             if not user_preferences:
-                logger.info(f"No preferences found for user {user_id}")
+                logger.info(f"❌ [Regional] No preferences found for user {user_id}")
                 return []
 
             user_priority = user_preferences.get('priority')
             if not user_priority:
-                logger.info(f"No priority found for user {user_id}")
+                logger.info(f"❌ [Regional] No priority found for user {user_id}")
                 return []
+
+            logger.info(f"✅ [Regional] Found user preferences for user {user_id}: priority={user_priority}")
+
+            # 2. 사용자 행동 벡터 조회 (북마크 패턴 분석용)
+            logger.info(f"🧠 [Regional] Getting user behavior vector for user {user_id}")
+            user_behavior_vector = await self._get_user_behavior_vector_cached(user_id)
+            if user_behavior_vector is not None:
+                logger.info(f"✅ [Regional] Found behavior vector for user {user_id}: shape {user_behavior_vector.shape}")
+            else:
+                logger.info(f"❌ [Regional] No behavior vector found for user {user_id}")
 
             # 2. 각 지역별로 사용자 선호 벡터 기반 추천 수량 계산
             regional_scores = await self._calculate_regional_recommendation_scores(user_preferences)
@@ -2360,9 +2515,10 @@ class UnifiedRecommendationEngine:
                 if len(final_recommendations) >= limit:
                     break
 
-                # 해당 지역의 추천 생성 (우선순위 카테고리 최상단)
-                region_recommendations = await self._get_priority_ordered_recommendations(
-                    user_preferences, region, user_priority, items_per_region
+                # 해당 지역의 추천 생성 (behavior_vector 통합된 우선순위 기반)
+                logger.info(f"🎯 [Regional] Generating recommendations for region {region} with behavior vector integration")
+                region_recommendations = await self._calculate_priority_enhanced_scores(
+                    user_preferences, user_behavior_vector, region, None, items_per_region
                 )
 
                 if region_recommendations:

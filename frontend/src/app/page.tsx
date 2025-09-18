@@ -377,7 +377,7 @@ export default function Home() {
             // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
             await loadRecommendedCities(loadedUserInfo, selectedRegion)
 
-            // 모든 지역 모든 카테고리 섹션 로드 (모든 로그인 사용자)
+            // 모든 지역 모든 카테고리 섹션 로드 (로그인 사용자용 개인화 적용)
             await loadAllRegionsAllCategories()
 
             // console.log('로그인 사용자 초기화 완료')
@@ -997,6 +997,15 @@ function UnifiedRecommendationSection({
     return section.attractions || []
   })
 
+  // MainCard에서 사용된 첫 번째 attraction 찾기
+  const mainCardAttraction = citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
+                            citySections[0]?.attractions?.[0]
+
+  // MainCard와 중복되지 않는 attractions 필터링
+  const filteredAttractions = mainCardAttraction
+    ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
+    : allAttractions
+
   return (
     <section aria-label={`${userName}님을 위한 추천`} className="w-full">
       {/* 제목 */}
@@ -1019,7 +1028,7 @@ function UnifiedRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
-          {allAttractions.map((attraction) => (
+          {filteredAttractions.map((attraction) => (
             <AttractionCard
               key={attraction.id}
               attraction={attraction}
@@ -1051,6 +1060,15 @@ function PopularRecommendationSection({
     return section.attractions || []
   })
 
+  // MainCard에서 사용된 첫 번째 attraction 찾기
+  const mainCardAttraction = citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
+                            citySections[0]?.attractions?.[0]
+
+  // MainCard와 중복되지 않는 attractions 필터링
+  const filteredAttractions = mainCardAttraction
+    ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
+    : allAttractions
+
   return (
     <section aria-label="인기 추천" className="w-full">
       {/* 제목 */}
@@ -1073,7 +1091,7 @@ function PopularRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
-          {allAttractions.map((attraction) => (
+          {filteredAttractions.map((attraction) => (
             <AttractionCard
               key={attraction.id}
               attraction={attraction}
