@@ -6,6 +6,8 @@ import json
 import asyncio
 import sys
 import os
+import hashlib
+import re
 
 # LLM_RAG.py를 임포트하기 위해 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -56,6 +58,56 @@ except Exception as e:
 
 router = APIRouter()
 
+# 확장된 캐시 메서드 구현
+def _generate_cache_key(query: str, cache_type: str = "response") -> str:
+    """쿼리 기반 캐시 키 생성"""
+    # 쿼리 정규화 (공백, 대소문자, 특수문자 처리)
+    normalized_query = re.sub(r'\s+', ' ', query.strip().lower())
+    normalized_query = re.sub(r'[^\w\s가-힣]', '', normalized_query)
+
+    # 해시 생성
+    query_hash = hashlib.md5(normalized_query.encode('utf-8')).hexdigest()[:12]
+    return f"llm:{cache_type}:{query_hash}"
+
+def cache_full_response(cache_instance, query: str, response_data: dict, expire: int = 3600) -> bool:
+    """전체 ChatResponse 데이터 캐싱"""
+    if not cache_instance or not cache_instance.enabled or not response_data:
+        return False
+
+    try:
+        cache_key = _generate_cache_key(query, "full")
+        data_json = json.dumps(response_data, ensure_ascii=False, default=str)
+        success = cache_instance.redis.set(cache_key, data_json, ex=expire)
+
+        if success:
+            print(f"💾 전체 응답 캐시 저장: {cache_key}")
+
+        return success
+
+    except Exception as e:
+        print(f"⚠️ 전체 캐시 저장 오류: {e}")
+        return False
+
+def get_cached_full_response(cache_instance, query: str) -> Optional[dict]:
+    """전체 ChatResponse 데이터 조회"""
+    if not cache_instance or not cache_instance.enabled:
+        return None
+
+    try:
+        cache_key = _generate_cache_key(query, "full")
+        cached_data = cache_instance.redis.get(cache_key)
+
+        if cached_data:
+            print(f"🎯 전체 캐시 히트: {cache_key}")
+            return json.loads(cached_data)
+        else:
+            print(f"❌ 전체 캐시 미스: {cache_key}")
+            return None
+
+    except Exception as e:
+        print(f"⚠️ 전체 캐시 조회 오류: {e}")
+        return None
+
 def process_response_for_frontend(response: str) -> tuple[str, List[str]]:
     """프론트엔드에서 쉽게 처리할 수 있도록 응답을 여러 형태로 변환"""
     
@@ -84,181 +136,7 @@ class ChatResponse(BaseModel):
     response_lines: Optional[List[str]] = None  # 줄별 배열 형태 응답
     redirect_url: Optional[str] = None  # 리다이렉트 URL
     places: Optional[List[dict]] = None  # 지도 표시용 장소 정보
-
-# @router.post("/chat/stream")  # 스트리밍 기능 비활성화
-async def chat_with_llm_stream(chat_message: ChatMessage):
-    """
-    스트리밍 방식으로 LLM 응답을 실시간 전송합니다.
-    Server-Sent Events (SSE) 형식으로 응답을 청크 단위로 전송합니다.
-    """
-    async def generate_response():
-        try:
-            if get_travel_recommendation is None and get_travel_recommendation_langgraph is None:
-                # 기본 응답을 스트림으로 전송
-                default_message = f"죄송합니다. 현재 AI 여행 추천 시스템을 준비 중입니다. 📝\n\n'{chat_message.message}'에 대한 답변을 위해 조금만 기다려주세요!"
-
-                # 문자 단위로 스트리밍
-                for char in default_message:
-                    await asyncio.sleep(0.02)  # 타이핑 효과
-                    yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
-
-                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
-                return
-
-            print(f"🔍 Processing travel query (streaming): {chat_message.message}")
-
-            # 🚀 스마트 캐싱: 빈번한 질문은 캐시된 응답을 스트리밍으로 전송
-            if llm_cache and llm_cache.enabled:
-                cached_response = llm_cache.get_cached_response(chat_message.message)
-                if cached_response:
-                    print("⚡ 캐시된 응답을 스트리밍으로 전송!")
-
-                    # 캐시 히트 알림
-                    yield f"data: {json.dumps({'type': 'status', 'content': '⚡ 빠른 응답을 준비했습니다!', 'done': False}, ensure_ascii=False)}\n\n"
-                    await asyncio.sleep(0.1)
-
-                    # 캐시된 응답을 빠른 속도로 스트리밍
-                    sentences = cached_response.split('.')
-                    for i, sentence in enumerate(sentences):
-                        if sentence.strip():
-                            sentence_with_dot = sentence.strip() + ('.' if i < len(sentences) - 1 else '')
-
-                            # 캐시된 응답은 더 빠르게 전송
-                            for char in sentence_with_dot:
-                                await asyncio.sleep(0.01)  # 더 빠른 타이핑 (0.015 → 0.01)
-                                yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
-
-                            await asyncio.sleep(0.05)  # 문장 간 짧은 휴지
-
-                    # 완료 표시
-                    yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True, 'cached': True}, ensure_ascii=False)}\n\n"
-                    return
-
-            # LangGraph 우선 사용 - 실제 스트리밍 구현
-            if LANGGRAPH_AVAILABLE and get_travel_recommendation_langgraph:
-                print("🚀 Using LangGraph workflow for real streaming response")
-
-                # 진행 상황 메시지들
-                status_messages = [
-                    "🔍 여행지 정보를 검색하고 있습니다...",
-                    "📋 최적의 여행 코스를 분석 중입니다...",
-                    "✨ AI가 맞춤 여행 계획을 생성 중입니다..."
-                ]
-
-                for msg in status_messages:
-                    yield f"data: {json.dumps({'type': 'status', 'content': msg, 'done': False}, ensure_ascii=False)}\n\n"
-                    await asyncio.sleep(0.3)
-
-                # 🚀 실제 LangGraph 스트리밍 생성
-                if get_travel_recommendation_langgraph_stream:
-                    print("🔄 LangGraph 스트리밍 함수 사용")
-
-                    # 스트리밍 응답 생성
-                    full_response = ""
-                    travel_plan = {}
-                    action_required = None
-                    tool_results = {}
-
-                    async for chunk_data in get_travel_recommendation_langgraph_stream(chat_message.message):
-                        if chunk_data['type'] == 'content':
-                            # 실시간 텍스트 스트리밍
-                            content = chunk_data['content']
-                            full_response += content
-
-                            # 즉시 스트리밍 (타이핑 효과 제거)
-                            yield f"data: {json.dumps({'type': 'content', 'content': content, 'done': False}, ensure_ascii=False)}\n\n"
-
-                        elif chunk_data['type'] == 'status':
-                            # 상태 업데이트
-                            yield f"data: {json.dumps({'type': 'status', 'content': chunk_data['content'], 'done': False}, ensure_ascii=False)}\n\n"
-
-                        elif chunk_data['type'] == 'metadata':
-                            # 메타데이터 수집
-                            travel_plan = chunk_data.get('travel_plan', {})
-                            action_required = chunk_data.get('action_required')
-                            tool_results = chunk_data.get('tool_results', {})
-
-                    # 응답 캐싱
-                    if llm_cache and llm_cache.enabled and full_response:
-                        llm_cache.cache_response(chat_message.message, full_response, expire=7200)
-                        print("💾 스트리밍 응답 캐시 저장 완료")
-
-                    # 완료 및 추가 데이터 전송
-                    final_data = {
-                        'type': 'done',
-                        'content': '',
-                        'done': True,
-                        'travel_plan': travel_plan,
-                        'action_required': action_required,
-                        'redirect_url': tool_results.get('redirect_url'),
-                        'places': tool_results.get('places'),
-                        'cached': False
-                    }
-                    yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
-
-                else:
-                    # 스트리밍 함수가 없으면 기존 방식으로 폴백
-                    print("⚠️ 스트리밍 함수 없음, 기존 방식으로 처리")
-
-                    result = get_travel_recommendation_langgraph(chat_message.message, conversation_history=[], session_id="current")
-                    response_text = result.get('response', '응답을 생성할 수 없습니다.')
-
-                    # 응답을 빠르게 스트리밍
-                    for char in response_text:
-                        await asyncio.sleep(0.01)
-                        yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
-
-                    # 메타데이터 전송
-                    tool_results = result.get('raw_state', {}).get('tool_results', {})
-                    final_data = {
-                        'type': 'done',
-                        'content': '',
-                        'done': True,
-                        'travel_plan': result.get('travel_plan', {}),
-                        'action_required': result.get('action_required'),
-                        'redirect_url': tool_results.get('redirect_url'),
-                        'places': tool_results.get('places'),
-                        'cached': False
-                    }
-                    yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
-
-            else:
-                # 기존 RAG 시스템 스트리밍
-                print("⚠️ LangGraph 사용 불가능, 기존 RAG 시스템으로 스트리밍")
-
-                yield f"data: {json.dumps({'type': 'status', 'content': '🔍 여행 정보를 검색 중입니다...', 'done': False}, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.3)
-
-                # 커스텀 스트림 함수 호출
-                response_generator = get_travel_recommendation_stream_async(chat_message.message)
-
-                async for chunk in response_generator:
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk, 'done': False}, ensure_ascii=False)}\n\n"
-
-                yield f"data: {json.dumps({'type': 'done', 'content': '', 'done': True}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            print(f"❌ Streaming chat error: {e}")
-            error_message = "죄송합니다. 응답 생성 중 오류가 발생했습니다."
-
-            for char in error_message:
-                await asyncio.sleep(0.02)
-                yield f"data: {json.dumps({'type': 'content', 'content': char, 'done': False}, ensure_ascii=False)}\n\n"
-
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e), 'done': True}, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(
-        generate_response(),
-        media_type="text/plain; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Nginx 버퍼링 비활성화
-            "Content-Type": "text/event-stream",  # SSE 헤더 추가
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
-    )
+    
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_llm(chat_message: ChatMessage):
@@ -280,7 +158,54 @@ async def chat_with_llm(chat_message: ChatMessage):
             )
         
         print(f"🔍 Processing travel query: {chat_message.message}")
-        
+
+        # 🚀 Redis 캐시 확인 (우선순위 1) - 확정 키워드 제외
+        confirmation_keywords = ["확정", "확정해줘", "확정할게", "이 일정으로 확정", "네 확정", "yes", "ok"]
+        is_confirmation = any(keyword in chat_message.message.lower() for keyword in confirmation_keywords)
+
+        if llm_cache and llm_cache.enabled and not is_confirmation:
+            # 확장된 캐시 데이터 조회
+            cached_data = get_cached_full_response(llm_cache, chat_message.message)
+            if cached_data:
+                print("⚡ 캐시된 전체 응답 반환!")
+
+                # 캐시된 데이터에서 여행 상태 복원
+                if cached_data.get('travel_plan') and current_travel_state is not None:
+                    import time
+                    current_travel_state.update({
+                        "last_query": chat_message.message,
+                        "travel_plan": cached_data['travel_plan'],
+                        "places": cached_data.get('places', []),
+                        "context": cached_data.get('response', ''),
+                        "timestamp": time.time()
+                    })
+                    print("📋 캐시된 응답으로 여행 상태 업데이트 완료")
+
+                return ChatResponse(
+                    response=cached_data.get('response', ''),
+                    success=True,
+                    travel_plan=cached_data.get('travel_plan'),
+                    action_required=cached_data.get('action_required'),
+                    formatted_response=cached_data.get('formatted_response'),
+                    response_html=cached_data.get('response_html', ''),
+                    response_lines=cached_data.get('response_lines', []),
+                    redirect_url=cached_data.get('redirect_url'),
+                    places=cached_data.get('places')
+                )
+
+            # 기존 단순 텍스트 캐시 폴백
+            cached_response = llm_cache.get_cached_response(chat_message.message)
+            if cached_response:
+                print("⚡ 캐시된 기본 응답 반환!")
+                response_html, response_lines = process_response_for_frontend(cached_response)
+
+                return ChatResponse(
+                    response=cached_response,
+                    success=True,
+                    response_html=response_html,
+                    response_lines=response_lines
+                )
+
         # LangGraph 사용 가능한 경우 우선 사용
         if LANGGRAPH_AVAILABLE and get_travel_recommendation_langgraph:
             print("🚀 Using LangGraph workflow for enhanced travel recommendation")
@@ -290,15 +215,36 @@ async def chat_with_llm(chat_message: ChatMessage):
             session_id = "demo_session"
             
             result = get_travel_recommendation_langgraph(chat_message.message, session_id=session_id)
-            
+
             print(f"✅ LangGraph result: {result.get('response', '')[:100]}...")
-            
+
             response_text = result.get('response', '응답을 생성할 수 없습니다.')
             response_html, response_lines = process_response_for_frontend(response_text)
-            
+
             # tool_results에서 redirect_url과 places 정보 추출
             tool_results = result.get('raw_state', {}).get('tool_results', {})
-            
+
+            # 💾 응답 캐싱 (LangGraph 결과 - 확장된 데이터)
+            if llm_cache and llm_cache.enabled and response_text and result.get('success', True):
+                # 전체 ChatResponse 데이터 구성
+                full_response_data = {
+                    'response': response_text,
+                    'travel_plan': result.get('travel_plan', {}),
+                    'action_required': result.get('action_required'),
+                    'formatted_response': result.get('raw_state', {}).get('formatted_ui_response'),
+                    'response_html': response_html,
+                    'response_lines': response_lines,
+                    'redirect_url': tool_results.get('redirect_url'),
+                    'places': tool_results.get('places')
+                }
+
+                # 확장된 캐시 저장
+                cache_full_response(llm_cache, chat_message.message, full_response_data, expire=3600)  # 1시간
+
+                # 기존 단순 텍스트 캐시도 호환성을 위해 저장
+                llm_cache.cache_response(chat_message.message, response_text, expire=3600)  # 1시간
+                print("💾 LangGraph 확장 응답 캐시 저장 완료")
+
             return ChatResponse(
                 response=response_text,
                 success=result.get('success', True),
@@ -321,9 +267,15 @@ async def chat_with_llm(chat_message: ChatMessage):
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(get_travel_recommendation, chat_message.message, False),
-                    timeout=10.0  # 10초 타임아웃
+                    timeout=60.0  # 60초 타임아웃 (초기 로딩 고려)
                 )
                 print(f"✅ Got fast RAG response: {response[:100]}..." if len(response) > 100 else f"✅ Got response: {response}")
+
+                # 💾 응답 캐싱 (기존 RAG 결과)
+                if llm_cache and llm_cache.enabled and response:
+                    llm_cache.cache_response(chat_message.message, response, expire=3600)  # 1시간
+                    print("💾 RAG 응답 캐시 저장 완료")
+
             except asyncio.TimeoutError:
                 response = "⏰ 요청 처리 시간이 초과되었습니다. 더 간단한 질문으로 다시 시도해주세요."
                 print("❌ RAG response timeout")
@@ -506,7 +458,7 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
 📋 **확정 정보:**
 • 일정 수: {len(plan_data.itinerary)}일
 • {places_summary}
-• 신뢰도: {plan_data.confidence_score:.2f if plan_data.confidence_score else 'N/A'}
+• 신뢰도: {f"{plan_data.confidence_score:.2f}" if plan_data.confidence_score else "N/A"}
 
 ✈️ 여행 계획 페이지로 이동하여 세부 조정을 진행하세요!
         """.strip()

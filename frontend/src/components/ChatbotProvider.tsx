@@ -134,11 +134,23 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
 
     setChatMessages(prev => [...prev, userMessage])
 
+    // 다양한 로딩 메시지들
+    const loadingMessages = [
+      '답변을 생성하고 있습니다...',
+      '여행 정보를 검색하고 있습니다...',
+      'AI가 최적의 여행 계획을 준비 중입니다...',
+      '맞춤형 추천을 생성하고 있습니다...',
+      '최신 여행 정보를 수집하고 있습니다...'
+    ]
+
+    // 랜덤한 로딩 메시지 선택
+    const randomLoadingMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)]
+
     // 로딩 메시지 추가
     const loadingMessage: ChatMessage = {
       id: Date.now() + 1,
       type: 'bot',
-      message: '답변을 생성하고 있습니다...',
+      message: randomLoadingMessage,
       timestamp: new Date()
     }
     setChatMessages(prev => [...prev, loadingMessage])
