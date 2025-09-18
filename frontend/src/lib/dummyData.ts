@@ -763,9 +763,10 @@ export const fetchAllRegionsAllCategories = async (
       'accept': 'application/json',
     }
 
-    // 🔑 JWT 토큰이 있으면 Authorization 헤더 추가 (우선순위 태그 필터링을 위해 필요)
-    if (session && (session as any).backendToken) {
-      headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+    // 🔑 JWT 토큰 안정적 조회 (우선순위 태그 필터링을 위해 필요)
+    const token = await getAuthToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
       console.log('🔐 JWT 토큰으로 개별 섹션 API 호출 (우선순위 태그 필터링 적용)')
     } else {
       console.log('🔓 비로그인 상태로 개별 섹션 API 호출 (일반 추천)')

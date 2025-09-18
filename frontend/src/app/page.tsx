@@ -377,7 +377,7 @@ export default function Home() {
             // 사용자 정보 로드 후에 추천 데이터 로드 (병렬 처리 대신 순차 처리로 안정성 확보)
             await loadRecommendedCities(loadedUserInfo, selectedRegion)
 
-            // 모든 지역 모든 카테고리 섹션 로드 (모든 로그인 사용자)
+            // 모든 지역 모든 카테고리 섹션 로드 (로그인 사용자용 개인화 적용)
             await loadAllRegionsAllCategories()
 
             // console.log('로그인 사용자 초기화 완료')
