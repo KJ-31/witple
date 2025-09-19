@@ -9,6 +9,19 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import json
 import time
+import re
+# Faiss 선택적 임포트 (Docker 환경 호환성)
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
+    faiss = None
+    print("⚠️ Faiss not available - ANN features will be disabled")
+
+import pickle
+import os
+from threading import Lock
 
 # 통합 설정 파일 사용 (backend 환경 대응)
 try:
@@ -55,9 +68,38 @@ logger = logging.getLogger(__name__)
 # 🔧 유틸리티 함수들
 # ============================================================================
 
-def safe_cosine_similarity(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-    """안전한 코사인 유사도 계산 (성능 최적화 버전)"""
+def safe_cosine_similarity(X: np.ndarray, Y: np.ndarray, use_ann: bool = False, faiss_manager=None) -> np.ndarray:
+    """안전한 코사인 유사도 계산 (ANN 지원 버전)"""
     try:
+        # ANN 사용 가능하고 요청된 경우 (안전하게 검사)
+        if (use_ann and
+            faiss_manager is not None and
+            hasattr(faiss_manager, 'index') and
+            faiss_manager.index is not None and
+            hasattr(faiss_manager, 'search')):
+            try:
+                # Y의 길이 확인
+                target_length = len(Y) if hasattr(Y, '__len__') else Y.shape[0] if hasattr(Y, 'shape') else 100
+                search_k = min(target_length, 100)
+
+                # ANN 검색 수행 (X는 쿼리 벡터)
+                place_ids, scores = faiss_manager.search(X, k=search_k)
+
+                # 결과를 기존 형태로 변환
+                similarity_dict = {place_id: score for place_id, score in zip(place_ids, scores)}
+
+                # Y의 길이에 맞춰 점수 배열 생성
+                if len(scores) >= target_length:
+                    return np.array(scores[:target_length])
+                else:
+                    # 부족한 경우 0.0으로 패딩
+                    padded_scores = scores + [0.0] * (target_length - len(scores))
+                    return np.array(padded_scores)
+
+            except Exception as e:
+                logger.warning(f"⚠️ ANN search failed, falling back to cosine similarity: {e}")
+
+        # 기존 코사인 유사도 계산 (Fallback)
         # None 값 검증
         if X is None or Y is None:
             return np.array([0.0])
@@ -166,6 +208,50 @@ def calculate_engagement_score(place_data: Dict[str, int]) -> float:
         return 0.0
 
 
+def safe_json_dumps(data: Any, **kwargs) -> str:
+    """UTF-8 안전 JSON 직렬화"""
+    try:
+        # 기본 설정
+        default_kwargs = {
+            'ensure_ascii': False,
+            'separators': (',', ':'),
+            'default': str
+        }
+        default_kwargs.update(kwargs)
+
+        # 데이터 정리 - 잘못된 문자 제거
+        cleaned_data = _clean_json_data(data)
+
+        return json.dumps(cleaned_data, **default_kwargs)
+    except (UnicodeDecodeError, UnicodeEncodeError) as e:
+        logger.warning(f"⚠️ UTF-8 encoding issue, falling back to ASCII: {e}")
+        # ASCII 모드로 폴백
+        return json.dumps(data, ensure_ascii=True, default=str, **kwargs)
+    except Exception as e:
+        logger.error(f"❌ JSON serialization failed: {e}")
+        return "{}"
+
+
+def _clean_json_data(data: Any) -> Any:
+    """JSON 데이터에서 문제가 될 수 있는 문자들을 정리"""
+    if isinstance(data, str):
+        # 잘못된 UTF-8 문자나 surrogate 문자 제거
+        try:
+            # 유효하지 않은 UTF-8 문자 제거
+            cleaned = data.encode('utf-8', errors='ignore').decode('utf-8')
+            # 제어 문자 제거 (탭, 줄바꿈은 유지)
+            cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', cleaned)
+            return cleaned
+        except Exception:
+            return str(data)
+    elif isinstance(data, dict):
+        return {k: _clean_json_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_clean_json_data(item) for item in data]
+    else:
+        return data
+
+
 def validate_vector_data(vector_data: Any) -> Optional[np.ndarray]:
     """벡터 데이터 검증 및 변환 (PostgreSQL vector 타입 및 ARRAY 타입 지원)"""
     try:
@@ -213,6 +299,176 @@ def validate_vector_data(vector_data: Any) -> Optional[np.ndarray]:
     except Exception as e:
         logger.error(f"❌ Vector validation failed: {e}")
         return None
+
+
+# ============================================================================
+# 🔍 ANN (Approximate Nearest Neighbor) 인덱스 관리 클래스
+# ============================================================================
+
+class FaissIndexManager:
+    """Faiss 기반 ANN 인덱스 관리 클래스 (선택적 사용)"""
+
+    def __init__(self, vector_dim: int = 768, index_type: str = "IVF"):
+        self.vector_dim = vector_dim
+        self.index_type = index_type
+        self.index = None
+        self.place_ids = []  # 인덱스의 벡터와 매핑되는 place_id 목록
+        self.is_trained = False
+        self.lock = Lock()
+        self.index_file_path = "faiss_index.bin"
+        self.metadata_file_path = "faiss_metadata.pkl"
+        self.available = FAISS_AVAILABLE
+
+    def _create_index(self, n_vectors: int) -> faiss.Index:
+        """벡터 개수에 따른 최적 인덱스 생성"""
+        if n_vectors < 1000:
+            # 작은 데이터셋: Flat (정확)
+            return faiss.IndexFlatIP(self.vector_dim)
+        elif n_vectors < 10000:
+            # 중간 데이터셋: IVF
+            nlist = min(int(np.sqrt(n_vectors)), 100)
+            quantizer = faiss.IndexFlatIP(self.vector_dim)
+            return faiss.IndexIVFFlat(quantizer, self.vector_dim, nlist)
+        else:
+            # 대용량 데이터셋: IVF + PQ
+            nlist = min(int(np.sqrt(n_vectors)), 1000)
+            quantizer = faiss.IndexFlatIP(self.vector_dim)
+            m = 64  # PQ segments
+            return faiss.IndexIVFPQ(quantizer, self.vector_dim, nlist, m, 8)
+
+    def build_index(self, vectors: np.ndarray, place_ids: List[int]):
+        """벡터 데이터로 인덱스 구축"""
+        if not self.available:
+            logger.warning("⚠️ Faiss not available, skipping index build")
+            return
+
+        with self.lock:
+            try:
+                n_vectors = len(vectors)
+                logger.info(f"🔨 Building Faiss index for {n_vectors} vectors")
+
+                # 벡터 정규화 (내적 -> 코사인 유사도)
+                faiss.normalize_L2(vectors)
+
+                # 인덱스 생성
+                self.index = self._create_index(n_vectors)
+                self.place_ids = place_ids.copy()
+
+                # 훈련 필요한 인덱스 처리
+                if hasattr(self.index, 'train'):
+                    logger.info("🎯 Training index...")
+                    self.index.train(vectors)
+                    self.is_trained = True
+
+                # 벡터 추가
+                self.index.add(vectors)
+                logger.info(f"✅ Index built successfully: {self.index.ntotal} vectors")
+
+                # 인덱스 저장
+                self.save_index()
+
+            except Exception as e:
+                logger.error(f"❌ Failed to build index: {e}")
+                raise
+
+    def search(self, query_vector: np.ndarray, k: int = 50) -> tuple:
+        """ANN 검색 수행"""
+        if not self.available:
+            return [], []
+
+        with self.lock:
+            if self.index is None:
+                return [], []
+
+            try:
+                # 쿼리 벡터 정규화
+                query_vector = query_vector.reshape(1, -1).astype(np.float32)
+                faiss.normalize_L2(query_vector)
+
+                # 검색 수행
+                scores, indices = self.index.search(query_vector, k)
+
+                # 결과 필터링 (유효한 인덱스만)
+                valid_mask = indices[0] != -1
+                valid_indices = indices[0][valid_mask]
+                valid_scores = scores[0][valid_mask]
+
+                # place_id 매핑
+                place_ids = [self.place_ids[idx] for idx in valid_indices]
+
+                return place_ids, valid_scores.tolist()
+
+            except Exception as e:
+                logger.error(f"❌ ANN search failed: {e}")
+                return [], []
+
+    def save_index(self):
+        """인덱스를 파일에 저장"""
+        try:
+            if self.index is not None:
+                faiss.write_index(self.index, self.index_file_path)
+
+                # 메타데이터 저장
+                metadata = {
+                    'place_ids': self.place_ids,
+                    'vector_dim': self.vector_dim,
+                    'index_type': self.index_type,
+                    'is_trained': self.is_trained
+                }
+                with open(self.metadata_file_path, 'wb') as f:
+                    pickle.dump(metadata, f)
+
+                logger.info("💾 Index saved to disk")
+        except Exception as e:
+            logger.error(f"❌ Failed to save index: {e}")
+
+    def load_index(self) -> bool:
+        """저장된 인덱스 로드"""
+        if not self.available:
+            return False
+
+        try:
+            if os.path.exists(self.index_file_path) and os.path.exists(self.metadata_file_path):
+                # 인덱스 로드
+                self.index = faiss.read_index(self.index_file_path)
+
+                # 메타데이터 로드
+                with open(self.metadata_file_path, 'rb') as f:
+                    metadata = pickle.load(f)
+
+                self.place_ids = metadata['place_ids']
+                self.vector_dim = metadata['vector_dim']
+                self.index_type = metadata['index_type']
+                self.is_trained = metadata['is_trained']
+
+                logger.info(f"📂 Index loaded: {self.index.ntotal} vectors")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Failed to load index: {e}")
+
+        return False
+
+    def update_index(self, new_vectors: np.ndarray, new_place_ids: List[int]):
+        """인덱스에 새 벡터 추가 (간단한 재구축 방식)"""
+        with self.lock:
+            try:
+                # 기존 벡터 추출 (Faiss에서 직접 추출은 복잡하므로 재구축)
+                all_place_ids = self.place_ids + new_place_ids
+
+                # 새 벡터 정규화
+                faiss.normalize_L2(new_vectors)
+
+                # 기존 인덱스가 있다면 새 벡터만 추가
+                if self.index is not None and hasattr(self.index, 'add'):
+                    self.index.add(new_vectors)
+                    self.place_ids.extend(new_place_ids)
+                    logger.info(f"➕ Added {len(new_vectors)} vectors to index")
+                else:
+                    logger.warning("Index type doesn't support incremental updates. Consider rebuilding.")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to update index: {e}")
+                raise
 
 
 # ============================================================================
@@ -319,6 +575,10 @@ class UnifiedRecommendationEngine:
         self.database_url = database_url or CONFIG.database_url
         self.db_manager = DatabaseManager(self.database_url)
 
+        # ANN 인덱스 매니저 추가
+        self.faiss_manager = FaissIndexManager(vector_dim=768)
+        self.ann_enabled = False
+
         # 계층적 캐싱 시스템 (개선)
         self.vector_cache: Dict[str, Dict] = {}  # 기본 벡터 캐시
         self.cache_timestamps: Dict[str, float] = {}
@@ -339,7 +599,9 @@ class UnifiedRecommendationEngine:
             'cache_hits': 0,
             'personalized_requests': 0,
             'popular_requests': 0,
-            'avg_response_time': 0.0
+            'avg_response_time': 0.0,
+            'ann_searches': 0,
+            'cosine_searches': 0
         }
 
     def _convert_s3_urls_to_https(self, place: Dict) -> Dict:
@@ -414,14 +676,96 @@ class UnifiedRecommendationEngine:
     async def initialize(self):
         """엔진 초기화 (애플리케이션 시작 시 호출)"""
         await self.db_manager.initialize()
+
+        # ANN 인덱스 로드 시도 (Faiss 가용성에 따라)
+        if FAISS_AVAILABLE:
+            try:
+                if self.faiss_manager.load_index():
+                    self.ann_enabled = True
+                    logger.info("✅ ANN index loaded successfully")
+                else:
+                    logger.info("📝 ANN index not found. Will build when needed.")
+            except Exception as e:
+                logger.warning(f"⚠️ ANN index loading failed, disabling ANN: {e}")
+                self.ann_enabled = False
+        else:
+            logger.info("⚠️ Faiss not available - ANN features disabled")
+            self.ann_enabled = False
+
         logger.info("✅ Recommendation engine fully initialized")
+
+    async def build_ann_index(self):
+        """모든 장소 벡터로 ANN 인덱스 구축"""
+        try:
+            logger.info("🔨 Building ANN index from database...")
+
+            # 모든 장소의 벡터 데이터 가져오기
+            query = """
+                SELECT id, embedding_vector
+                FROM locations
+                WHERE embedding_vector IS NOT NULL
+                ORDER BY id
+            """
+
+            results = await self.db_manager.execute_query(query)
+
+            if not results:
+                logger.warning("❌ No vector data found for ANN index")
+                return False
+
+            # 벡터 데이터 준비
+            vectors = []
+            place_ids = []
+
+            for row in results:
+                vector = validate_vector_data(row['embedding_vector'])
+                if vector is not None:
+                    vectors.append(vector)
+                    place_ids.append(row['id'])
+
+            if len(vectors) == 0:
+                logger.warning("❌ No valid vectors found for ANN index")
+                return False
+
+            # numpy 배열로 변환
+            vectors_array = np.vstack(vectors).astype(np.float32)
+
+            # 인덱스 구축
+            self.faiss_manager.build_index(vectors_array, place_ids)
+            self.ann_enabled = True
+
+            logger.info(f"✅ ANN index built successfully with {len(vectors)} vectors")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to build ANN index: {e}")
+            self.ann_enabled = False
+            return False
 
     async def close(self):
         """리소스 정리"""
         await self.db_manager.close()
         self.vector_cache.clear()
         self.cache_timestamps.clear()
+
+        # ANN 인덱스 저장
+        if self.ann_enabled and self.faiss_manager.index is not None:
+            self.faiss_manager.save_index()
+
         logger.info("🔌 Recommendation engine closed")
+
+    def get_performance_stats(self) -> Dict:
+        """성능 통계 반환"""
+        total_searches = self.stats['ann_searches'] + self.stats['cosine_searches']
+        ann_ratio = self.stats['ann_searches'] / total_searches if total_searches > 0 else 0
+
+        return {
+            **self.stats,
+            'total_searches': total_searches,
+            'ann_usage_ratio': ann_ratio,
+            'ann_enabled': self.ann_enabled,
+            'index_size': self.faiss_manager.index.ntotal if self.faiss_manager.index else 0
+        }
 
     def _is_cache_valid(self, cache_key: str, cache_type: str = 'vector') -> bool:
         """계층적 캐시 유효성 검사"""
@@ -489,17 +833,21 @@ class UnifiedRecommendationEngine:
 
             # 지역 지정 여부에 따라 분기
             if region:
-                # 특정 지역 지정시: 해당 지역 내 선호도 기반 추천
-                logger.info(f"🎯 Regional preference recommendations for user {user_id} in {region}")
-                result = await self._get_preference_based_recommendations(user_id, region, category, limit)
+                # 특정 지역 지정시: 우선순위 + 다양한 카테고리 통합 추천
+                logger.info(f"🎯 Regional diverse recommendations for user {user_id} in {region}")
+                result = await self._get_regional_diverse_recommendations(user_id, region, category, limit)
                 if not result:
-                    # 선호도 데이터가 없으면 인기 추천으로 폴백
-                    logger.info(f"📊 Fallback to popular recommendations for user {user_id}")
-                    result = await self._get_popular_recommendations(region, category, limit, fast_mode)
+                    # 다양한 추천 실패시 기존 우선순위 기반으로 폴백
+                    logger.info(f"📊 Fallback to priority-based recommendations for user {user_id}")
+                    result = await self._get_preference_based_recommendations(user_id, region, category, limit)
+                    if not result:
+                        # 선호도 데이터가 없으면 인기 추천으로 폴백
+                        logger.info(f"📊 Fallback to popular recommendations for user {user_id}")
+                        result = await self._get_popular_recommendations(region, category, limit, fast_mode)
             else:
-                # 지역 지정 없을 때: 모든 지역을 대상으로 지역별 선호도 추천
-                logger.info(f"🌍 All regions preference recommendations for user {user_id}")
-                result = await self._get_regional_preference_recommendations(user_id, limit)
+                # 지역 지정 없을 때: 사용자 맞춤 추천 (전체 지역 대상)
+                logger.info(f"👤 User personalized recommendations for user {user_id}")
+                result = await self._get_user_personalized_recommendations(user_id, limit)
                 if not result:
                     # 선호도 데이터가 없으면 인기 추천으로 폴백
                     logger.info(f"📊 Fallback to popular recommendations for user {user_id}")
@@ -671,10 +1019,15 @@ class UnifiedRecommendationEngine:
                 WHERE user_id = $1 AND behavior_vector IS NOT NULL
             """
             vector_data = await self.db_manager.execute_single_query(query, user_id)
-            logger.info(f"DEBUG: User {user_id} raw vector data from DB: {vector_data is not None}")
+            logger.info(f"🔍 [Vector] User {user_id} raw vector data from DB: {vector_data is not None}")
+            if vector_data is not None:
+                logger.info(f"🔍 [Vector] User {user_id} vector type: {type(vector_data)}, length: {len(vector_data) if hasattr(vector_data, '__len__') else 'N/A'}")
 
             validated_vector = validate_vector_data(vector_data)
-            logger.info(f"DEBUG: User {user_id} validated vector: {validated_vector is not None}")
+            logger.info(f"🔍 [Vector] User {user_id} validated vector: {validated_vector is not None}")
+
+            if validated_vector is not None:
+                logger.info(f"🔍 [Vector] User {user_id} validated vector shape: {validated_vector.shape}, non-zero: {np.count_nonzero(validated_vector)}")
 
             # 캐시에 저장 (None도 캐시하여 반복 쿼리 방지)
             if validated_vector is not None:
@@ -948,6 +1301,7 @@ class UnifiedRecommendationEngine:
                 bookmark_count = place.get('bookmark_cnt', 0)
                 place['final_score'] = bookmark_count
                 place['recommendation_type'] = 'popular_fast' if fast_mode else 'popular'
+                place['source'] = 'popular'  # 소스 태그 추가
                 place['similarity_score'] = 0.8  # 인기 추천용 기본값
             except Exception as e:
                 logger.error(f"❌ Popular score calculation failed for place {place.get('place_id')}: {e}")
@@ -1160,7 +1514,18 @@ class UnifiedRecommendationEngine:
 
             # 벡터화된 유사도 계산
             place_vectors_array = np.array(place_vectors, dtype=np.float32)
-            similarities = safe_cosine_similarity(user_vector, place_vectors_array)
+            similarities = safe_cosine_similarity(
+                user_vector,
+                place_vectors_array,
+                use_ann=self.ann_enabled,
+                faiss_manager=self.faiss_manager
+            )
+
+            # 통계 업데이트
+            if self.ann_enabled:
+                self.stats['ann_searches'] += 1
+            else:
+                self.stats['cosine_searches'] += 1
 
             # 북마크 선호도 강화된 하이브리드 점수 계산
             results = []
@@ -1252,7 +1617,18 @@ class UnifiedRecommendationEngine:
 
             # 벡터화된 유사도 계산
             place_vectors_array = np.array(place_vectors, dtype=np.float32)
-            similarities = safe_cosine_similarity(user_vector, place_vectors_array)
+            similarities = safe_cosine_similarity(
+                user_vector,
+                place_vectors_array,
+                use_ann=self.ann_enabled,
+                faiss_manager=self.faiss_manager
+            )
+
+            # 통계 업데이트
+            if self.ann_enabled:
+                self.stats['ann_searches'] += 1
+            else:
+                self.stats['cosine_searches'] += 1
 
             # 하이브리드 점수 계산
             results = []
@@ -1457,6 +1833,121 @@ class UnifiedRecommendationEngine:
             logger.error(f"❌ Priority-enhanced recommendation failed for user {user_id}: {e}")
             return []
 
+    async def _get_regional_diverse_recommendations(
+        self,
+        user_id: str,
+        region: str,
+        category: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict]:
+        """
+        특정 지역 내에서 우선순위 + 다양한 카테고리 통합 추천
+        - 우선순위 태그: 50%
+        - 다양한 카테고리: 30%
+        - 유사한 장소: 20%
+        """
+        try:
+            # 1. 사용자 선호도 및 행동 벡터 조회
+            logger.info(f"🔍 [Regional Diverse] Getting user data for {user_id} in {region}")
+            user_preferences = await self._get_user_preferences(user_id)
+            if not user_preferences:
+                logger.info(f"❌ [Regional Diverse] No preferences found for user {user_id}")
+                return []
+
+            user_behavior_vector = await self._get_user_behavior_vector_cached(user_id)
+            logger.info(f"🧠 [Regional Diverse] Behavior vector: {'Found' if user_behavior_vector is not None else 'Not found'}")
+
+            # 2. 특정 지역 추천: 다양한 소스 조합 (사용자별 추천과 구별)
+            recommendations = []
+
+            if user_behavior_vector is not None:
+                logger.info(f"🧠 [Regional Diverse] Mixed recommendations for region {region} (behavior + priority)")
+
+                # 행동 벡터 기반 + 우선순위 기반 조합 (50:50)
+                behavior_limit = max(1, int(limit * 0.5))
+                priority_limit = limit - behavior_limit
+
+                # 행동 벡터 기반 추천 (50%)
+                behavior_recommendations = await self._get_similar_places_in_region(
+                    user_behavior_vector, region, behavior_limit
+                )
+
+                # 우선순위 기반 추천 (50%)
+                priority_recommendations = await self._calculate_preference_scores(
+                    user_preferences, region, category, priority_limit
+                )
+
+                # 두 추천 결과 병합
+                recommendations.extend(behavior_recommendations)
+                recommendations.extend(priority_recommendations)
+
+                # 중복 제거
+                seen_places = set()
+                unique_recommendations = []
+                for rec in recommendations:
+                    place_id = rec.get('place_id')
+                    if place_id not in seen_places:
+                        seen_places.add(place_id)
+                        unique_recommendations.append(rec)
+
+                recommendations = unique_recommendations[:limit]
+                logger.info(f"✅ [Regional Diverse] Mixed completed: {len(recommendations)} items (behavior+priority)")
+                return recommendations
+            else:
+                logger.info(f"❌ [Regional Diverse] No behavior vector, using priority-based only")
+                # 행동 벡터가 없으면 선호도 기반으로만
+                recommendations = await self._calculate_preference_scores(
+                    user_preferences, region, category, limit
+                )
+                return recommendations
+
+            # 3. 카테고리 필터가 없는 경우 다양한 소스 조합
+            recommendations = []
+
+            # 우선순위 카테고리 추천 (80% - 더 많이 가져오기)
+            priority_limit = max(10, int(limit * 0.8))  # 최소 10개, 80%로 증가
+            logger.info(f"🎯 [Regional Diverse] Getting {priority_limit} priority recommendations")
+            priority_recommendations = await self._calculate_priority_enhanced_scores(
+                user_preferences, user_behavior_vector, region, None, priority_limit
+            )
+
+            # 다양한 카테고리 추천 (15%)
+            diverse_limit = max(3, int(limit * 0.15))  # 최소 3개, 15%로 감소
+            logger.info(f"🌈 [Regional Diverse] Getting {diverse_limit} diverse category recommendations")
+            user_priority = user_preferences.get('priority')
+            diverse_recommendations = await self._get_diverse_category_recommendations(
+                user_behavior_vector, region, diverse_limit, exclude_priority=user_priority
+            )
+
+            # 유사한 장소 추천 (5%)
+            similar_limit = max(1, limit - priority_limit - diverse_limit)
+            logger.info(f"🔍 [Regional Diverse] Getting {similar_limit} similar place recommendations")
+            similar_recommendations = []
+            if user_behavior_vector is not None:
+                similar_recommendations = await self._get_similar_places_in_region(
+                    user_behavior_vector, region, similar_limit
+                )
+
+            # 4. 추천 병합 (중복 제거)
+            final_recommendations = self._merge_diverse_recommendations(
+                priority_recommendations, diverse_recommendations, similar_recommendations, limit
+            )
+
+            # 5. 소스 태그 추가
+            for rec in final_recommendations:
+                if 'source' not in rec:
+                    rec['source'] = 'diverse_regional'
+
+            logger.info(f"🎉 [Regional Diverse] Generated {len(final_recommendations)} diverse recommendations "
+                       f"(priority: {len(priority_recommendations)}, diverse: {len(diverse_recommendations)}, "
+                       f"similar: {len(similar_recommendations)})")
+
+            return final_recommendations
+
+        except Exception as e:
+            logger.error(f"❌ Regional diverse recommendation failed for user {user_id}: {e}")
+            return []
+
     async def _get_user_preferences(self, user_id: str) -> Dict[str, Any]:
         """사용자 선호도 정보 조회 (user_preferences 테이블에서 조회)"""
         try:
@@ -1525,44 +2016,72 @@ class UnifiedRecommendationEngine:
         try:
             priority = user_preferences.get('priority')
 
-            # 우선순위 태그가 있으면 해당 카테고리로 필터링
-            target_category = category
-            if priority:
-                # 체험 우선순위는 nature/humanities/leisure_sports 중에서 선택
-                if priority == 'experience':
-                    if category not in ['nature', 'humanities', 'leisure_sports']:
-                        target_category = 'nature'  # 기본값
-                else:
-                    # 다른 우선순위는 해당 카테고리로 고정
-                    target_category = priority
+            # 체험 우선순위는 특별 처리 필요
+            if priority == 'experience':
+                logger.info(f"🎯 Experience priority: collecting from nature, humanities, leisure_sports")
 
-            logger.info(f"🎯 Priority filtering: {priority} → target_category: {target_category}")
+                # 체험 우선순위는 3개 카테고리에서 모두 수집
+                experience_categories = ['nature', 'humanities', 'leisure_sports']
+                all_places_data = []
 
-            # 우선순위 카테고리 내에서 장소 후보군 조회 (벡터 포함)
-            places_query = """
-                SELECT
-                    place_id, table_name, region, name,
-                    latitude, longitude, overview, image_urls, bookmark_cnt,
-                    vector as text_vector,
-                    COALESCE(bookmark_cnt, 0) as popularity_score
-                FROM place_recommendations
-                WHERE name IS NOT NULL
-                    AND ($1::text IS NULL OR region = $1)
-                    AND ($2::text IS NULL OR table_name = $2)
-                ORDER BY bookmark_cnt DESC
-                LIMIT $3
-            """
+                async with self.db_manager.get_connection() as conn:
+                    for exp_category in experience_categories:
+                        places_query = """
+                            SELECT
+                                place_id, table_name, region, name,
+                                latitude, longitude, overview, image_urls, bookmark_cnt,
+                                vector as text_vector,
+                                COALESCE(bookmark_cnt, 0) as popularity_score
+                            FROM place_recommendations
+                            WHERE name IS NOT NULL
+                                AND ($1::text IS NULL OR region = $1)
+                                AND table_name = $2
+                            ORDER BY bookmark_cnt DESC
+                            LIMIT $3
+                        """
 
-            async with self.db_manager.get_connection() as conn:
-                places_data = await conn.fetch(
-                    places_query,
-                    region,
-                    target_category,
-                    CONFIG.candidate_limit
-                )
+                        category_places = await conn.fetch(
+                            places_query,
+                            region,
+                            exp_category,
+                            CONFIG.candidate_limit // 3  # 각 카테고리에서 1/3씩
+                        )
+                        all_places_data.extend(category_places)
+                        logger.info(f"🎯 Found {len(category_places)} places for experience->{exp_category}")
+
+                places_data = all_places_data
+            else:
+                # 다른 우선순위는 기존 방식
+                target_category = category if category else priority
+                logger.info(f"🎯 Priority filtering: {priority} → target_category: {target_category}")
+
+                places_query = """
+                    SELECT
+                        place_id, table_name, region, name,
+                        latitude, longitude, overview, image_urls, bookmark_cnt,
+                        vector as text_vector,
+                        COALESCE(bookmark_cnt, 0) as popularity_score
+                    FROM place_recommendations
+                    WHERE name IS NOT NULL
+                        AND ($1::text IS NULL OR region = $1)
+                        AND ($2::text IS NULL OR table_name = $2)
+                    ORDER BY bookmark_cnt DESC
+                    LIMIT $3
+                """
+
+                async with self.db_manager.get_connection() as conn:
+                    places_data = await conn.fetch(
+                        places_query,
+                        region,
+                        target_category,
+                        CONFIG.candidate_limit
+                    )
 
             if not places_data:
-                logger.warning(f"No places found for priority: {priority}, region: {region}, category: {target_category}")
+                if priority == 'experience':
+                    logger.warning(f"No places found for experience priority in region: {region}")
+                else:
+                    logger.warning(f"No places found for priority: {priority}, region: {region}, category: {target_category}")
                 return []
 
             # 우선순위 태그 내에서 behavior_vector 기반 점수 계산
@@ -1578,7 +2097,7 @@ class UnifiedRecommendationEngine:
                 if user_behavior_vector is not None and place.get('text_vector'):
                     place_text_vector = validate_vector_data(place['text_vector'])
                     if place_text_vector is not None:
-                        similarity = safe_cosine_similarity(user_behavior_vector, place_text_vector)
+                        similarity = safe_cosine_similarity(user_behavior_vector, place_text_vector, use_ann=False)
                         behavior_score = float(similarity[0]) if len(similarity) > 0 else 0.0
                         logger.info(f"🧠 {place['name']}: behavior_score={behavior_score:.4f}")
                     else:
@@ -1623,19 +2142,25 @@ class UnifiedRecommendationEngine:
                     scored_places.append(place_dict)
 
             # 점수 기준 정렬
+            logger.info(f"🔄 [Priority] Sorting {len(scored_places)} scored places...")
             scored_places.sort(key=lambda x: x['final_score'], reverse=True)
+            logger.info(f"✅ [Priority] Sorting completed")
 
             # numpy 배열을 리스트로 변환 (JSON 직렬화를 위해)
-            for place in scored_places[:limit]:
+            logger.info(f"🔄 [Priority] Converting numpy arrays for {len(scored_places[:limit])} places...")
+            result_places = scored_places[:limit]
+            for i, place in enumerate(result_places):
+                logger.info(f"🔄 [Priority] Processing place {i+1}/{len(result_places)}: {place.get('name', 'Unknown')}")
                 if 'text_vector' in place and isinstance(place['text_vector'], np.ndarray):
                     place['text_vector'] = place['text_vector'].tolist()
                 if 'image_vector' in place and isinstance(place['image_vector'], np.ndarray):
                     place['image_vector'] = place['image_vector'].tolist()
+            logger.info(f"✅ [Priority] Numpy conversion completed")
 
             behavior_used = user_behavior_vector is not None
-            logger.info(f"🚀 Priority-enhanced scoring completed: {len(scored_places[:limit])} results, behavior_vector: {'✅' if behavior_used else '❌'}")
+            logger.info(f"🚀 Priority-enhanced scoring completed: {len(scored_places)} total, {len(result_places)} results, behavior_vector: {'✅' if behavior_used else '❌'}")
 
-            return scored_places[:limit]
+            return result_places
 
         except Exception as e:
             logger.error(f"❌ Failed to calculate priority-enhanced scores: {e}")
@@ -2088,32 +2613,32 @@ class UnifiedRecommendationEngine:
                 # 1. 행동 벡터(클릭/북마크) → 장소 텍스트 (384차원)
                 place_text_vector = place.get('text_vector')
                 if place_text_vector is not None and user_behavior_vector is not None:
-                    text_sim = safe_cosine_similarity(user_behavior_vector, place_text_vector)
+                    text_sim = safe_cosine_similarity(user_behavior_vector, place_text_vector, use_ann=False)
                     scores['behavior_text_similarity'] = float(text_sim[0]) if len(text_sim) > 0 else 0.0
 
                 # 2. 업로드 포스팅 이미지 → 장소 이미지 (512차원)
                 place_image_vector = place.get('image_vector')
                 if user_upload_vector is not None and place_image_vector is not None:
-                    upload_sim = safe_cosine_similarity(user_upload_vector, place_image_vector)
+                    upload_sim = safe_cosine_similarity(user_upload_vector, place_image_vector, use_ann=False)
                     scores['upload_image_similarity'] = float(upload_sim[0]) if len(upload_sim) > 0 else 0.0
 
                 # 3. 북마크 장소 텍스트 → 장소 텍스트 (384차원)
                 if bookmark_preferences.get('avg_text_vector') is not None and place_text_vector is not None:
                     bookmark_text_sim = safe_cosine_similarity(
-                        bookmark_preferences['avg_text_vector'], place_text_vector
+                        bookmark_preferences['avg_text_vector'], place_text_vector, use_ann=False
                     )
                     scores['bookmark_text_similarity'] = float(bookmark_text_sim[0]) if len(bookmark_text_sim) > 0 else 0.0
 
                 # 4. 북마크 장소 이미지 → 장소 이미지 (512차원)
                 if bookmark_preferences.get('avg_image_vector') is not None and place_image_vector is not None:
                     bookmark_image_sim = safe_cosine_similarity(
-                        bookmark_preferences['avg_image_vector'], place_image_vector
+                        bookmark_preferences['avg_image_vector'], place_image_vector, use_ann=False
                     )
                     scores['bookmark_image_similarity'] = float(bookmark_image_sim[0]) if len(bookmark_image_sim) > 0 else 0.0
 
                 # 5. 좋아요한 포스팅 이미지 → 장소 이미지 (512차원)
                 if liked_posts_vector is not None and place_image_vector is not None:
-                    liked_sim = safe_cosine_similarity(liked_posts_vector, place_image_vector)
+                    liked_sim = safe_cosine_similarity(liked_posts_vector, place_image_vector, use_ann=False)
                     scores['liked_post_similarity'] = float(liked_sim[0]) if len(liked_sim) > 0 else 0.0
 
                 # 6. 5개 독립적 채널들의 조합 점수 계산
@@ -2332,7 +2857,18 @@ class UnifiedRecommendationEngine:
 
             # 벡터화된 유사도 계산 (단일 채널)
             place_vectors_array = np.array(place_vectors, dtype=np.float32)
-            similarities = safe_cosine_similarity(user_vector, place_vectors_array)
+            similarities = safe_cosine_similarity(
+                user_vector,
+                place_vectors_array,
+                use_ann=self.ann_enabled,
+                faiss_manager=self.faiss_manager
+            )
+
+            # 통계 업데이트
+            if self.ann_enabled:
+                self.stats['ann_searches'] += 1
+            else:
+                self.stats['cosine_searches'] += 1
 
             # 간소화된 점수 계산 (복잡한 가중치 없음)
             results = []
@@ -2465,83 +3001,166 @@ class UnifiedRecommendationEngine:
             # 실패 시 선호도 기반으로 폴백
             return await self._get_preference_based_recommendations(user_id, region, category, limit)
 
-    async def _get_regional_preference_recommendations(
+    async def _get_user_personalized_recommendations(
         self,
         user_id: str,
         limit: int = 50
     ) -> List[Dict]:
         """
-        지역별 사용자 선호 태그 기반 추천 (지역별 추천 수량으로 정렬)
-        - 사용자 선호 태그를 통해 각 지역별 추천 수량 계산
-        - 추천 수량이 많은 지역부터 내림차순 정렬
-        - 각 지역 내에서는 사용자 우선순위 카테고리를 최상단 배치
+        사용자 맞춤 추천 (전체 지역 대상)
+        - 행동 벡터가 있으면: 모든 지역에서 행동 벡터 기반 유사도 순 추천
+        - 행동 벡터가 없으면: 모든 지역에서 선호도 기반 점수 순 추천
+        - 중복 제거 후 유사도/점수 순으로 정렬하여 반환
         """
         try:
             # 1. 사용자 선호도 정보 조회
-            logger.info(f"🔍 [Regional] Getting user preferences for user {user_id}")
+            logger.info(f"🔍 [Personalized] Getting user preferences for user {user_id}")
             user_preferences = await self._get_user_preferences(user_id)
             if not user_preferences:
-                logger.info(f"❌ [Regional] No preferences found for user {user_id}")
+                logger.info(f"❌ [Personalized] No preferences found for user {user_id}")
                 return []
 
             user_priority = user_preferences.get('priority')
             if not user_priority:
-                logger.info(f"❌ [Regional] No priority found for user {user_id}")
+                logger.info(f"❌ [Personalized] No priority found for user {user_id}")
                 return []
 
-            logger.info(f"✅ [Regional] Found user preferences for user {user_id}: priority={user_priority}")
+            logger.info(f"✅ [Personalized] Found user preferences for user {user_id}: priority={user_priority}")
 
             # 2. 사용자 행동 벡터 조회 (북마크 패턴 분석용)
-            logger.info(f"🧠 [Regional] Getting user behavior vector for user {user_id}")
+            logger.info(f"🧠 [Personalized] Getting user behavior vector for user {user_id}")
             user_behavior_vector = await self._get_user_behavior_vector_cached(user_id)
             if user_behavior_vector is not None:
-                logger.info(f"✅ [Regional] Found behavior vector for user {user_id}: shape {user_behavior_vector.shape}")
+                logger.info(f"✅ [Personalized] Found behavior vector for user {user_id}: shape {user_behavior_vector.shape}")
+                logger.info(f"🔍 [Personalized] Behavior vector type: {type(user_behavior_vector)}, non-zero elements: {np.count_nonzero(user_behavior_vector)}")
             else:
-                logger.info(f"❌ [Regional] No behavior vector found for user {user_id}")
+                logger.info(f"❌ [Personalized] No behavior vector found for user {user_id}")
+                # 추가 디버깅: user_behavior_vectors 테이블 직접 확인
+                try:
+                    async with self.db_manager.get_connection() as conn:
+                        debug_result = await conn.fetchrow(
+                            "SELECT user_id, behavior_vector IS NOT NULL as has_vector FROM user_behavior_vectors WHERE user_id = $1",
+                            user_id
+                        )
+                        if debug_result:
+                            logger.info(f"🔍 [Personalized] DEBUG: user_behavior_vectors table has user {user_id}, has_vector: {debug_result['has_vector']}")
+                        else:
+                            logger.info(f"🔍 [Personalized] DEBUG: user {user_id} not found in user_behavior_vectors table")
+                except Exception as debug_e:
+                    logger.warning(f"⚠️ [Personalized] DEBUG query failed: {debug_e}")
 
-            # 2. 각 지역별로 사용자 선호 벡터 기반 추천 수량 계산
-            regional_scores = await self._calculate_regional_recommendation_scores(user_preferences)
+            # 2. 모든 지역 목록 가져오기 (점수 계산 없이)
+            regions_query = """
+                SELECT DISTINCT region
+                FROM place_recommendations
+                WHERE region IS NOT NULL
+                ORDER BY region
+            """
 
-            # 3. 추천 수량 기준으로 지역 정렬 (내림차순)
-            sorted_regions = sorted(regional_scores.items(), key=lambda x: x[1], reverse=True)
+            all_regions = []
+            async with self.db_manager.get_connection() as conn:
+                regions_data = await conn.fetch(regions_query)
+                all_regions = [row['region'] for row in regions_data]
 
-            logger.info(f"📊 Regional recommendation scores: {dict(sorted_regions[:5])}")  # 상위 5개 지역만 로깅
+            logger.info(f"📍 Found {len(all_regions)} regions: {all_regions}")
 
-            # 4. 각 지역별로 카테고리 우선순위 적용하여 추천 생성
-            final_recommendations = []
-            items_per_region = max(3, limit // len(sorted_regions)) if sorted_regions else limit
+            # 3. 모든 지역의 추천을 수집하고 유사도 순으로 정렬
+            all_recommendations = []
+            logger.info(f"🔥 [DEBUG] Starting to collect recommendations from {len(all_regions)} regions")
 
-            for region, score in sorted_regions:
-                if len(final_recommendations) >= limit:
-                    break
+            for region in all_regions:
+                # 해당 지역의 추천 생성
+                logger.info(f"🎯 [Personalized] Generating recommendations for region {region}")
 
-                # 해당 지역의 추천 생성 (behavior_vector 통합된 우선순위 기반)
-                logger.info(f"🎯 [Regional] Generating recommendations for region {region} with behavior vector integration")
-                region_recommendations = await self._calculate_priority_enhanced_scores(
-                    user_preferences, user_behavior_vector, region, None, items_per_region
-                )
+                # behavior_vector가 있는 사용자는 행동 벡터 기반 유사한 장소만 추천 (우선순위 카테고리 무관)
+                if user_behavior_vector is not None:
+                    logger.info(f"🧠 [Personalized] Using behavior vector based recommendations for region {region}")
+
+                    # 행동 벡터 기반 유사한 장소 추천만 사용 (우선순위 카테고리 상관없이)
+                    try:
+                        region_recommendations = await self._get_similar_places_in_region(
+                            user_behavior_vector, region, 5  # 각 지역에서 5개씩만 가져오기
+                        )
+                        logger.info(f"🔍 [Personalized] Found {len(region_recommendations)} behavior-based recommendations for {region}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Similar places search failed for {region}, using fallback: {e}")
+                        # 폴백으로 간단한 지역 기반 추천 사용
+                        region_recommendations = await self._get_simple_regional_recommendations(region, 5)
+                else:
+                    logger.info(f"🎯 [Personalized] Using priority-based recommendations for region {region}")
+
+                    # 기존 방식: 우선순위 태그 기반 추천만 - 더 많은 데이터 가져오기
+                    region_recommendations = await self._calculate_priority_enhanced_scores(
+                        user_preferences, user_behavior_vector, region, None, 15  # 각 지역에서 15개씩 가져오기 (5->15로 증가)
+                    )
 
                 if region_recommendations:
                     # 지역 정보 메타데이터 추가
                     for rec in region_recommendations:
-                        rec['region_score'] = score
-                        rec['region_rank'] = len(final_recommendations) // items_per_region + 1
+                        rec['source_region'] = region
 
-                    final_recommendations.extend(region_recommendations[:items_per_region])
+                    all_recommendations.extend(region_recommendations)
+                    logger.info(f"🔥 [DEBUG] Added {len(region_recommendations)} recommendations from {region}")
+                else:
+                    logger.info(f"🔥 [DEBUG] No recommendations from {region}")
 
-            logger.info(f"✅ Generated {len(final_recommendations)} regional preference recommendations for user {user_id}")
+            # 디버깅: 지역별 추천 분포 확인
+            region_distribution = {}
+            for rec in all_recommendations:
+                region = rec.get('source_region', 'unknown')
+                region_distribution[region] = region_distribution.get(region, 0) + 1
+
+            logger.info(f"🗺️ [DEBUG] Regional distribution BEFORE sorting: {region_distribution}")
+            logger.info(f"🔢 [DEBUG] Total recommendations collected: {len(all_recommendations)}")
+            logger.info(f"🔥 [DEBUG] About to sort recommendations")
+
+            # 5. 모든 추천을 유사도/점수 순으로 정렬
+            if user_behavior_vector is not None:
+                # 행동 벡터가 있는 경우: similarity_score 또는 final_score로 정렬
+                all_recommendations.sort(key=lambda x: x.get('similarity_score', x.get('final_score', 0)), reverse=True)
+                logger.info(f"🎯 [Personalized] Sorted all recommendations by similarity_score for behavior vector user")
+            else:
+                # 행동 벡터가 없는 경우: final_score로 정렬
+                all_recommendations.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+                logger.info(f"🎯 [Personalized] Sorted all recommendations by final_score for preference-based user")
+
+            # 중복 제거 (place_id 기준)
+            seen_places = set()
+            final_recommendations = []
+            for rec in all_recommendations:
+                place_id = rec.get('place_id')
+                if place_id not in seen_places:
+                    seen_places.add(place_id)
+                    final_recommendations.append(rec)
+
+                if len(final_recommendations) >= limit:
+                    break
+
+            # 디버깅: 최종 결과의 지역별 분포 확인
+            final_region_distribution = {}
+            for rec in final_recommendations:
+                region = rec.get('source_region', 'unknown')
+                final_region_distribution[region] = final_region_distribution.get(region, 0) + 1
+
+            logger.info(f"🏁 [DEBUG] Final regional distribution: {final_region_distribution}")
+            logger.info(f"📋 [DEBUG] Sample recommendations (first 3): {[{'name': r.get('name'), 'region': r.get('source_region'), 'score': r.get('similarity_score', r.get('final_score', 0))} for r in final_recommendations[:3]]}")
+
+            logger.info(f"✅ Generated {len(final_recommendations)} user personalized recommendations for user {user_id}")
+            logger.info(f"🔥 [DEBUG] Returning {min(len(final_recommendations), limit)} recommendations")
             return final_recommendations[:limit]
 
         except Exception as e:
-            logger.error(f"❌ Regional preference recommendation failed for user {user_id}: {e}")
+            logger.error(f"❌ User personalized recommendation failed for user {user_id}: {e}")
+            logger.error(f"🔥 [DEBUG] Exception traceback: ", exc_info=True)
             return []
 
     async def _calculate_regional_recommendation_scores(
         self,
-        user_preferences: Dict[str, Any]
+        user_preferences: Dict[str, Any],
+        user_behavior_vector: Optional[np.ndarray] = None
     ) -> Dict[str, float]:
         """
-        각 지역별 사용자 선호 태그 기반 추천 수량 점수 계산
+        각 지역별 사용자 선호 태그 + 행동 벡터 기반 추천 수량 점수 계산
         """
         try:
             regional_scores = {}
@@ -2567,8 +3186,21 @@ class UnifiedRecommendationEngine:
                         user_preferences, region, conn
                     )
 
-                    # 장소 수와 선호도 점수를 결합한 최종 점수
-                    final_score = region_score * (1 + place_count / 1000)  # 장소 수 가중치 적용
+                    # 행동 벡터 기반 지역 선호도 점수 계산 (안전한 fallback)
+                    behavior_score = 0.0
+                    if user_behavior_vector is not None:
+                        try:
+                            behavior_score = await self._calculate_region_behavior_score(
+                                user_behavior_vector, region, conn
+                            )
+                            logger.info(f"🧠 [Regional] Region {region} behavior score: {behavior_score:.4f}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Behavior score calculation failed for {region}: {e}")
+                            behavior_score = 0.0
+
+                    # 태그 선호도 + 행동 벡터 + 장소 수를 결합한 최종 점수
+                    combined_score = (region_score * 0.6) + (behavior_score * 0.4)  # 태그:행동 = 6:4 비율
+                    final_score = combined_score * (1 + place_count / 1000)  # 장소 수 가중치 적용
                     regional_scores[region] = final_score
 
             return regional_scores
@@ -2620,6 +3252,450 @@ class UnifiedRecommendationEngine:
             logger.error(f"❌ Region preference score calculation failed for {region}: {e}")
             return 0.0
 
+    async def _calculate_region_behavior_score(
+        self,
+        user_behavior_vector: np.ndarray,
+        region: str,
+        conn
+    ) -> float:
+        """
+        특정 지역에 대한 사용자 행동 벡터 기반 유사도 점수 계산
+        """
+        try:
+            # 해당 지역의 장소들의 벡터를 가져와서 유사도 계산
+            region_vectors_query = """
+                SELECT pr.place_id, l.embedding_vector
+                FROM place_recommendations pr
+                JOIN locations l ON pr.place_id = l.id
+                WHERE pr.region = $1
+                AND l.embedding_vector IS NOT NULL
+                AND array_length(l.embedding_vector, 1) > 0
+                LIMIT 100
+            """
+
+            region_places = await conn.fetch(region_vectors_query, region)
+
+            if not region_places:
+                return 0.0
+
+            # 벡터 유효성 검사 및 수집
+            valid_vectors = []
+            for place in region_places:
+                vector = validate_vector_data(place['embedding_vector'])
+                if vector is not None:
+                    valid_vectors.append(vector)
+
+            if not valid_vectors:
+                return 0.0
+
+            # 지역 장소들의 평균 벡터 계산
+            region_vectors_array = np.array(valid_vectors, dtype=np.float32)
+            region_avg_vector = np.mean(region_vectors_array, axis=0)
+
+            # 사용자 행동 벡터와 지역 평균 벡터 간 유사도 계산 (ANN 지원)
+            similarities = safe_cosine_similarity(
+                user_behavior_vector,
+                region_avg_vector.reshape(1, -1),
+                use_ann=self.ann_enabled,
+                faiss_manager=self.faiss_manager
+            )
+
+            # 통계 업데이트
+            if self.ann_enabled:
+                self.stats['ann_searches'] += 1
+            else:
+                self.stats['cosine_searches'] += 1
+
+            similarity_score = float(similarities[0]) if len(similarities) > 0 else 0.0
+
+            # 0-1 범위로 정규화하고 가중치 적용
+            normalized_score = max(0.0, similarity_score)
+
+            logger.info(f"🧠 [Regional] Region {region}: {len(valid_vectors)} places, similarity={similarity_score:.4f}")
+
+            return normalized_score
+
+        except Exception as e:
+            logger.error(f"❌ Region behavior score calculation failed for {region}: {e}")
+            return 0.0
+
+    async def _get_similar_places_in_region(
+        self,
+        user_behavior_vector: np.ndarray,
+        region: str,
+        limit: int = 10,
+        category_filter: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        특정 지역에서 사용자 행동 벡터와 유사한 장소들을 ANN으로 찾기
+        """
+        try:
+            logger.info(f"🔍 [Similar] Finding similar places in region {region} using ANN")
+
+            # ANN이 활성화된 경우, 빠른 유사도 검색 수행
+            if self.ann_enabled and self.faiss_manager.index is not None:
+                # ANN으로 유사한 장소 ID들 찾기
+                similar_place_ids, scores = self.faiss_manager.search(user_behavior_vector, k=limit * 3)
+
+                if not similar_place_ids:
+                    return []
+
+                # 해당 지역의 장소들만 필터링
+                if category_filter:
+                    region_query = """
+                        SELECT
+                            pr.place_id, pr.table_name, pr.region, pr.name,
+                            pr.latitude, pr.longitude, pr.overview, pr.image_urls,
+                            pr.bookmark_cnt, pr.vector as text_vector,
+                            pr.vector as embedding_vector
+                        FROM place_recommendations pr
+                        WHERE pr.region = $1
+                        AND pr.place_id = ANY($2)
+                        AND pr.table_name = $3
+                        AND pr.name IS NOT NULL
+                        ORDER BY pr.bookmark_cnt DESC
+                    """
+                else:
+                    region_query = """
+                        SELECT
+                            pr.place_id, pr.table_name, pr.region, pr.name,
+                            pr.latitude, pr.longitude, pr.overview, pr.image_urls,
+                            pr.bookmark_cnt, pr.vector as text_vector,
+                            pr.vector as embedding_vector
+                        FROM place_recommendations pr
+                        WHERE pr.region = $1
+                        AND pr.place_id = ANY($2)
+                        AND pr.name IS NOT NULL
+                        ORDER BY pr.bookmark_cnt DESC
+                    """
+
+                async with self.db_manager.get_connection() as conn:
+                    if category_filter:
+                        places_data = await conn.fetch(region_query, region, similar_place_ids, category_filter)
+                    else:
+                        places_data = await conn.fetch(region_query, region, similar_place_ids)
+
+                # 실제 유사도 점수로 정렬
+                scored_places = []
+                place_id_to_score = {pid: score for pid, score in zip(similar_place_ids, scores)}
+
+                for place in places_data:
+                    place_dict = dict(place)
+                    ann_score = place_id_to_score.get(place['place_id'], 0.0)
+
+                    # 유사도 점수와 인기도를 결합한 최종 점수
+                    popularity_score = min(place['bookmark_cnt'] / 100.0, 1.0) if place['bookmark_cnt'] else 0.0
+                    final_score = (ann_score * 0.8) + (popularity_score * 0.2)
+
+                    place_dict['similarity_score'] = ann_score
+                    place_dict['final_score'] = final_score
+                    place_dict['recommendation_type'] = 'similar_places_ann'
+                    place_dict['source'] = 'behavior_based'
+
+                    scored_places.append(place_dict)
+
+                # 최종 점수로 정렬
+                scored_places.sort(key=lambda x: x['final_score'], reverse=True)
+
+                self.stats['ann_searches'] += 1
+                logger.info(f"✅ [Similar] Found {len(scored_places)} similar places in {region} using ANN")
+
+                return scored_places[:limit]
+
+            else:
+                # ANN이 비활성화된 경우, 전통적인 코사인 유사도 사용
+                return await self._get_similar_places_fallback(user_behavior_vector, region, limit, category_filter)
+
+        except Exception as e:
+            logger.error(f"❌ Similar places search failed for region {region}: {e}")
+            return []
+
+    async def _get_similar_places_fallback(
+        self,
+        user_behavior_vector: np.ndarray,
+        region: str,
+        limit: int = 10,
+        category_filter: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        전통적인 코사인 유사도를 사용한 유사한 장소 검색 (Fallback)
+        """
+        try:
+            # 해당 지역의 모든 장소 벡터 조회
+            if category_filter:
+                region_query = """
+                    SELECT
+                        pr.place_id, pr.table_name, pr.region, pr.name,
+                        pr.latitude, pr.longitude, pr.overview, pr.image_urls,
+                        pr.bookmark_cnt, pr.vector as text_vector,
+                        pr.vector as embedding_vector
+                    FROM place_recommendations pr
+                    WHERE pr.region = $1
+                    AND pr.table_name = $2
+                    AND pr.vector IS NOT NULL
+                    AND pr.name IS NOT NULL
+                    LIMIT 200
+                """
+            else:
+                region_query = """
+                    SELECT
+                        pr.place_id, pr.table_name, pr.region, pr.name,
+                        pr.latitude, pr.longitude, pr.overview, pr.image_urls,
+                        pr.bookmark_cnt, pr.vector as text_vector,
+                        pr.vector as embedding_vector
+                    FROM place_recommendations pr
+                    WHERE pr.region = $1
+                    AND pr.vector IS NOT NULL
+                    AND pr.name IS NOT NULL
+                    LIMIT 200
+                """
+
+            async with self.db_manager.get_connection() as conn:
+                if category_filter:
+                    places_data = await conn.fetch(region_query, region, category_filter)
+                else:
+                    places_data = await conn.fetch(region_query, region)
+
+            if not places_data:
+                return []
+
+            # 벡터 유효성 검사 및 유사도 계산
+            valid_places = []
+            place_vectors = []
+
+            for place in places_data:
+                vector = validate_vector_data(place['embedding_vector'])
+                if vector is not None:
+                    valid_places.append(dict(place))
+                    place_vectors.append(vector)
+
+            if not valid_places:
+                return []
+
+            # 벡터화된 유사도 계산
+            place_vectors_array = np.array(place_vectors, dtype=np.float32)
+            similarities = safe_cosine_similarity(user_behavior_vector, place_vectors_array, use_ann=False)
+
+            # 점수화 및 정렬
+            scored_places = []
+            for i, place in enumerate(valid_places):
+                similarity_score = float(similarities[i])
+                popularity_score = min(place['bookmark_cnt'] / 100.0, 1.0) if place['bookmark_cnt'] else 0.0
+                final_score = (similarity_score * 0.8) + (popularity_score * 0.2)
+
+                place['similarity_score'] = similarity_score
+                place['final_score'] = final_score
+                place['recommendation_type'] = 'similar_places_cosine'
+                place['source'] = 'behavior_based'
+
+                scored_places.append(place)
+
+            # 최종 점수로 정렬
+            scored_places.sort(key=lambda x: x['final_score'], reverse=True)
+
+            self.stats['cosine_searches'] += 1
+            logger.info(f"✅ [Similar] Found {len(scored_places)} similar places in {region} using cosine similarity")
+
+            return scored_places[:limit]
+
+        except Exception as e:
+            logger.error(f"❌ Similar places fallback search failed for region {region}: {e}")
+            return []
+
+    def _merge_recommendations(
+        self,
+        priority_recommendations: List[Dict],
+        similar_recommendations: List[Dict],
+        target_limit: int
+    ) -> List[Dict]:
+        """
+        우선순위 추천과 유사한 장소 추천을 병합 (중복 제거)
+        """
+        try:
+            # place_id를 기준으로 중복 제거
+            seen_place_ids = set()
+            merged_recommendations = []
+
+            # 1. 우선순위 추천을 먼저 추가
+            for rec in priority_recommendations:
+                place_id = rec.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    rec['merge_source'] = 'priority'
+                    merged_recommendations.append(rec)
+                    seen_place_ids.add(place_id)
+
+            # 2. 유사한 장소 추천 추가 (중복되지 않는 것만)
+            for rec in similar_recommendations:
+                place_id = rec.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    rec['merge_source'] = 'similar'
+                    merged_recommendations.append(rec)
+                    seen_place_ids.add(place_id)
+
+            # 3. 목표 개수에 맞춰 자르기
+            final_recommendations = merged_recommendations[:target_limit]
+
+            logger.info(f"🔄 [Merge] Combined {len(priority_recommendations)} priority + {len(similar_recommendations)} similar → {len(final_recommendations)} final")
+
+            return final_recommendations
+
+        except Exception as e:
+            logger.error(f"❌ Recommendation merge failed: {e}")
+            return priority_recommendations[:target_limit]  # Fallback to priority only
+
+    async def _get_diverse_category_recommendations(
+        self,
+        user_behavior_vector: np.ndarray,
+        region: str,
+        limit: int,
+        exclude_priority: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        행동 벡터를 기반으로 다양한 카테고리에서 추천 생성
+        우선순위 카테고리는 제외하고 다른 카테고리들에서 추천
+        """
+        try:
+            logger.info(f"🌈 [Diverse] STARTED - Getting diverse category recommendations for region {region}, limit={limit}, excluding {exclude_priority}")
+            logger.info(f"🌈 [Diverse] Input validation - user_behavior_vector: {user_behavior_vector is not None}, region: {region}, limit: {limit}")
+
+            # 모든 카테고리 목록 (우선순위 카테고리 제외)
+            all_categories = ['nature', 'humanities', 'leisure_sports', 'accommodation', 'dining', 'shopping']
+
+            # experience는 특별 처리 - nature, humanities, leisure_sports 포함하므로 이들은 제외
+            if exclude_priority == 'experience':
+                diverse_categories = ['accommodation', 'dining', 'shopping']
+            elif exclude_priority in all_categories:
+                diverse_categories = [cat for cat in all_categories if cat != exclude_priority]
+            else:
+                diverse_categories = all_categories
+
+            logger.info(f"🎯 [Diverse] Target categories: {diverse_categories}")
+
+            diverse_recommendations = []
+            items_per_category = max(1, limit // len(diverse_categories)) if diverse_categories else 0
+
+            for category in diverse_categories:
+                try:
+                    # 해당 카테고리에서 행동 벡터 기반 추천 생성
+                    category_places = await self._get_category_places_with_vectors(region, category)
+
+                    if not category_places:
+                        logger.info(f"⚠️ [Diverse] No places found for category {category} in region {region}")
+                        continue
+
+                    # 행동 벡터와의 유사도 계산
+                    category_recommendations = []
+                    for place in category_places:
+                        try:
+                            place_vector = validate_vector_data(place.get('text_vector'))
+                            if place_vector is not None:
+                                similarity = safe_cosine_similarity(
+                                    user_behavior_vector.reshape(1, -1),
+                                    place_vector.reshape(1, -1)
+                                )[0]
+
+                                place_dict = dict(place)
+                                place_dict['similarity_score'] = float(similarity)
+                                place_dict['recommendation_category'] = category
+                                place_dict['recommendation_source'] = 'diverse_category'
+                                category_recommendations.append(place_dict)
+                        except Exception as place_e:
+                            logger.warning(f"⚠️ [Diverse] Failed to process place {place.get('place_id', 'unknown')}: {place_e}")
+                            continue
+
+                    # 유사도 순으로 정렬
+                    category_recommendations.sort(key=lambda x: x['similarity_score'], reverse=True)
+                    selected_recommendations = category_recommendations[:items_per_category]
+
+                    if selected_recommendations:
+                        logger.info(f"✅ [Diverse] Added {len(selected_recommendations)} recommendations from {category}")
+                        diverse_recommendations.extend(selected_recommendations)
+
+                except Exception as cat_e:
+                    logger.warning(f"⚠️ [Diverse] Failed to get recommendations for category {category}: {cat_e}")
+                    continue
+
+            logger.info(f"🌈 [Diverse] Generated {len(diverse_recommendations)} diverse category recommendations")
+            return diverse_recommendations[:limit]
+
+        except Exception as e:
+            logger.error(f"❌ [Diverse] Diverse category recommendations failed: {e}")
+            return []
+
+    async def _get_category_places_with_vectors(self, region: str, category: str) -> List[Dict]:
+        """특정 지역과 카테고리의 장소들과 벡터 데이터 조회"""
+        try:
+            places_query = """
+                SELECT
+                    place_id, table_name, region, name,
+                    latitude, longitude, overview, image_urls, bookmark_cnt,
+                    vector as text_vector
+                FROM place_recommendations
+                WHERE name IS NOT NULL
+                    AND region = $1
+                    AND table_name = $2
+                    AND vector IS NOT NULL
+                ORDER BY bookmark_cnt DESC
+                LIMIT 100
+            """
+
+            async with self.db_manager.get_connection() as conn:
+                places_data = await conn.fetch(places_query, region, category)
+                return [dict(row) for row in places_data]
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get places for region {region}, category {category}: {e}")
+            return []
+
+    def _merge_diverse_recommendations(
+        self,
+        priority_recommendations: List[Dict],
+        diverse_recommendations: List[Dict],
+        similar_recommendations: List[Dict],
+        target_limit: int
+    ) -> List[Dict]:
+        """
+        우선순위, 다양한 카테고리, 유사한 장소 추천을 병합 (중복 제거)
+        """
+        try:
+            seen_place_ids = set()
+            merged_recommendations = []
+
+            # 1. 우선순위 추천을 먼저 추가
+            for rec in priority_recommendations:
+                place_id = rec.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    rec['merge_source'] = 'priority'
+                    merged_recommendations.append(rec)
+                    seen_place_ids.add(place_id)
+
+            # 2. 다양한 카테고리 추천 추가
+            for rec in diverse_recommendations:
+                place_id = rec.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    rec['merge_source'] = 'diverse_category'
+                    merged_recommendations.append(rec)
+                    seen_place_ids.add(place_id)
+
+            # 3. 유사한 장소 추천 추가 (중복되지 않는 것만)
+            for rec in similar_recommendations:
+                place_id = rec.get('place_id')
+                if place_id and place_id not in seen_place_ids:
+                    rec['merge_source'] = 'similar'
+                    merged_recommendations.append(rec)
+                    seen_place_ids.add(place_id)
+
+            # 4. 목표 개수에 맞춰 자르기
+            final_recommendations = merged_recommendations[:target_limit]
+
+            logger.info(f"🔄 [Diverse Merge] Combined {len(priority_recommendations)} priority + {len(diverse_recommendations)} diverse + {len(similar_recommendations)} similar → {len(final_recommendations)} final")
+
+            return final_recommendations
+
+        except Exception as e:
+            logger.error(f"❌ Diverse recommendation merge failed: {e}")
+            return priority_recommendations[:target_limit]  # Fallback to priority only
+
     async def _get_priority_ordered_recommendations(
         self,
         user_preferences: Dict[str, Any],
@@ -2665,6 +3741,45 @@ class UnifiedRecommendationEngine:
             logger.error(f"❌ Priority ordered recommendations failed for {region}: {e}")
             return []
 
+    async def _get_simple_regional_recommendations(
+        self,
+        region: str,
+        limit: int
+    ) -> List[Dict]:
+        """
+        간단한 지역 기반 추천 (폴백용)
+        """
+        try:
+            query = """
+                SELECT
+                    pr.place_id, pr.table_name, pr.region, pr.name,
+                    pr.latitude, pr.longitude, pr.overview, pr.image_urls,
+                    pr.bookmark_cnt, pr.vector as text_vector,
+                    pr.vector as embedding_vector
+                FROM place_recommendations pr
+                WHERE pr.region = $1
+                AND pr.name IS NOT NULL
+                ORDER BY pr.bookmark_cnt DESC
+                LIMIT $2
+            """
+
+            async with self.db_manager.get_connection() as conn:
+                places_data = await conn.fetch(query, region, limit)
+
+            recommendations = []
+            for place in places_data:
+                place_dict = dict(place)
+                place_dict['recommendation_type'] = 'simple_regional'
+                place_dict['source'] = 'regional_fallback'
+                recommendations.append(place_dict)
+
+            logger.info(f"📍 Generated {len(recommendations)} simple regional recommendations for {region}")
+            return recommendations
+
+        except Exception as e:
+            logger.error(f"❌ Simple regional recommendations failed for {region}: {e}")
+            return []
+
 
 # ============================================================================
 # 🚀 전역 엔진 인스턴스 (싱글톤 패턴)
@@ -2677,8 +3792,20 @@ async def get_engine() -> UnifiedRecommendationEngine:
     global _engine_instance
 
     if _engine_instance is None:
-        _engine_instance = UnifiedRecommendationEngine()
-        await _engine_instance.initialize()
+        try:
+            _engine_instance = UnifiedRecommendationEngine()
+            await _engine_instance.initialize()
+            logger.info("✅ Global recommendation engine initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize recommendation engine: {e}")
+            # 실패 시에도 기본 엔진은 반환 (부분 기능 사용)
+            if _engine_instance is None:
+                _engine_instance = UnifiedRecommendationEngine()
+                # 초기화 실패해도 기본 DB 연결만이라도 시도
+                try:
+                    await _engine_instance.db_manager.initialize()
+                except Exception as db_e:
+                    logger.error(f"❌ DB connection also failed: {db_e}")
 
     return _engine_instance
 
