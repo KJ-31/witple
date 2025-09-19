@@ -1,9 +1,7 @@
 import boto3
 from langchain_aws import ChatBedrock
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 from langchain_postgres import PGVector
-from langchain_core.runnables import RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
@@ -14,9 +12,11 @@ import sys
 import os
 import json
 import re
-import datetime
 import hashlib
 import redis
+import numpy as np
+import faiss
+import pickle
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
@@ -300,6 +300,184 @@ class LLMCache:
 # 전역 캐시 인스턴스
 llm_cache = LLMCache(redis_client if redis_available else None)
 
+# FAISS 벡터 캐시 클래스
+class FAISSVectorCache:
+    def __init__(self, dimension: int = 384, max_vectors: int = 100000):
+        """FAISS 벡터 캐시 초기화"""
+        self.dimension = dimension
+        self.max_vectors = max_vectors
+        self.index = None
+        self.id_to_metadata = {}  # FAISS ID -> 문서 메타데이터 매핑
+        self.content_hash_to_id = {}  # 문서 해시 -> FAISS ID 매핑
+        self.is_loaded = False
+        self.cache_file = "faiss_vector_cache.pkl"
+
+        try:
+            # FAISS 인덱스 초기화 (L2 거리 기반)
+            self.index = faiss.IndexFlatL2(dimension)
+            print(f"🚀 FAISS 벡터 캐시 초기화 완료 (차원: {dimension})")
+        except Exception as e:
+            print(f"⚠️ FAISS 초기화 실패: {e}")
+            self.index = None
+
+    def load_from_pgvector(self, engine):
+        """PGVector에서 벡터와 메타데이터를 로드하여 FAISS 캐시 구성"""
+        if not self.index:
+            return False
+
+        try:
+            print("📥 PGVector에서 벡터 데이터 로딩 중...")
+
+            with engine.connect() as conn:
+                # 모든 벡터와 메타데이터 조회
+                query = text("""
+                    SELECT document, cmetadata, embedding
+                    FROM langchain_pg_embedding
+                    LIMIT :max_vectors
+                """)
+
+                result = conn.execute(query, {"max_vectors": self.max_vectors})
+
+                vectors = []
+                metadata_list = []
+
+                for row in result:
+                    if row.embedding:
+                        # 벡터 데이터 파싱
+                        vector_str = row.embedding.strip('[]')
+                        vector = np.array([float(x) for x in vector_str.split(',')], dtype=np.float32)
+
+                        if vector.shape[0] == self.dimension:
+                            vectors.append(vector)
+
+                            # 메타데이터 저장
+                            metadata = {
+                                'content': row.document,
+                                'metadata': row.cmetadata or {}
+                            }
+                            metadata_list.append(metadata)
+
+                if vectors:
+                    # FAISS 인덱스에 벡터 추가
+                    vectors_array = np.vstack(vectors)
+                    self.index.add(vectors_array)
+
+                    # ID 매핑 생성
+                    for i, metadata in enumerate(metadata_list):
+                        self.id_to_metadata[i] = metadata
+                        content_hash = hashlib.md5(metadata['content'].encode()).hexdigest()
+                        self.content_hash_to_id[content_hash] = i
+
+                    self.is_loaded = True
+                    print(f"✅ FAISS 캐시 로딩 완료: {len(vectors)}개 벡터")
+
+                    # 캐시 파일 저장
+                    self.save_cache()
+                    return True
+                else:
+                    print("⚠️ 로드할 벡터 데이터가 없습니다")
+                    return False
+
+        except Exception as e:
+            print(f"⚠️ PGVector 로딩 실패: {e}")
+            return False
+
+    def save_cache(self):
+        """FAISS 캐시를 파일로 저장"""
+        try:
+            cache_data = {
+                'id_to_metadata': self.id_to_metadata,
+                'content_hash_to_id': self.content_hash_to_id,
+                'is_loaded': self.is_loaded
+            }
+
+            with open(self.cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+
+            # FAISS 인덱스 별도 저장
+            if self.index and self.is_loaded:
+                faiss.write_index(self.index, "faiss_index.bin")
+
+            print("💾 FAISS 캐시 파일 저장 완료")
+
+        except Exception as e:
+            print(f"⚠️ FAISS 캐시 저장 실패: {e}")
+
+    def load_cache(self):
+        """저장된 FAISS 캐시 로드"""
+        try:
+            if os.path.exists(self.cache_file) and os.path.exists("faiss_index.bin"):
+                # 메타데이터 로드
+                with open(self.cache_file, 'rb') as f:
+                    cache_data = pickle.load(f)
+
+                self.id_to_metadata = cache_data.get('id_to_metadata', {})
+                self.content_hash_to_id = cache_data.get('content_hash_to_id', {})
+                self.is_loaded = cache_data.get('is_loaded', False)
+
+                # FAISS 인덱스 로드
+                self.index = faiss.read_index("faiss_index.bin")
+
+                print(f"📂 FAISS 캐시 로드 완료: {len(self.id_to_metadata)}개 벡터")
+                return True
+            else:
+                print("📂 저장된 FAISS 캐시가 없습니다")
+                return False
+
+        except Exception as e:
+            print(f"⚠️ FAISS 캐시 로드 실패: {e}")
+            return False
+
+    def search(self, query_vector: np.ndarray, k: int = 10) -> List[tuple]:
+        """FAISS를 사용한 벡터 유사도 검색"""
+        if not self.index or not self.is_loaded:
+            return []
+
+        try:
+            # 쿼리 벡터 차원 확인
+            if query_vector.shape[0] != self.dimension:
+                print(f"⚠️ 벡터 차원 불일치: {query_vector.shape[0]} != {self.dimension}")
+                return []
+
+            # FAISS 검색 수행
+            query_vector = query_vector.reshape(1, -1).astype(np.float32)
+            distances, indices = self.index.search(query_vector, k)
+
+            results = []
+            for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+                if idx in self.id_to_metadata:
+                    metadata = self.id_to_metadata[idx]
+                    # 거리를 유사도 점수로 변환 (낮을수록 유사함)
+                    similarity_score = 1.0 / (1.0 + distance)
+                    results.append((metadata, similarity_score))
+
+            return results
+
+        except Exception as e:
+            print(f"⚠️ FAISS 검색 실패: {e}")
+            return []
+
+    def get_stats(self) -> dict:
+        """FAISS 캐시 통계 반환"""
+        return {
+            "enabled": self.index is not None,
+            "loaded": self.is_loaded,
+            "total_vectors": len(self.id_to_metadata),
+            "dimension": self.dimension,
+            "max_vectors": self.max_vectors
+        }
+
+# 전역 FAISS 캐시 인스턴스
+faiss_cache = FAISSVectorCache(dimension=384, max_vectors=100000)
+
+def get_search_performance_stats():
+    """검색 성능 통계 반환"""
+    return {
+        "faiss_cache": faiss_cache.get_stats(),
+        "llm_cache": llm_cache.get_cache_stats(),
+        "vectorstore_available": vectorstore is not None
+    }
+
 # LLM 모델 설정 (Amazon Bedrock - Claude)
 print("🤖 Amazon Bedrock Claude 모델 초기화 중...")
 try:
@@ -342,6 +520,21 @@ if DB_ENABLED:
             pre_delete_collection=False,
         )
         print("✅ 벡터스토어 연결 완료 (Redis 우선, PGVector 폴백)")
+
+        # FAISS 캐시 초기화 시도
+        print("🚀 FAISS 벡터 캐시 초기화 중...")
+        try:
+            # 저장된 캐시가 있으면 로드, 없으면 PGVector에서 새로 구성
+            if not faiss_cache.load_cache():
+                print("📥 PGVector에서 FAISS 캐시 새로 구성...")
+                faiss_cache.load_from_pgvector(embeddings, shared_engine)
+            else:
+                print("📂 기존 FAISS 캐시 로드 완료")
+
+        except Exception as faiss_e:
+            print(f"⚠️ FAISS 캐시 초기화 실패: {faiss_e}")
+            print("📢 FAISS 캐시 없이 PGVector만 사용")
+
     except Exception as e:
         print(f"⚠️ 벡터스토어 연결 실패: {e}")
         print("📢 Redis 캐시 전용 모드로 동작")
@@ -372,7 +565,6 @@ FOOD_KEYWORDS = ['맛집', '음식', '레스토랑', '식당', '먹거리', '요
 
 def extract_location_and_category(query: str):
     """쿼리에서 지역명과 카테고리를 정확히 추출"""
-    query_lower = query.lower()
     
     found_regions = []
     found_cities = []
@@ -481,8 +673,14 @@ class HybridOptimizedRetriever(BaseRetriever):
             
             sql_query = f"""
                 SELECT document, cmetadata, embedding
-                FROM langchain_pg_embedding 
-                WHERE {where_clause}
+                FROM langchain_pg_embedding
+                WHERE ({where_clause})
+                AND cmetadata->>'category' NOT ILIKE '%숙소%'
+                AND cmetadata->>'category' NOT ILIKE '%호텔%'
+                AND cmetadata->>'category' NOT ILIKE '%펜션%'
+                AND cmetadata->>'category' NOT ILIKE '%모텔%'
+                AND cmetadata->>'category' NOT ILIKE '%게스트하우스%'
+                AND cmetadata->>'category' NOT ILIKE '%리조트%'
                 LIMIT {self.max_sql_results}
             """
             
@@ -553,122 +751,185 @@ class HybridOptimizedRetriever(BaseRetriever):
             return []
     
     def _vector_search_on_candidates(self, query: str, candidate_docs: List[Document]) -> List[Document]:
-        """선별된 후보 문서들에 대해 벡터 유사도 계산"""
+        """선별된 후보 문서들에 대해 벡터 유사도 계산 (FAISS 캐시 우선)"""
         try:
-            # 후보 문서들을 임시 벡터스토어나 직접 유사도 계산
-            # 실제로는 후보 문서 ID들로 제한된 벡터 검색을 수행
-            
-            # 간단한 구현: 전체 벡터스토어에서 검색하되 결과를 후보와 매치
+            # 1. FAISS 캐시 검색 시도
+            if faiss_cache.is_loaded:
+                try:
+                    print("🚀 FAISS 캐시를 사용한 벡터 검색")
+
+                    # 쿼리 벡터 생성
+                    query_vector = embeddings.embed_query(query)
+                    query_vector = np.array(query_vector, dtype=np.float32)
+
+                    # FAISS 검색 수행
+                    faiss_results = faiss_cache.search(query_vector, k=self.k)
+
+                    if faiss_results:
+                        # 후보 문서와 매칭
+                        candidate_contents = {doc.page_content for doc in candidate_docs}
+
+                        filtered_docs = []
+                        for metadata, similarity_score in faiss_results:
+                            content = metadata.get('content', '')
+                            category = metadata.get('metadata', {}).get('category', '')
+
+                            # 숙소 카테고리 필터링
+                            accommodation_keywords = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트', '한옥', '관광호텔', '유스호스텔', '텔', '레지던스']
+                            is_accommodation = any(keyword in category for keyword in accommodation_keywords)
+
+                            if is_accommodation:
+                                print(f"🚫 숙소 필터링: {category} - {content[:30]}...")
+                                continue
+
+                            if content in candidate_contents and similarity_score >= self.score_threshold:
+                                # Document 객체 생성
+                                doc = Document(
+                                    page_content=content,
+                                    metadata={
+                                        **metadata.get('metadata', {}),
+                                        'similarity_score': round(similarity_score, 3),
+                                        'search_method': 'faiss_cache'
+                                    }
+                                )
+                                filtered_docs.append(doc)
+
+                                if len(filtered_docs) >= 50:
+                                    break
+
+                        print(f"✅ FAISS 캐시 검색 완료: {len(filtered_docs)}개 문서")
+                        return filtered_docs
+
+                except Exception as e:
+                    print(f"⚠️ FAISS 캐시 검색 실패, PGVector로 폴백: {e}")
+
+            # 2. PGVector 폴백 검색
+            print("🔄 PGVector 폴백 검색")
             all_docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=self.k)
-            
-            # 후보 문서의 내용으로 매칭 (실제로는 ID 기반 매칭이 더 효율적)
+
+            # 후보 문서의 내용으로 매칭
             candidate_contents = {doc.page_content for doc in candidate_docs}
-            
+
             filtered_docs = []
             for doc, score in all_docs_with_scores:
+                # 숙소 카테고리 필터링
+                category = doc.metadata.get('category', '')
+                accommodation_keywords = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트', '한옥', '관광호텔', '유스호스텔', '텔', '레지던스']
+                is_accommodation = any(keyword in category for keyword in accommodation_keywords)
+
+                if is_accommodation:
+                    print(f"🚫 PGVector 폴백 숙소 필터링: {category} - {doc.page_content[:30]}...")
+                    continue
+
                 if doc.page_content in candidate_contents and score >= self.score_threshold:
                     # 유사도 점수를 metadata에 추가
                     doc.metadata['similarity_score'] = round(score, 3)
+                    doc.metadata['search_method'] = 'pgvector_fallback'
                     filtered_docs.append(doc)
-                    
+
                     # 충분한 결과를 얻으면 중단 (성능 최적화)
                     if len(filtered_docs) >= 50:
                         break
-            
+
+            print(f"✅ PGVector 검색 완료: {len(filtered_docs)}개 문서")
             return filtered_docs
-            
+
         except Exception as e:
             print(f"❌ 벡터 유사도 계산 오류: {e}")
             return []
     
     def _fallback_vector_search(self, query: str) -> List[Document]:
-        """SQL 필터링 실패시 순수 벡터 검색"""
+        """SQL 필터링 실패시 순수 벡터 검색 (FAISS 캐시 우선)"""
         try:
-            print("🧠 순수 벡터 검색 실행...")
-            docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=min(100, self.k))
-            
+            # 1. FAISS 캐시 검색 시도
+            if faiss_cache.is_loaded:
+                try:
+                    print("🚀 FAISS 캐시를 사용한 순수 벡터 검색")
+
+                    # 쿼리 벡터 생성
+                    query_vector = embeddings.embed_query(query)
+                    query_vector = np.array(query_vector, dtype=np.float32)
+
+                    # FAISS 검색 수행
+                    faiss_results = faiss_cache.search(query_vector, k=min(500, self.k))
+
+                    if faiss_results:
+                        filtered_docs = []
+                        for metadata, similarity_score in faiss_results:
+                            category = metadata.get('metadata', {}).get('category', '')
+
+                            # 숙소 카테고리 필터링
+                            accommodation_keywords = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트', '한옥', '관광호텔', '유스호스텔', '텔', '레지던스']
+                            is_accommodation = any(keyword in category for keyword in accommodation_keywords)
+
+                            if is_accommodation:
+                                print(f"🚫 폴백 숙소 필터링: {category} - {metadata.get('content', '')[:30]}...")
+                                continue
+
+                            if similarity_score >= self.score_threshold:
+                                # Document 객체 생성
+                                doc = Document(
+                                    page_content=metadata.get('content', ''),
+                                    metadata={
+                                        **metadata.get('metadata', {}),
+                                        'similarity_score': round(similarity_score, 3),
+                                        'search_method': 'faiss_fallback'
+                                    }
+                                )
+                                filtered_docs.append(doc)
+
+                        print(f"✅ FAISS 폴백 검색 완료: {len(filtered_docs)}개 문서")
+                        return filtered_docs
+
+                except Exception as e:
+                    print(f"⚠️ FAISS 폴백 검색 실패, PGVector로 폴백: {e}")
+
+            # 2. PGVector 폴백 검색
+            print("🧠 PGVector 순수 벡터 검색 실행...")
+            docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=min(500, self.k))
+
             filtered_docs = []
             for doc, score in docs_with_scores:
                 if score >= self.score_threshold:
                     doc.metadata['similarity_score'] = round(score, 3)
+                    doc.metadata['search_method'] = 'pgvector_pure'
                     filtered_docs.append(doc)
-            
+
+            print(f"✅ PGVector 폴백 검색 완료: {len(filtered_docs)}개 문서")
             return filtered_docs
-            
+
         except Exception as e:
             print(f"❌ 폴백 벡터 검색 오류: {e}")
             return []
 
 # 하이브리드 최적화 Retriever 생성 (sentence-transformers 모델에 최적화된 임계값)
-retriever = HybridOptimizedRetriever(vectorstore, k=32000, score_threshold=0.5, max_sql_results=5000)
+retriever = HybridOptimizedRetriever(vectorstore, k=50000, score_threshold=0.4, max_sql_results=8000)
 
 # =============================================================================
-# 프롬프트 템플릿 정의
+# 주요 기능 함수들 (LangGraph 워크플로우 사용)
 # =============================================================================
-
-rag_prompt = ChatPromptTemplate.from_template("""
-당신은 여행 전문 어시스턴트입니다. 
-주어진 여행지 정보를 바탕으로 사용자의 요청에 맞는 여행 일정을 작성해주세요.
-
-여행지 정보:
-{context}
-
-사용자 질문: {question}
-
-답변 지침:
-1. 만약 여행지 정보가 "NO_RELEVANT_DATA"라면, 다음과 같이 답변하세요:
-   "죄송합니다. 요청하신 '{question}'와 관련된 여행지 정보를 찾을 수 없습니다. 
-   더 구체적인 지역명이나 다른 여행지로 다시 문의해 주시기 바랍니다."
-
-2. 관련 여행지 정보가 있다면:
-    - 실제 제공된 여행지 정보만을 활용하세요
-    - 구체적인 장소명, 지역, 카테고리를 포함하세요
-    - 사용자가 요청한 일정으로 구성해주세요
-    - 점심, 저녁 시간을 생각하고 식사를 할 곳도 넣어주세요
-    - 시간단위로 일정을 제공해주세요
-    - 카테고리가 다르더라도 명소라 생각되면 답변해주세요
-    - 중복된 추천은 반드시 제거해주세요
-    - 한국어로 자연스럽게 작성하세요
-
-답변:
-""")
-
-# # RAG 체인 구성
 
 def format_docs(docs):
     """검색된 문서들을 텍스트로 포맷팅 (유사도 점수 포함)"""
     if not docs:
         return "NO_RELEVANT_DATA"  # 관련 데이터 없음을 나타내는 특별한 마커
-    
+
     formatted_docs = []
     for i, doc in enumerate(docs, 1):
         # 유사도 점수 추출
         similarity_score = doc.metadata.get('similarity_score', 'N/A')
         content = f"[여행지 {i}] (유사도: {similarity_score})\n{doc.page_content}"
-        
+
         if doc.metadata:
             meta_info = []
             for key, value in doc.metadata.items():
-                if value and key not in ['original_id', 'similarity_score', '_embedding']:  # 내부 키 제외
+                if value and key not in ['original_id', 'similarity_score', '_embedding', 'search_method']:  # 내부 키 제외
                     meta_info.append(f"{key}: {value}")
             if meta_info:
                 content += f"\n({', '.join(meta_info)})"
         formatted_docs.append(content)
-    
+
     return "\n\n".join(formatted_docs)
-
-# RAG 파이프라인 구성
-rag_chain = (
-    {
-        "context": retriever | format_docs, 
-        "question": RunnablePassthrough()
-    }
-    | rag_prompt
-    | llm
-    | StrOutputParser()
-)
-
-# # 주요 기능 함수들
 
 def search_places(query):
     """여행지 검색 함수 (하이브리드 최적화 + Redis 캐싱)"""
@@ -776,7 +1037,6 @@ def extract_region_from_context(state):
 # LangGraph 의존성 임포트 (선택적)
 try:
     from langgraph.graph import StateGraph, START, END
-    from langgraph.graph.message import add_messages
     LANGGRAPH_AVAILABLE = True
 except ImportError:
     print("⚠️ LangGraph가 설치되지 않음. 기본 RAG 모드로 동작합니다.")
@@ -1057,11 +1317,11 @@ def rag_processing_node(state: TravelState) -> TravelState:
                     region_docs.append(doc)
             
             if region_docs:
-                docs = region_docs[:50]  # 더 많은 결과 허용
+                docs = region_docs[:35]  # FAISS 최적화로 품질 높은 문서 선별
                 print(f"📍 지역 필터링 결과: {len(docs)}개 문서 선별")
             else:
                 print(f"⚠️ 지역 필터링 결과 없음, 전체 결과 사용")
-                docs = docs[:50]
+                docs = docs[:35]
         
         # 구조화된 장소 데이터 추출
         structured_places = extract_structured_places(docs)
@@ -1082,16 +1342,18 @@ def rag_processing_node(state: TravelState) -> TravelState:
 - 주어진 여행지 정보에 포함된 장소들만 사용하세요
 - 각 일차별로 시간대에 맞는 적절한 장소를 배치하세요
 - 같은 지역 내에서만 일정을 구성하세요
+- 반드시 실제 장소들만 사용하세요
 
 출력 형식을 다음과 같이 맞춰주세요:
 
 🏝️ <strong>지역명 여행 일정</strong>
 
 <strong>[1일차]</strong>
-• 09:00-12:00 <strong>장소명</strong> - 간단한 설명 (1줄)
-• 12:00-13:00 <strong>식당명</strong> - 음식 종류 점심
+• 09:00-12:00(유동적으로 조절) <strong>장소명</strong> - 간단한 설명 (1줄)
+• 12:00-13:00(식사 사간은 고정) <strong>식당명</strong> - 음식 종류 점심
 • 14:00-17:00 <strong>장소명</strong> - 간단한 설명 (1줄)
 • 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁
+(추천지를 늘려도 좋습니다)
 
 <strong>[2일차]</strong> (기간에 따라 추가)
 ...
@@ -1354,7 +1616,6 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         **travel_plan,
         "status": "confirmed",
         "confirmed_at": datetime.now().isoformat(),
-        "ready_for_booking": True,
         "plan_id": generate_plan_id()  # 고유 ID 생성
     }
     
@@ -1765,14 +2026,13 @@ def find_real_place_id(place_name: str, table_name: str, region: str = "") -> st
     try:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
-        from models_attractions import Nature, Restaurant, Shopping, Accommodation, Humanities, LeisureSports
+        from models_attractions import Nature, Restaurant, Shopping, Humanities, LeisureSports
         
-        # 테이블 매핑
+        # 테이블 매핑 (숙소 제외)
         table_models = {
             "nature": Nature,
             "restaurants": Restaurant,
             "shopping": Shopping,
-            "accommodation": Accommodation,
             "humanities": Humanities,
             "leisure_sports": LeisureSports
         }
@@ -1818,7 +2078,7 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
     """RAG 검색 결과에서 구조화된 장소 정보 추출 (업데이트된 메타데이터 활용)"""
     structured_places = []
 
-    for doc in docs[:20]:  # 상위 20개만 처리
+    for doc in docs[:25]:  # 상위 25개 처리 (FAISS 최적화)
         try:
             # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
             metadata = doc.metadata or {}
@@ -1897,7 +2157,7 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
                     "맛집": "restaurants", "자연": "nature", "관광": "nature",
                     "문화": "humanities", "쇼핑": "shopping",
                     "레포츠": "leisure_sports", "스포츠": "leisure_sports",
-                    "숙박": "accommodation", "펜션": "accommodation", "호텔": "accommodation"
+                    # 숙소 관련 카테고리 제외
                 }
                 place_info["table_name"] = category_to_table.get(place_info["category"], "nature")
 
@@ -2311,7 +2571,6 @@ def get_current_travel_state_ref():
 
 async def get_travel_recommendation_langgraph(query: str, conversation_history: List[str] = None, session_id: str = "default") -> dict:
     """LangGraph 기반 여행 추천 (개선된 상태 관리 - 새 추천시 덮어쓰기)"""
-    import datetime
 
     if not travel_workflow:
         # LangGraph 미사용 시 에러 반환
@@ -2352,12 +2611,12 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
                 "travel_plan": {},
                 "places": [],
                 "context": "",
-                "timestamp": datetime.datetime.now().isoformat()
+                "timestamp": "auto"
             })
         else:
             print("💾 기존 상태 유지")
             current_travel_state["last_query"] = query
-            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
+            current_travel_state["timestamp"] = "auto"
 
         # 전역 상태에서 기존 여행 계획 가져오기
         existing_travel_plan = current_travel_state.get("travel_plan", {})
@@ -2399,7 +2658,7 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
                 "places": places,
                 "context": final_state.get("conversation_context", ""),
                 "last_query": query,
-                "timestamp": datetime.datetime.now().isoformat()
+                "timestamp": "auto"
             })
             print(f"💾 새로운 여행 상태 저장 완료: {len(places)}개 장소")
         

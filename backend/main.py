@@ -93,7 +93,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "redis": redis_client.ping()}
+    try:
+        redis_status = redis_client.ping()
+    except Exception as e:
+        redis_status = f"Redis connection failed: {str(e)}"
+
+    return {"status": "healthy", "redis": redis_status}
 
 
 @app.get("/redis/test")
