@@ -1965,7 +1965,7 @@ def rag_processing_node(state: TravelState) -> TravelState:
                     target_keywords.extend(keywords)
                     break
         
-        # 지역 필터링 개선 (더 포괄적으로)
+        # 지역 필터링 강화 - 정확한 지역만 매칭
         if query_regions:
             print(f"🎯 지역 필터링: {query_regions}")
             region_docs = []
@@ -1974,39 +1974,45 @@ def rag_processing_node(state: TravelState) -> TravelState:
                 doc_region = doc.metadata.get('region', '').lower()
                 doc_city = doc.metadata.get('city', '').lower()
                 
-                # 포괄적인 지역 매칭
+                # 정확한 지역 매칭만 허용 (다른 지역 장소 배제)
                 is_relevant = False
                 for region in query_regions:
                     region_lower = region.lower()
                     
-                    # 1. 정확한 지역명 매칭
-                    if region_lower in doc_region:
+                    # 서울 요청 시 서울특별시만 허용
+                    if '서울' in region_lower:
+                        if '서울' in doc_region and '강원' not in doc_region and '부산' not in doc_region:
+                            is_relevant = True
+                            break
+                    # 부산 요청 시 부산광역시만 허용
+                    elif '부산' in region_lower:
+                        if '부산' in doc_region and '서울' not in doc_region:
+                            is_relevant = True
+                            break
+                    # 강릉/강원도 요청 시 강원도만 허용
+                    elif '강릉' in region_lower or '강원' in region_lower:
+                        if '강원' in doc_region and '서울' not in doc_region:
+                            is_relevant = True
+                            break
+                    # 제주 요청 시 제주도만 허용
+                    elif '제주' in region_lower:
+                        if '제주' in doc_region and '서울' not in doc_region:
+                            is_relevant = True
+                            break
+                    # 기타 지역 정확한 매칭
+                    elif region_lower in doc_region:
                         is_relevant = True
-                        break
-                    
-                    # 2. 특정 지역 요청 시 해당 광역시/도 전체 포함
-                    elif '강릉' in region_lower and '강원' in doc_region:
-                        is_relevant = True  # 강릉 요청 시 강원도 전체 포함
-                        break
-                    elif '부산' in region_lower and ('부산' in doc_region or '부산' in doc_city):
-                        is_relevant = True  # 부산 요청 시 부산 전체 포함
-                        break  
-                    elif '서울' in region_lower and ('서울' in doc_region or '서울' in doc_city):
-                        is_relevant = True  # 서울 요청 시 서울 전체 포함
-                        break
-                    elif '제주' in region_lower and '제주' in doc_region:
-                        is_relevant = True  # 제주 요청 시 제주도 전체 포함
                         break
                 
                 if is_relevant:
                     region_docs.append(doc)
             
             if region_docs:
-                docs = region_docs[:50]  # 더 많은 결과 허용
-                print(f"📍 지역 필터링 결과: {len(docs)}개 문서 선별")
+                docs = region_docs[:50]  # 필터링된 결과 사용
+                print(f"📍 강화된 지역 필터링 결과: {len(docs)}개 문서 선별 (지역: {query_regions})")
             else:
-                print(f"⚠️ 지역 필터링 결과 없음, 전체 결과 사용")
-                docs = docs[:50]
+                print(f"⚠️ 지역 필터링 결과 없음, 전체 결과에서 상위 20개 사용")
+                docs = docs[:20]  # 전체 결과도 줄임
         
         # 구조화된 장소 데이터 추출
         structured_places = extract_structured_places(docs)
@@ -2212,7 +2218,7 @@ def general_chat_node(state: TravelState) -> TravelState:
         }
 
 def normalize_place_name(place_name: str) -> str:
-    """장소명 정규화 (매칭 정확도 향상)"""
+    """장소명 정규화 (매칭 정확도 향상) - 부가 정보 제거"""
     if not place_name:
         return ""
 
@@ -2224,6 +2230,12 @@ def normalize_place_name(place_name: str) -> str:
         name = name[8:].strip()
     if name.endswith("</strong>"):
         name = name[:-9].strip()
+
+    # 부가 정보 패턴 제거 (한국관광 품질인증 등)
+    name = re.sub(r'\[한국관광\s*품질인증[^\]]*\]', '', name)  # [한국관광 품질인증/Korea Quality] 제거
+    name = re.sub(r'\[Korea\s*Quality[^\]]*\]', '', name)      # [Korea Quality] 제거  
+    name = re.sub(r'\([^)]*품질인증[^)]*\)', '', name)         # (품질인증 관련) 제거
+    name = re.sub(r'\s+', ' ', name)                          # 연속 공백 정리
 
     # 공백 정리
     name = ' '.join(name.split())
@@ -2364,9 +2376,15 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
             table_name = place.get("table_name", "nature")
             place_id = place.get("place_id")
 
-            # place_id가 없거나 "1"이면 스킵 (무등산 주상절리대 방지)
-            if not place_id or place_id == "1":
-                print(f"⚠️ place_id 없음 - 장소 '{place.get('name', 'Unknown')}' 스킵")
+            # place_id 검증 - 실제 DB에 존재하는 ID만 허용
+            if not place_id or place_id.startswith('temp_'):
+                print(f"⚠️ 유효하지 않은 place_id - 장소 '{place.get('name', 'Unknown')}' 스킵 (place_id: {place_id})")
+                continue
+            
+            # 무효한 장소명 체크
+            invalid_names = ['무등산 주상절리대', '기본장소', 'unknown', '']
+            if place.get('name', '') in invalid_names:
+                print(f"⚠️ 무효한 장소명 - 장소 '{place.get('name', 'Unknown')}' 스킵")
                 continue
 
             # 장소 ID 생성 (table_name_place_id 형태)
@@ -2686,38 +2704,55 @@ def get_place_from_recommendations(place_id: str, table_name: str) -> dict:
         return None
 
 def find_place_in_recommendations(place_name: str) -> dict:
-    """place_recommendations 테이블에서 장소명으로 실제 데이터 검색 (벡터 업데이트 후 불필요)"""
-    # 벡터 업데이트 후에는 메타데이터에 place_id, table_name이 포함되므로
-    # 이 함수는 호환성을 위해서만 유지
+    """place_recommendations 테이블에서 장소명으로 실제 데이터 검색 (정규화된 이름으로 검색)"""
     try:
         from sqlalchemy import text
 
         # DB 연결
         engine = shared_engine
+        
+        # 정규화된 장소명으로 검색
+        normalized_name = normalize_place_name(place_name)
+        print(f"   🔎 DB 검색 - 원본: '{place_name}' -> 정규화: '{normalized_name}'")
 
         with engine.connect() as conn:
-            # 유사한 이름으로 검색 (대소문자 구분 없이) - psycopg3 스타일
+            # 1. 정규화된 이름으로 정확한 매칭 시도
             search_query = """
             SELECT place_id, table_name, name, region, city, category
             FROM place_recommendations
-            WHERE name ILIKE :search_term
+            WHERE LOWER(REPLACE(REPLACE(name, '[한국관광 품질인증/Korea Quality]', ''), '[Korea Quality]', '')) ILIKE :exact_term
             LIMIT 1
             """
-
-            result = conn.execute(text(search_query), {'search_term': f"%{place_name}%"})
+            
+            result = conn.execute(text(search_query), {'exact_term': f"%{normalized_name}%"})
             row = result.fetchone()
+            
+            # 2. 정확한 매칭 실패 시 부분 매칭 시도
+            if not row:
+                search_query = """
+                SELECT place_id, table_name, name, region, city, category
+                FROM place_recommendations
+                WHERE name ILIKE :partial_term
+                LIMIT 1
+                """
+                
+                result = conn.execute(text(search_query), {'partial_term': f"%{normalized_name}%"})
+                row = result.fetchone()
 
             if row:
+                print(f"   ✅ DB 매칭 성공: '{row.name}' (ID: {row.place_id})")
                 return {
                     'name': row.name,
                     'place_id': str(row.place_id) if row.place_id else "1",
-                    'table_name': row.table_name or 'nature',
-                    'region': row.region or '강원특별자치도',
-                    'city': row.city or '미지정',
-                    'category': row.category or '관광',
+                    'table_name': row.table_name or 'accommodation',
+                    'region': row.region or '서울특별시',
+                    'city': row.city or '서울시',
+                    'category': row.category or '숙박',
                     'description': f'장소: {row.name}',
                     'similarity_score': 0.9
                 }
+            else:
+                print(f"   ❌ DB에서 매칭 실패: '{normalized_name}' 찾을 수 없음")
 
         return None
 
@@ -2905,55 +2940,65 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
             continue
         
         # 너무 짧거나 긴 장소명 제외
-        if len(mentioned_place) < 2 or len(mentioned_place) > 30:
+        if len(mentioned_place) < 2 or len(mentioned_place) > 50:  # 길이 제한 완화
+            print(f"🚫 장소명 길이 부적합: '{mentioned_place}' (길이: {len(mentioned_place)})")
             continue
+        
+        print(f"🔍 장소 매칭 시도: '{mentioned_place}'")
             
-        # structured_places에서 가장 유사한 장소 찾기
+        # structured_places에서 가장 유사한 장소 찾기 (정규화된 이름으로 비교)
         best_match = None
         best_score = 0
         
+        # 언급된 장소명 정규화 
+        mentioned_place_normalized = normalize_place_name(mentioned_place)
+        print(f"   📝 정규화된 이름: '{mentioned_place}' -> '{mentioned_place_normalized}'")
+        
         for place in structured_places:
             place_name = place.get("name", "").strip()
+            place_name_normalized = normalize_place_name(place_name)
 
             # LLM이 생성한 장소는 모두 포함 (지역 필터링 제거)
             # LLM이 이미 적절한 판단을 했다고 신뢰
             
-            # 정확히 일치하는 경우
-            if mentioned_place == place_name:
+            # 정규화된 이름으로 정확히 일치하는 경우
+            if mentioned_place_normalized == place_name_normalized:
                 best_match = place
                 best_score = 1.0
+                print(f"   ✅ 정확 매칭: '{mentioned_place_normalized}' == '{place_name_normalized}'")
                 break
             
-            # 부분 문자열 매칭
-            if mentioned_place in place_name or place_name in mentioned_place:
+            # 부분 문자열 매칭 (정규화된 이름으로)
+            if (mentioned_place_normalized and place_name_normalized and 
+                (mentioned_place_normalized in place_name_normalized or place_name_normalized in mentioned_place_normalized)):
                 # 더 긴 매칭일수록 높은 점수
-                score = min(len(mentioned_place), len(place_name)) / max(len(mentioned_place), len(place_name))
+                score = min(len(mentioned_place_normalized), len(place_name_normalized)) / max(len(mentioned_place_normalized), len(place_name_normalized))
                 if score > best_score:
                     best_score = score
                     best_match = place
+                    print(f"   📈 부분 매칭: '{mentioned_place_normalized}' <-> '{place_name_normalized}' (점수: {score:.2f})")
         
-        # 매칭 점수가 0.2 이상이면 추가 (더 관대하게)
-        if best_match and best_score >= 0.2:
+        # 매칭 점수를 더 관대하게 (0.2 -> 0.1) 서울 지역 장소 포함성 향상
+        if best_match and best_score >= 0.1:
             if best_match not in matched_places:
+                print(f"✅ 장소 매칭 성공: '{mentioned_place}' -> '{best_match.get('name', 'Unknown')}' (점수: {best_score:.2f})")
                 matched_places.append(best_match)
-        elif not best_match and len(mentioned_place) >= 3:
-            # 실제 place_recommendations 테이블에서 해당 장소 검색
-            actual_place = find_place_in_recommendations(mentioned_place)
-            if actual_place:
-                matched_places.append(actual_place)
-            else:
-                # 정말 찾을 수 없는 경우만 가상 장소 생성
-                virtual_place = {
-                    'name': mentioned_place,
-                    'category': '관광',
-                    'region': '강원특별자치도',
-                    'city': '강릉시' if '강릉' in mentioned_place else '미지정',
-                    'table_name': 'nature',
-                    'place_id': "1",  # 찾을 수 없는 경우 기본 ID
-                    'description': f'LLM 추천 장소: {mentioned_place}',
-                    'similarity_score': 0.8
-                }
-                matched_places.append(virtual_place)
+        else:
+            # 매칭 실패한 경우
+            if not best_match:
+                print(f"❌ 매칭 실패: '{mentioned_place}' (구조화된 장소에서 찾을 수 없음)")
+            elif best_score < 0.1:
+                print(f"❌ 매칭 점수 부족: '{mentioned_place}' (최고 점수: {best_score:.2f} < 0.1)")
+            
+            # DB에서 직접 검색 시도
+            if len(mentioned_place) >= 2:
+                print(f"🔎 DB에서 장소 검색 시도: '{mentioned_place}'")
+                actual_place = find_place_in_recommendations(mentioned_place)
+                if actual_place:
+                    print(f"✅ DB에서 찾음: '{actual_place.get('name', 'Unknown')}'")
+                    matched_places.append(actual_place)
+                else:
+                    print(f"❌ DB에서도 찾을 수 없음: '{mentioned_place}' - 지도 표시에서 제외")
     
     return matched_places
 
