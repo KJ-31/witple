@@ -245,12 +245,7 @@ export default function Home() {
         // console.log('🔄 처리된 데이터로 setCitySections 호출:', processedData.length, '개 섹션')
       }
 
-      console.log('🔥 setCitySections 호출:', {
-        finalDataLength: finalData.length,
-        totalAttractions: totalAttractions,
-        processedDataLength: processedData.length,
-        originalResultLength: result.data?.length || 0
-      })
+       // console.log('setCitySections 호출:', finalData.length, '개 섹션')
       setCitySections(finalData)
 
       // 사용 가능한 지역 추출 및 업데이트
@@ -260,8 +255,7 @@ export default function Home() {
 
       setAvailableRegions(regions)
     } catch (error) {
-      console.error('🚨 데이터 로드 오류:', error instanceof Error ? error.message : String(error))
-      console.log('🚨 오류로 인해 빈 배열 설정')
+       console.error('데이터 로드 오류:', error instanceof Error ? error.message : String(error))
       setCitySections([])
     } finally {
       setLoading(false)
@@ -858,14 +852,14 @@ function AttractionCard({
 }) {
   const categoryColor = getCategoryColor(attraction.category?.trim())
 
-  // 이미지 URL 및 카테고리 디버깅
-  console.log(`🖼️ AttractionCard - ${attraction.name}:`, {
-    imageUrl: attraction.imageUrl,
-    imageUrlType: typeof attraction.imageUrl,
-    imageUrlLength: attraction.imageUrl?.length,
-    category: attraction.category,
-    fullData: attraction
-  })
+  // // 이미지 URL 및 카테고리 디버깅
+  // console.log(`🖼️ AttractionCard - ${attraction.name}:`, {
+  //   imageUrl: attraction.imageUrl,
+  //   imageUrlType: typeof attraction.imageUrl,
+  //   imageUrlLength: attraction.imageUrl?.length,
+  //   category: attraction.category,
+  //   fullData: attraction
+  // })
 
   return (
     <figure
@@ -897,7 +891,7 @@ function AttractionCard({
                 target.style.opacity = '1';
                 const loadingIndicator = target.previousElementSibling as HTMLElement;
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
-                console.log(`✅ 이미지 로드 성공: ${attraction.name} - ${attraction.imageUrl}`);
+                // console.log(`✅ 이미지 로드 성공: ${attraction.name} - ${attraction.imageUrl}`);
               }}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -1080,11 +1074,7 @@ function UnifiedRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
-          {/* 🎯 디버그: filteredAttractions 확인 */}
-          {(() => {
-            console.log('🎯 UnifiedRecommendationSection 데이터 체크:', filteredAttractions.length);
-            return null;
-          })()}
+           {/* 디버그 로그 제거됨 */}
           {filteredAttractions.length === 0 && (
             <div className="flex-shrink-0 p-4 bg-red-500/20 text-white rounded mx-4">
               ⚠️ 추천할 장소가 없습니다
@@ -1153,11 +1143,7 @@ function PopularRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
-          {/* 🎯 디버그: filteredAttractions 확인 */}
-          {(() => {
-            console.log('🎯 UnifiedRecommendationSection 데이터 체크:', filteredAttractions.length);
-            return null;
-          })()}
+           {/* 디버그 로그 제거됨 */}
           {filteredAttractions.length === 0 && (
             <div className="flex-shrink-0 p-4 bg-red-500/20 text-white rounded mx-4">
               ⚠️ 추천할 장소가 없습니다
