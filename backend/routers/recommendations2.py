@@ -156,16 +156,63 @@ async def get_main_personalized_feed(
     try:
         user_id = str(current_user.user_id) if current_user else None
 
-        logger.info(f"Getting personalized feed for user: {user_id}, limit: {limit}")
+        # priority_tag 가져오기 (explore와 동일한 방식)
+        user_priority_tag = "none"
+        if user_id:
+            try:
+                engine = await get_engine()
+                priority = await engine.get_user_priority_tag(user_id)
+                user_priority_tag = priority or "none"
+            except Exception as e:
+                logger.warning(f"Failed to get user priority for personalized: {e}")
 
-        # 통합 엔진 호출 (메인 페이지용 fast_mode 적용)
-        recommendations = await fetch_recommendations_with_fallback(
-            user_id=user_id,
-            region=region,  # 지역 필터 적용
-            category=None,
-            limit=limit,
-            fast_mode=True  # 메인 피드는 항상 고속 모드
-        )
+        logger.info(f"🔍 Getting personalized feed for user: {user_id}, priority_tag: {user_priority_tag}, limit: {limit}")
+        print(f"🔍 DEBUG: user_id={user_id}, priority_tag={user_priority_tag}")
+
+        # experience 사용자는 별도 처리 (폴백 포함)
+        if user_priority_tag == "experience":
+            logger.info(f"🎯 Processing experience user with fallback")
+            # 먼저 개인화 추천 시도
+            recommendations = await fetch_recommendations_with_fallback(
+                user_id=user_id,
+                region=region,
+                category=None,
+                limit=limit,
+                fast_mode=True
+            )
+            # 개인화 추천이 실패하면 experience 카테고리의 인기 추천으로 폴백
+            if not recommendations:
+                logger.info(f"🎯 Fallback to popular experience recommendations")
+                # experience 카테고리별로 인기 추천 가져오기
+                experience_recommendations = []
+                experience_categories = ["nature", "humanities", "leisure_sports"]
+                for category in experience_categories:
+                    category_recs = await fetch_recommendations_with_fallback(
+                        user_id=None,  # 인기 추천을 위해 None
+                        region=None,
+                        category=category,
+                        limit=limit // len(experience_categories) + 2,
+                        fast_mode=True
+                    )
+                    if category_recs:
+                        experience_recommendations.extend(category_recs)
+
+                # 점수순으로 정렬하고 제한
+                if experience_recommendations:
+                    experience_recommendations.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+                    recommendations = experience_recommendations[:limit]
+                    logger.info(f"🎯 Fallback returned {len(recommendations)} experience recommendations")
+        else:
+            # 일반 사용자는 기존 로직
+            recommendations = await fetch_recommendations_with_fallback(
+                user_id=user_id,
+                region=region,  # 지역 필터 적용
+                category=None,
+                limit=limit,
+                fast_mode=True  # 메인 피드는 항상 고속 모드
+            )
+
+        logger.info(f"🔍 Initial recommendations count: {len(recommendations) if recommendations else 0}")
 
         if not recommendations:
             return {
@@ -173,6 +220,16 @@ async def get_main_personalized_feed(
                 "feed": [],
                 "message": "추천할 콘텐츠가 없습니다."
             }
+
+        # 체험 우선순위 사용자에게는 체험 관련 카테고리만 필터링
+        if user_priority_tag == "experience":
+            experience_categories = ["nature", "humanities", "leisure_sports"]
+            logger.info(f"🎯 Experience user - filtering to experience categories: {experience_categories}")
+            recommendations = [
+                rec for rec in recommendations
+                if rec.get('table_name') in experience_categories
+            ]
+            logger.info(f"🎯 Filtered recommendations count: {len(recommendations)}")
 
         # 응답 데이터에 category 필드 추가
         processed_recommendations = []
@@ -235,11 +292,7 @@ async def get_main_explore_feed(
         logger.info(f"Dynamic regions: {target_regions[:3]}... ({len(target_regions)} total)")
         logger.info(f"Dynamic categories: {target_categories[:3]}... ({len(target_categories)} total)")
 
-        # 성능을 위해 일부 카테고리만 사용, 지역은 모두 포함
-        limited_regions = target_regions  # 모든 지역 포함
-        limited_categories = target_categories[:6]  # 상위 6개 카테고리 (요청사항 반영)
-
-        # 🔑 사용자 우선순위 태그 조회 (캐시 키 생성용)
+        # 🔑 사용자 우선순위 태그 조회 (카테고리 필터링용)
         user_priority_tag = "none"
         if user_id:
             try:
@@ -249,8 +302,18 @@ async def get_main_explore_feed(
             except Exception as e:
                 logger.warning(f"Failed to get user priority for cache key: {e}")
 
-        # 🚀 Redis 캐시 키 생성 (우선순위 태그 포함) - v2
-        cache_key = f"explore_feed_v2:{user_id or 'anonymous'}:{user_priority_tag}:{':'.join(sorted(limited_regions))}:{':'.join(sorted(limited_categories))}"
+        # 성능을 위해 일부 카테고리만 사용, 지역은 모두 포함
+        limited_regions = target_regions  # 모든 지역 포함
+
+        # 체험 우선순위 사용자에게는 체험 관련 카테고리만 제공
+        if user_priority_tag == "experience":
+            limited_categories = ["nature", "humanities", "leisure_sports"]
+            logger.info(f"🎯 Experience user - showing only experience categories: {limited_categories}")
+        else:
+            limited_categories = target_categories[:6]  # 상위 6개 카테고리 (요청사항 반영)
+
+        # 🚀 Redis 캐시 키 생성 (우선순위 태그 포함) - v3 (체험 우선순위 필터링 수정)
+        cache_key = f"explore_feed_v3:{user_id or 'anonymous'}:{user_priority_tag}:{':'.join(sorted(limited_regions))}:{':'.join(sorted(limited_categories))}"
 
         logger.info(f"🔑 Cache key generated: {cache_key}")
 
@@ -323,12 +386,24 @@ async def get_explore_section(
 
         logger.info(f"Getting section data: {region}/{category} for user: {user_id}")
 
-        # 🎯 로그인된 사용자의 경우 우선순위 태그 기반으로 카테고리 결정
+        # 🎯 로그인된 사용자의 경우 우선순위 태그 기반으로 카테고리 결정 (안전한 처리)
         target_category = category
         if current_user and user_id:
             try:
                 engine = await get_engine()
-                user_priority = await engine.get_user_priority_tag(user_id)
+
+                # 사용자 우선순위 태그 조회 (추가 보호)
+                try:
+                    user_priority = await asyncio.wait_for(
+                        engine.get_user_priority_tag(user_id),
+                        timeout=2.0  # 2초 타임아웃
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout getting user priority for {user_id}")
+                    user_priority = None
+                except Exception as priority_e:
+                    logger.warning(f"Error getting user priority for {user_id}: {priority_e}")
+                    user_priority = None
 
                 if user_priority:
                     logger.info(f"User {user_id} priority tag: {user_priority}")
@@ -355,19 +430,32 @@ async def get_explore_section(
                             target_category = priority_category_map[user_priority]
 
                     logger.info(f"Target category for region {region}: {target_category} (based on priority: {user_priority})")
+                else:
+                    logger.info(f"No priority tag found for user {user_id}, using original category: {category}")
 
             except Exception as e:
-                logger.warning(f"Failed to get user priority for {user_id}: {e}")
+                logger.error(f"Failed to process user priority for {user_id}: {e}")
                 # 실패 시 원래 카테고리 사용
                 target_category = category
 
-        recommendations = await fetch_recommendations_with_fallback(
-            user_id=user_id,
-            region=region,
-            category=target_category,
-            limit=limit + offset,  # offset 만큼 더 조회
-            fast_mode=False  # 상세 섭션은 전체 기능 사용
-        )
+        # 추천 조회 (추가 타임아웃 보호)
+        try:
+            recommendations = await asyncio.wait_for(
+                fetch_recommendations_with_fallback(
+                    user_id=user_id,
+                    region=region,
+                    category=target_category,
+                    limit=limit + offset,  # offset 만큼 더 조회
+                    fast_mode=False  # 상세 섭션은 전체 기능 사용
+                ),
+                timeout=10.0  # 10초 타임아웃
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout getting recommendations for {region}/{target_category}")
+            recommendations = []
+        except Exception as rec_e:
+            logger.error(f"Error getting recommendations for {region}/{target_category}: {rec_e}")
+            recommendations = []
 
         # 오프셋 적용
         paginated_recommendations = recommendations[offset:offset + limit]
@@ -382,7 +470,9 @@ async def get_explore_section(
                 "limit": limit,
                 "total": len(recommendations),
                 "has_more": len(recommendations) > offset + limit
-            }
+            },
+            "success": True,
+            "message": f"Found {len(paginated_recommendations)} recommendations"
         }
 
     except Exception as e:

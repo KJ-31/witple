@@ -179,7 +179,7 @@ export default function Home() {
 
         // 필터링 후 데이터가 없으면 전체 데이터 사용 (백엔드가 지역 필터를 지원하지 않을 경우)
         if (filteredData.length === 0) {
-          console.warn('지역 필터링 결과가 비어있음. 백엔드 API가 지역 필터를 지원하지 않는 것 같습니다. 전체 데이터 사용.')
+          // console.warn('지역 필터링 결과가 비어있음. 백엔드 API가 지역 필터를 지원하지 않는 것 같습니다. 전체 데이터 사용.')
           filteredData = result.data
         }
       } else {
@@ -239,12 +239,18 @@ export default function Home() {
       const finalData = totalAttractions === 0 ? result.data : processedData
 
       if (totalAttractions === 0) {
-        console.warn('필터링 후 모든 데이터가 사라짐, 원본 데이터로 대체')
+        // console.warn('필터링 후 모든 데이터가 사라짐, 원본 데이터로 대체')
         // console.log('🔄 원본 데이터로 setCitySections 호출:', result.data.length, '개 섹션')
       } else {
         // console.log('🔄 처리된 데이터로 setCitySections 호출:', processedData.length, '개 섹션')
       }
 
+      console.log('🔥 setCitySections 호출:', {
+        finalDataLength: finalData.length,
+        totalAttractions: totalAttractions,
+        processedDataLength: processedData.length,
+        originalResultLength: result.data?.length || 0
+      })
       setCitySections(finalData)
 
       // 사용 가능한 지역 추출 및 업데이트
@@ -254,7 +260,8 @@ export default function Home() {
 
       setAvailableRegions(regions)
     } catch (error) {
-      console.warn('데이터 로드 오류:', error instanceof Error ? error.message : String(error))
+      console.error('🚨 데이터 로드 오류:', error instanceof Error ? error.message : String(error))
+      console.log('🚨 오류로 인해 빈 배열 설정')
       setCitySections([])
     } finally {
       setLoading(false)
@@ -295,7 +302,7 @@ export default function Home() {
     } catch (error) {
       console.error('❌ 데이터 다시 로드 실패:', error)
     }
-  }, [loadRecommendedCities, userInfo])
+  }, [userInfo])
 
   // 사용자 선호도 체크 (profile API 데이터 기반)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
@@ -577,9 +584,10 @@ export default function Home() {
         <div className="px-5 mb-12">
           <MainCard
             attraction={
+              popularSections[0]?.categorySections?.[0]?.attractions?.[0] ||
+              popularSections[0]?.attractions?.[0] ||
               citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
-              citySections[0]?.attractions?.[0] ||
-              popularSections[0]?.attractions?.[0]
+              citySections[0]?.attractions?.[0]
             }
             onAttractionClick={(attractionId) => router.push(`/attraction/${attractionId}`)}
           />
@@ -590,16 +598,17 @@ export default function Home() {
       {!showSearchResults && (
         <main className="pl-[20px] pr-0 pb-24 space-y-12">
           {/* 추천 섹션 - 로그인/비로그인에 따라 다르게 표시 */}
-          {citySections.length > 0 && (
+          {popularSections.length > 0 && (
           <div>
             {session ? (
-              // 로그인 사용자: 개인화 추천 섹션
+              // 로그인 사용자: 지역별 추천에서 랜덤 선택
               <UnifiedRecommendationSection
-                citySections={citySections}
+                citySections={popularSections}
                 userName={userInfo?.name || (session.user?.name) || '사용자'}
+                userInfo={userInfo}
                 onAttractionClick={(attractionId) => {
                   // 🎯 추천 카드 클릭 추적
-                  const attraction = citySections.flatMap(section =>
+                  const attraction = popularSections.flatMap(section =>
                     section.attractions ||
                     section.categorySections?.flatMap(cs => cs.attractions || []) || []
                   ).find(a => a.id === attractionId)
@@ -984,10 +993,12 @@ function UnifiedRecommendationSection({
   citySections,
   userName,
   onAttractionClick,
+  userInfo,
 }: {
   citySections: CitySection[]
   userName: string
   onAttractionClick: (attractionId: string) => void
+  userInfo?: { name: string, preferences: any } | null
 }) {
   // 모든 섹션의 attractions를 하나로 통합
   const allAttractions = citySections.flatMap(section => {
@@ -997,14 +1008,55 @@ function UnifiedRecommendationSection({
     return section.attractions || []
   })
 
-  // MainCard에서 사용된 첫 번째 attraction 찾기
+  // 우선순위 태그에 따른 필터링
+  const getFilteredByPriority = (attractions: any[]) => {
+    if (!userInfo?.preferences?.priority) {
+      return attractions
+    }
+
+    const priority = userInfo.preferences.priority.toLowerCase()
+
+    // 체험 우선순위인 경우 nature, humanities, leisure_sports 카테고리만
+    if (priority === 'exploration' || priority === '체험') {
+      return attractions.filter(attraction =>
+        ['nature', 'humanities', 'leisure_sports'].includes(attraction.category)
+      )
+    }
+    // 다른 우선순위들도 필터링
+    else if (priority === 'accommodation' || priority === '숙박') {
+      return attractions.filter(attraction => attraction.category === 'accommodation')
+    }
+    else if (priority === 'restaurants' || priority === '맛집') {
+      return attractions.filter(attraction => attraction.category === 'restaurants')
+    }
+    else if (priority === 'shopping' || priority === '쇼핑') {
+      return attractions.filter(attraction => attraction.category === 'shopping')
+    }
+
+    return attractions
+  }
+
+  // MainCard에서 사용된 첫 번째 attraction 찾기 (popularSections 기준과 동일)
   const mainCardAttraction = citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
                             citySections[0]?.attractions?.[0]
 
   // MainCard와 중복되지 않는 attractions 필터링
-  const filteredAttractions = mainCardAttraction
+  const availableAttractions = mainCardAttraction
     ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
     : allAttractions
+
+  // 우선순위 태그에 따른 필터링 적용
+  const priorityFilteredAttractions = getFilteredByPriority(availableAttractions)
+
+  // 지역별 추천 데이터에서 랜덤하게 12개 선택
+  const getRandomAttractions = (attractions: any[], count: number = 12) => {
+    if (attractions.length <= count) return attractions
+
+    const shuffled = [...attractions].sort(() => 0.5 - Math.random())
+    return shuffled.slice(0, count)
+  }
+
+  const filteredAttractions = getRandomAttractions(priorityFilteredAttractions, 12)
 
   return (
     <section aria-label={`${userName}님을 위한 추천`} className="w-full">
@@ -1028,6 +1080,16 @@ function UnifiedRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
+          {/* 🎯 디버그: filteredAttractions 확인 */}
+          {(() => {
+            console.log('🎯 UnifiedRecommendationSection 데이터 체크:', filteredAttractions.length);
+            return null;
+          })()}
+          {filteredAttractions.length === 0 && (
+            <div className="flex-shrink-0 p-4 bg-red-500/20 text-white rounded mx-4">
+              ⚠️ 추천할 장소가 없습니다
+            </div>
+          )}
           {filteredAttractions.map((attraction) => (
             <AttractionCard
               key={attraction.id}
@@ -1091,6 +1153,16 @@ function PopularRecommendationSection({
           "
           style={{ scrollBehavior: 'smooth' }}
         >
+          {/* 🎯 디버그: filteredAttractions 확인 */}
+          {(() => {
+            console.log('🎯 UnifiedRecommendationSection 데이터 체크:', filteredAttractions.length);
+            return null;
+          })()}
+          {filteredAttractions.length === 0 && (
+            <div className="flex-shrink-0 p-4 bg-red-500/20 text-white rounded mx-4">
+              ⚠️ 추천할 장소가 없습니다
+            </div>
+          )}
           {filteredAttractions.map((attraction) => (
             <AttractionCard
               key={attraction.id}
