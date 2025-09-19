@@ -5,6 +5,8 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import logging
 from asyncio import Semaphore
+import hashlib
+import json
 
 # 통합된 임포트 (backend 환경에 맞게 수정)
 try:
@@ -16,12 +18,14 @@ try:
     from vectorization2 import get_engine, close_engine
     from auth_utils import get_current_user_optional
     from recommendation_config import EXPLORE_REGIONS, EXPLORE_CATEGORIES, config
+    from cache_utils import cache, cached  # Redis 캐싱 유틸리티 추가
 except ImportError:
     try:
         # 상대 임포트 시도
         from ..vectorization2 import get_engine, close_engine
         from ..auth_utils import get_current_user_optional
         from ..recommendation_config import EXPLORE_REGIONS, EXPLORE_CATEGORIES, config
+        from ..cache_utils import cache, cached  # Redis 캐싱 유틸리티 추가
     except ImportError:
         # 개발용 Mock
         async def get_engine():
@@ -33,6 +37,16 @@ except ImportError:
         EXPLORE_REGIONS = ["서울특별시", "부산광역시"]
         EXPLORE_CATEGORIES = ["restaurants", "accommodation"]
         config = None
+        
+        # Mock cache
+        class MockCache:
+            def get(self, key): return None
+            def set(self, key, value, expire=None): return True
+        cache = MockCache()
+        def cached(expire=300, key_prefix=""):
+            def decorator(func):
+                return func
+            return decorator
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +64,60 @@ REQUEST_SEMAPHORE = Semaphore(MAX_PARALLEL_REQUESTS)
 
 
 # ============================================================================
-# 🔧 안전한 추천 데이터 조회 유틸리티 함수들
+# 🔧 Redis 캐싱 유틸리티 함수들
+# ============================================================================
+
+def generate_cache_key(prefix: str, user_id: Optional[str], region: Optional[str], 
+                      category: Optional[str], limit: int, **kwargs) -> str:
+    """
+    캐시 키 생성 함수
+    """
+    # 사용자별로 다른 캐시를 사용 (개인화 추천)
+    user_part = f"user_{user_id}" if user_id else "anonymous"
+    
+    # 파라미터들을 정렬된 문자열로 변환
+    params = {
+        'region': region or 'all',
+        'category': category or 'all',
+        'limit': limit
+    }
+    params.update(kwargs)
+    
+    # 안정적인 해시 생성을 위해 정렬
+    param_str = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+    
+    # MD5 해시로 긴 키를 줄임
+    hash_obj = hashlib.md5(param_str.encode())
+    param_hash = hash_obj.hexdigest()[:8]
+    
+    return f"{prefix}:{user_part}:{param_hash}"
+
+def get_recommendations_cache(cache_key: str) -> Optional[List[Dict[str, Any]]]:
+    """캐시에서 추천 데이터 조회"""
+    try:
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit: {cache_key}")
+            return cached_data
+        return None
+    except Exception as e:
+        logger.error(f"Cache get error: {e}")
+        return None
+
+def set_recommendations_cache(cache_key: str, data: List[Dict[str, Any]], expire: int = 900) -> bool:
+    """캐시에 추천 데이터 저장 (기본 15분)"""
+    try:
+        success = cache.set(cache_key, data, expire=expire)
+        if success:
+            logger.info(f"Cache set: {cache_key} (expire: {expire}s)")
+        return success
+    except Exception as e:
+        logger.error(f"Cache set error: {e}")
+        return False
+
+
+# ============================================================================
+# 🔧 안전한 추천 데이터 조회 유틸리티 함수들 (캐싱 적용)
 # ============================================================================
 
 async def fetch_recommendations_with_fallback(
@@ -61,8 +128,23 @@ async def fetch_recommendations_with_fallback(
     fast_mode: bool = False  # 메인 페이지용 고속 모드
 ) -> List[Dict[str, Any]]:
     """
-    안전한 추천 데이터 조회 (통합 엔진 사용)
+    안전한 추천 데이터 조회 (통합 엔진 사용) - Redis 캐싱 적용
     """
+    # 캐시 키 생성
+    cache_key = generate_cache_key(
+        prefix="rec_main",
+        user_id=user_id,
+        region=region,
+        category=category,
+        limit=limit,
+        fast_mode=fast_mode
+    )
+    
+    # 캐시에서 조회 시도
+    cached_result = get_recommendations_cache(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
     async with REQUEST_SEMAPHORE:
         try:
             # 통합 엔진 인스턴스 획득
@@ -79,6 +161,12 @@ async def fetch_recommendations_with_fallback(
                 ),
                 timeout=RECOMMENDATION_TIMEOUT
             )
+            
+            # 결과가 있으면 캐시에 저장 (메인페이지는 5분, 일반은 15분)
+            if result:
+                expire_time = 300 if fast_mode else 900  # 5분 or 15분
+                set_recommendations_cache(cache_key, result, expire=expire_time)
+            
             return result if result else []
 
         except asyncio.TimeoutError:
@@ -149,12 +237,27 @@ async def get_main_personalized_feed(
     region: Optional[str] = Query(None, description="지역 필터 (선택사항)")
 ):
     """
-    메인 상단 'For You' 섹션 - 개인화 추천
+    메인 상단 'For You' 섹션 - 개인화 추천 (Redis 캐싱 적용)
     - 로그인: 개인화 추천 (지역/카테고리 무관, 균등 가중치 50:50)
     - 비로그인: 인기 추천 (bookmark_cnt 기준)
     """
     try:
         user_id = str(current_user.user_id) if current_user else None
+
+        # 전체 응답 캐싱을 위한 캐시 키 생성
+        response_cache_key = generate_cache_key(
+            prefix="main_personalized",
+            user_id=user_id,
+            region=region,
+            category=None,
+            limit=limit
+        )
+        
+        # 캐시된 응답 조회
+        cached_response = cache.get(response_cache_key)
+        if cached_response is not None:
+            logger.info(f"🚀 Main personalized feed cache hit: {response_cache_key}")
+            return cached_response
 
         # priority_tag 가져오기 (explore와 동일한 방식)
         user_priority_tag = "none"
@@ -248,11 +351,18 @@ async def get_main_personalized_feed(
             processed_rec['category'] = category_mapping.get(table_name, table_name)
             processed_recommendations.append(processed_rec)
 
-        return {
+        # 응답 데이터 구성
+        response_data = {
             "featured": processed_recommendations[0] if processed_recommendations else None,
             "feed": processed_recommendations[1:] if len(processed_recommendations) > 1 else [],
             "total_count": len(processed_recommendations)
         }
+        
+        # 결과를 캐시에 저장 (5분 캐싱)
+        cache.set(response_cache_key, response_data, expire=300)
+        logger.info(f"🚀 Main personalized feed cached: {response_cache_key}")
+        
+        return response_data
 
     except Exception as e:
         logger.error(f"Error in get_main_personalized_feed: {e}")
@@ -269,13 +379,33 @@ async def get_main_explore_feed(
     categories: Optional[List[str]] = Query(None, description="요청할 카테고리 목록 (미지정시 인기순)")
 ):
     """
-    메인 하단 '탐색' 섹션 - 동적 인기순 지역별/카테고리별 추천
+    메인 하단 '탐색' 섹션 - 동적 인기순 지역별/카테고리별 추천 (Redis 캐싱 적용)
     - 지역: 북마크 총합 기준 인기순
     - 카테고리: 북마크 총합 기준 인기순
     - 장소: bookmark_cnt 기준 인기순
     """
     try:
         user_id = str(current_user.user_id) if current_user else None
+
+        # 전체 응답 캐싱을 위한 캐시 키 생성
+        regions_str = ",".join(sorted(regions)) if regions else "default"
+        categories_str = ",".join(sorted(categories)) if categories else "default"
+        
+        explore_cache_key = generate_cache_key(
+            prefix="main_explore",
+            user_id=user_id,
+            region=regions_str,
+            category=categories_str,
+            limit=50,  # 기본 limit
+            regions_count=len(regions) if regions else 0,
+            categories_count=len(categories) if categories else 0
+        )
+        
+        # 캐시된 응답 조회
+        cached_response = cache.get(explore_cache_key)
+        if cached_response is not None:
+            logger.info(f"🚀 Main explore feed cache hit: {explore_cache_key}")
+            return cached_response
 
         # 동적 지역/카테고리 순서 결정 (하드코딩 제거)
         if not regions or not categories:
@@ -352,9 +482,9 @@ async def get_main_explore_feed(
             }
         }
 
-        # 🚀 Redis 캐시에 저장 (10분 TTL)
-        cache.set(cache_key, result, expire=600)
-        logger.info(f"💾 Cached explore feed with priority tag '{user_priority_tag}': {cache_key}")
+        # 🚀 응답을 새로운 캐시 키로 저장 (8분 TTL - 메인페이지용 최적화)
+        cache.set(explore_cache_key, result, expire=480)
+        logger.info(f"🚀 Main explore feed cached: {explore_cache_key}")
 
         return result
 
@@ -379,10 +509,26 @@ async def get_explore_section(
     offset: int = Query(0, ge=0, description="페이징 오프셋")
 ):
     """
-    특정 지역/카테고리 섹션 데이터 조회 (우선순위 태그 기반 필터링, 지연 로딩, 페이징 지원)
+    특정 지역/카테고리 섹션 데이터 조회 (우선순위 태그 기반 필터링, 지연 로딩, 페이징 지원) - Redis 캐싱 적용
     """
     try:
         user_id = str(current_user.user_id) if current_user else None
+
+        # 개별 섹션 캐시 키 생성
+        section_cache_key = generate_cache_key(
+            prefix="explore_section",
+            user_id=user_id,
+            region=region,
+            category=category,
+            limit=limit,
+            offset=offset
+        )
+        
+        # 캐시된 응답 조회
+        cached_section = cache.get(section_cache_key)
+        if cached_section is not None:
+            logger.info(f"🚀 Explore section cache hit: {section_cache_key}")
+            return cached_section
 
         logger.info(f"Getting section data: {region}/{category} for user: {user_id}")
 
@@ -460,7 +606,8 @@ async def get_explore_section(
         # 오프셋 적용
         paginated_recommendations = recommendations[offset:offset + limit]
 
-        return {
+        # 응답 데이터 구성
+        section_response = {
             "region": region,
             "category": target_category,  # 실제 사용된 카테고리 반환
             "original_category": category,  # 원래 요청된 카테고리
@@ -474,6 +621,12 @@ async def get_explore_section(
             "success": True,
             "message": f"Found {len(paginated_recommendations)} recommendations"
         }
+        
+        # 결과를 캐시에 저장 (개별 섹션은 15분 캐싱)
+        cache.set(section_cache_key, section_response, expire=900)
+        logger.info(f"🚀 Explore section cached: {section_cache_key}")
+        
+        return section_response
 
     except Exception as e:
         logger.error(f"Error in get_explore_section: {e}")
@@ -490,10 +643,44 @@ async def get_explore_section(
 @router.get("/health", response_model=dict)
 async def health_check():
     """
-    추천 시스템 헬스체크
+    추천 시스템 헬스체크 (캐시 상태 포함)
     """
     try:
-        # 간단한 추천 요청으로 시스템 상태 확인
+        # 캐시 상태 확인
+        cache_status = "healthy"
+        cache_info = {"cached_keys": 0}
+        try:
+            # 테스트 캐시 쓰기/읽기
+            test_key = "health_check_test"
+            test_value = {"status": "ok", "timestamp": asyncio.get_event_loop().time()}
+            cache.set(test_key, test_value, expire=60)
+            read_value = cache.get(test_key)
+            
+            if read_value and read_value.get("status") == "ok":
+                cache_status = "healthy"
+                # Redis 캐시 키 개수 확인
+                try:
+                    if hasattr(cache, 'redis'):
+                        rec_keys = len(cache.redis.keys("rec_*"))
+                        main_keys = len(cache.redis.keys("main_*"))
+                        explore_keys = len(cache.redis.keys("explore_*"))
+                        cache_info = {
+                            "rec_keys": rec_keys,
+                            "main_keys": main_keys,
+                            "explore_keys": explore_keys,
+                            "total_rec_cache": rec_keys + main_keys + explore_keys
+                        }
+                except Exception:
+                    cache_info["note"] = "키 개수 확인 불가"
+                    
+            else:
+                cache_status = "write/read error"
+        except Exception as e:
+            cache_status = f"error: {str(e)[:50]}"
+
+        # 간단한 추천 요청으로 시스템 상태 확인 (캐시 효과 확인)
+        import time
+        start_time = time.time()
         test_recommendations = await fetch_recommendations_with_fallback(
             user_id=None,
             region=None,
@@ -501,12 +688,18 @@ async def health_check():
             limit=1,
             fast_mode=True  # 헬스체크는 빠르게
         )
+        response_time = round((time.time() - start_time) * 1000, 1)  # ms
 
         return {
             "status": "healthy",
             "engine_responsive": True,
+            "cache_status": cache_status,
+            "cache_info": cache_info,
+            "test_response_time_ms": response_time,
+            "cache_working": response_time < 100,  # 100ms 이하면 캐시에서 응답
             "timestamp": asyncio.get_event_loop().time(),
-            "test_result": len(test_recommendations) > 0
+            "test_result": len(test_recommendations) > 0,
+            "recommendations_count": len(test_recommendations)
         }
 
     except Exception as e:
@@ -517,6 +710,21 @@ async def health_check():
             "error": str(e),
             "timestamp": asyncio.get_event_loop().time()
         }
+
+
+@router.delete("/cache/clear")
+async def clear_cache():
+    """추천 캐시 삭제"""
+    try:
+        cleared = 0
+        if hasattr(cache, 'redis'):
+            for pattern in ["rec_*", "main_*", "explore_*"]:
+                keys = cache.redis.keys(pattern)
+                if keys:
+                    cleared += cache.redis.delete(*keys)
+        return {"cleared_keys": cleared, "message": f"{cleared}개 캐시 삭제됨"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
