@@ -1,11 +1,3 @@
-"""
-하이브리드 검색 최적화 RAG (Retrieval-Augmented Generation) 시스템
-PostgreSQL + PGVector + LangChain + Amazon Bedrock 기반
-
-작성일: 2025년
-목적: SQL 필터링 + 벡터 유사도를 결합한 고성능 여행지 추천 시스템 (Amazon Bedrock 버전)
-"""
-
 import boto3
 from langchain_aws import ChatBedrock
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,19 +7,16 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
-from typing import List, Any, Literal, TypedDict, Sequence, Optional
-from sqlalchemy import create_engine, text
+from typing import List, Any, Literal, TypedDict, Optional
+from sqlalchemy import text
 from database import engine as shared_engine
-from cache_utils import RedisCache
 import sys
 import os
 import json
 import re
-import requests
 import datetime
 import hashlib
 import redis
-from functools import wraps
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
@@ -202,7 +191,6 @@ class LLMCache:
                 "total_keys": len(llm_keys),
                 "memory_usage": info.get('used_memory_human', 'N/A'),
                 "connected_clients": info.get('connected_clients', 0),
-                "cache_hit_ratio": "추후 구현"  # 별도 모니터링 필요
             }
 
         except Exception as e:
@@ -707,299 +695,21 @@ def search_places(query):
         print(f"❌ 검색 오류: {e}")
         return []
 
-def get_travel_recommendation_optimized(query, stream=True):
-    """최적화된 Redis 캐싱 + 스트림"""
-    def _generate_stream():
-        try:
-            # 검색 단계는 항상 캐싱 활용
-            cached_docs = llm_cache.get_cached_search_results(query)
-            if cached_docs:
-                docs = cached_docs
-            else:
-                docs = retriever._get_relevant_documents(query)
-                llm_cache.cache_search_results(query, docs, expire=1800)
-
-            context = format_docs(docs)
-            prompt_value = rag_prompt.invoke({"context": context, "question": query})
-
-            # 스트림 모드: yield로 실시간 응답
-            full_response = ""
-            buffer = ""
-            for chunk in llm.stream(prompt_value):
-                if hasattr(chunk, 'content'):
-                    content = chunk.content
-                    if content:
-                        buffer += content
-                        full_response += content
-
-                        # 적절한 청크로 yield
-                        if len(buffer) > 15 or any(c in buffer for c in ['\n', '.']):
-                            yield buffer
-                            buffer = ""
-
-            if buffer:
-                yield buffer
-
-            # 🎯 스트림 완료 후 전체 응답 캐싱
-            if len(full_response) > 50:
-                llm_cache.cache_response(query, full_response, expire=3600)
-
-        except Exception as e:
-            yield f"❌ 추천 생성 오류: {e}"
-
-    try:
-        if stream:
-            return _generate_stream()
-        else:
-            # 비스트림: 캐시 확인 후 일반 처리
-            cached_response = llm_cache.get_cached_response(query)
-            if cached_response:
-                return cached_response
-
-            # 검색 단계는 항상 캐싱 활용
-            cached_docs = llm_cache.get_cached_search_results(query)
-            if cached_docs:
-                docs = cached_docs
-            else:
-                docs = retriever._get_relevant_documents(query)
-                llm_cache.cache_search_results(query, docs, expire=1800)
-
-            context = format_docs(docs)
-            prompt_value = rag_prompt.invoke({"context": context, "question": query})
-
-            response = llm.invoke(prompt_value)
-            if hasattr(response, 'content'):
-                response_text = response.content
-            else:
-                response_text = str(response)
-            llm_cache.cache_response(query, response_text, expire=3600)
-            return response_text
-
-    except Exception as e:
-        return f"❌ 추천 생성 오류: {e}"
-
-def get_travel_recommendation(query, stream=True):
-    """여행 추천 생성 함수 (스트림 지원 + Redis 캐싱)"""
-    if stream:
-        return get_travel_recommendation_optimized(query, stream=True)
-    else:
-        return get_travel_recommendation_optimized(query, stream=False)
-
-def get_travel_recommendation_stream(query):
-    """진짜 스트림 방식 여행 추천 생성 (터미널/웹 용)"""
-    try:
-        docs = retriever._get_relevant_documents(query)
-        context = format_docs(docs)
-
-        prompt_value = rag_prompt.invoke({"context": context, "question": query})
-
-        # ▶️ 진짜 yield로 스트리밍
-        buffer = ""
-        full_response = ""
-        for chunk in llm.stream(prompt_value):
-            if hasattr(chunk, 'content'):
-                content = chunk.content
-            else:
-                content = str(chunk)
-            if content:
-                buffer += content
-                full_response += content
-                # 자연스러운 스트리밍: 문장/줄/청크 단위로
-                if len(buffer) > 15 or '\n' in buffer or '.' in buffer:
-                    to_send, buffer = buffer, ""
-                    yield to_send
-        if buffer:
-            yield buffer
-    except Exception as e:
-        yield f"❌ 스트림 추천 생성 오류: {e}"
 
 
-async def get_travel_recommendation_stream_async(query):
-    """비동기 스트림 방식 여행 추천 생성 (FastAPI 호환)"""
-    import asyncio
-    try:
-        docs = retriever._get_relevant_documents(query)
-        if len(docs) > 5:
-            docs = docs[:5]
-        context = format_docs(docs)
-        prompt_value = rag_prompt.invoke({"context": context, "question": query})
 
-        buffer = ""
-        full_response = ""
-        for chunk in llm.stream(prompt_value):
-            if hasattr(chunk, 'content'):
-                content = chunk.content
-            else:
-                content = str(chunk)
-            if content:
-                buffer += content
-                full_response += content
-                # 빠른 스트림 + 자연스러운 단위
-                if len(buffer) > 15 or '\n' in buffer or '.' in buffer:
-                    to_send, buffer = buffer, ""
-                    yield to_send
-                    await asyncio.sleep(0.02)
-        if buffer:
-            yield buffer
-    except Exception as e:
-        error_msg = f"❌ 비동기 스트림 추천 생성 오류: {e}"
-        yield error_msg
-        await asyncio.sleep(0.01)
 
-# =============================================================================
-# 기상청 API 관련 함수들
-# =============================================================================
 
-# 기상청 API 키 (환경변수에서 가져오기)
-WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')
-
-def get_coordinates_for_region(region_name):
-    """지역명을 기상청 API용 격자 좌표로 변환 (DB 기반 + 매핑)"""
-
-    # 지역별 대표 좌표 매핑 (기상청 격자 좌표)
-    region_coordinates = {
-        # === 특별시/광역시/도 대표 좌표 ===
-        '서울특별시': {'nx': 60, 'ny': 127},
-        '서울': {'nx': 60, 'ny': 127},
-
-        '부산광역시': {'nx': 98, 'ny': 76},
-        '부산': {'nx': 98, 'ny': 76},
-
-        '대구광역시': {'nx': 89, 'ny': 90},
-        '대구': {'nx': 89, 'ny': 90},
-
-        '인천광역시': {'nx': 55, 'ny': 124},
-        '인천': {'nx': 55, 'ny': 124},
-
-        '광주광역시': {'nx': 58, 'ny': 74},
-        '광주': {'nx': 58, 'ny': 74},
-
-        '대전광역시': {'nx': 67, 'ny': 100},
-        '대전': {'nx': 67, 'ny': 100},
-
-        '울산광역시': {'nx': 102, 'ny': 84},
-        '울산': {'nx': 102, 'ny': 84},
-
-        '세종특별자치시': {'nx': 66, 'ny': 103},
-        '세종시': {'nx': 66, 'ny': 103},
-        '세종': {'nx': 66, 'ny': 103},
-
-        '경기도': {'nx': 60, 'ny': 121},  # 수원 기준
-        '강원특별자치도': {'nx': 73, 'ny': 134},  # 춘천 기준
-        '강원도': {'nx': 73, 'ny': 134},
-        '충청북도': {'nx': 69, 'ny': 106},  # 청주 기준
-        '충청남도': {'nx': 63, 'ny': 110},  # 천안 기준
-        '전북특별자치도': {'nx': 63, 'ny': 89},  # 전주 기준
-        '전라북도': {'nx': 63, 'ny': 89},
-        '전라남도': {'nx': 58, 'ny': 74},  # 광주 기준
-        '경상북도': {'nx': 89, 'ny': 90},  # 대구 기준
-        '경상남도': {'nx': 90, 'ny': 77},  # 창원 기준
-        '제주특별자치도': {'nx': 52, 'ny': 38},
-        '제주도': {'nx': 52, 'ny': 38},
-        '제주': {'nx': 52, 'ny': 38},
-
-        # === 주요 도시 세부 좌표 ===
-        # 서울 주요 구
-        '강남구': {'nx': 61, 'ny': 126},
-        '강남': {'nx': 61, 'ny': 126},
-        '종로구': {'nx': 60, 'ny': 127},
-        '종로': {'nx': 60, 'ny': 127},
-        '마포구': {'nx': 59, 'ny': 126},
-        '강북구': {'nx': 60, 'ny': 128},
-        '강북': {'nx': 60, 'ny': 128},
-        '송파구': {'nx': 62, 'ny': 126},
-        '구로구': {'nx': 58, 'ny': 125},
-
-        # 부산 주요 구
-        '해운대구': {'nx': 99, 'ny': 75},
-        '해운대': {'nx': 99, 'ny': 75},
-        '사하구': {'nx': 96, 'ny': 76},
-        '사하': {'nx': 96, 'ny': 76},
-        '기장군': {'nx': 100, 'ny': 77},
-
-        # 경기도 주요 도시
-        '수원시': {'nx': 60, 'ny': 121},
-        '수원': {'nx': 60, 'ny': 121},
-        '성남시': {'nx': 63, 'ny': 124},
-        '성남': {'nx': 63, 'ny': 124},
-        '고양시': {'nx': 57, 'ny': 128},
-        '고양': {'nx': 57, 'ny': 128},
-        '용인시': {'nx': 64, 'ny': 119},
-        '용인': {'nx': 64, 'ny': 119},
-        '안양시': {'nx': 59, 'ny': 123},
-        '안양': {'nx': 59, 'ny': 123},
-        '파주시': {'nx': 56, 'ny': 131},
-        '파주': {'nx': 56, 'ny': 131},
-        '가평군': {'nx': 61, 'ny': 133},
-        '가평': {'nx': 61, 'ny': 133},
-
-        # 강원도 주요 도시
-        '춘천시': {'nx': 73, 'ny': 134},
-        '춘천': {'nx': 73, 'ny': 134},
-        '강릉시': {'nx': 92, 'ny': 131},
-        '강릉': {'nx': 92, 'ny': 131},
-        '평창군': {'nx': 84, 'ny': 123},
-        '평창': {'nx': 84, 'ny': 123},
-
-        # 기타 주요 도시
-        '경주시': {'nx': 100, 'ny': 91},
-        '경주': {'nx': 100, 'ny': 91},
-        '전주시': {'nx': 63, 'ny': 89},
-        '전주': {'nx': 63, 'ny': 89},
-        '여수시': {'nx': 73, 'ny': 66},
-        '여수': {'nx': 73, 'ny': 66},
-        '창원시': {'nx': 90, 'ny': 77},
-        '창원': {'nx': 90, 'ny': 77},
-        '제주시': {'nx': 53, 'ny': 38},
-        '서귀포시': {'nx': 52, 'ny': 33},
-        '서귀포': {'nx': 52, 'ny': 33},
-
-        # 구 이름들 (중복 처리)
-        '중구': {'nx': 60, 'ny': 127},  # 서울 기준
-        '동구': {'nx': 68, 'ny': 100},  # 대전 기준
-        '서구': {'nx': 67, 'ny': 100},  # 대전 기준
-        '남구': {'nx': 58, 'ny': 74},   # 광주 기준
-        '북구': {'nx': 59, 'ny': 75},   # 광주 기준
-    }
-
-    # 정확한 매치 시도
-    if region_name in region_coordinates:
-        return region_coordinates[region_name]
-
-    # 부분 매치 시도 (지역명이 포함된 경우)
-    for key, coords in region_coordinates.items():
-        if region_name in key or key in region_name:
-            return coords
-
-    # 기본값 (서울)
-    return {'nx': 60, 'ny': 127}
-
-def get_db_regions_and_cities():
-    """DB에서 실제 region과 city 데이터 추출"""
-    try:
-        from sqlalchemy import text
-
-        engine = shared_engine
-        with engine.connect() as conn:
-            # Region 데이터 추출
-            regions = []
-            result = conn.execute(text("SELECT DISTINCT cmetadata->>'region' as region FROM langchain_pg_embedding WHERE cmetadata->>'region' IS NOT NULL AND cmetadata->>'region' != ''"))
-            for row in result:
-                if row[0]:  # 빈 문자열 제외
-                    regions.append(row[0])
-
-            # City 데이터 추출 (상위 100개)
-            cities = []
-            result = conn.execute(text("SELECT DISTINCT cmetadata->>'city' as city FROM langchain_pg_embedding WHERE cmetadata->>'city' IS NOT NULL AND cmetadata->>'city' != '' ORDER BY city LIMIT 100"))
-            for row in result:
-                if row[0]:  # 빈 문자열 제외
-                    cities.append(row[0])
-
-            return regions, cities
-    except Exception as e:
-        print(f"DB 연결 오류: {e}")
-        # 기본값 반환
-        return ['서울특별시', '부산광역시', '대구광역시'], ['서울', '부산', '대구']
+# Weather 모듈 import
+from weather import (
+    get_weather_info,
+    get_smart_weather_info,
+    is_weather_query,
+    is_historical_weather_query,
+    get_historical_weather_info,
+    extract_date_from_query,
+    extract_region_from_query
+)
 
 def extract_region_from_context(state):
     """현재 대화 컨텍스트에서 지역명 추출"""
@@ -1061,657 +771,6 @@ def extract_region_from_context(state):
         print(f"❌ 컨텍스트에서 지역 추출 오류: {e}")
         return None
 
-def extract_region_from_query(query):
-    """사용자 쿼리에서 지역명 추출 (DB 기반)"""
-    # DB에서 실제 region과 city 데이터 가져오기
-    db_regions, db_cities = get_db_regions_and_cities()
-
-    # 전체 지역 키워드 = DB regions + DB cities + 추가 별칭
-    region_keywords = []
-
-    # DB에서 가져온 region들
-    region_keywords.extend(db_regions)
-
-    # DB에서 가져온 city들
-    region_keywords.extend(db_cities)
-
-    # 추가 별칭들 (줄임말, 다른 표기)
-    aliases = [
-        '서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
-        '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주',
-        '해운대', '강남', '강북', '종로', '명동', '홍대', '이태원', '인사동',
-        '광안리', '남포동', '서면', '강릉', '춘천', '원주', '속초', '동해',
-        '삼척', '태백', '정선', '평창', '영월', '횡성', '홍천', '화천',
-        '양구', '인제', '고성', '양양'
-    ]
-    region_keywords.extend(aliases)
-
-    # 중복 제거
-    region_keywords = list(set(region_keywords))
-
-    # 긴 키워드부터 매칭 (더 구체적인 지역명 우선)
-    region_keywords.sort(key=len, reverse=True)
-
-    # 쿼리에서 지역명 찾기
-    for region in region_keywords:
-        if region in query:
-            return region
-
-    return None
-
-def get_weather_info(region_name):
-    """기상청 API로 날씨 정보 가져오기"""
-    if not WEATHER_API_KEY:
-        return "❌ 기상청 API 키가 설정되지 않았습니다. .env 파일에 WEATHER_API_KEY를 추가해주세요."
-
-    try:
-        # 지역 좌표 가져오기
-        coords = get_coordinates_for_region(region_name)
-
-        # 현재 날짜와 시간
-        now = datetime.datetime.now()
-        base_date = now.strftime('%Y%m%d')
-
-        # 기상청 발표시간에 맞춰 base_time 설정 (02, 05, 08, 11, 14, 17, 20, 23시)
-        hour = now.hour
-        if hour < 2:
-            base_time = '2300'
-            base_date = (now - datetime.timedelta(days=1)).strftime('%Y%m%d')
-        elif hour < 5:
-            base_time = '0200'
-        elif hour < 8:
-            base_time = '0500'
-        elif hour < 11:
-            base_time = '0800'
-        elif hour < 14:
-            base_time = '1100'
-        elif hour < 17:
-            base_time = '1400'
-        elif hour < 20:
-            base_time = '1700'
-        elif hour < 23:
-            base_time = '2000'
-        else:
-            base_time = '2300'
-
-        # 기상청 API 요청 URL (HTTP로 시도)
-        url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst'
-
-        params = {
-            'serviceKey': WEATHER_API_KEY,
-            'pageNo': '1',
-            'numOfRows': '1000',
-            'dataType': 'JSON',
-            'base_date': base_date,
-            'base_time': base_time,
-            'nx': coords['nx'],
-            'ny': coords['ny']
-        }
-
-        # 재시도 로직과 함께 HTTP 요청
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Connection': 'keep-alive'
-        }
-
-        # 재시도 로직
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                print(f"🌤️ 기상청 API 호출 시도 {attempt + 1}/{max_retries}")
-                response = requests.get(url, params=params, headers=headers, timeout=30)
-                break
-            except requests.exceptions.Timeout:
-                if attempt == max_retries - 1:
-                    return f"❌ 기상청 서버 응답 시간 초과 ({region_name})"
-                print(f"   ⏰ 타임아웃 발생, {attempt + 2}번째 시도...")
-                continue
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    return f"❌ 기상청 API 연결 오류: {e}"
-                print(f"   🔄 연결 오류, {attempt + 2}번째 시도...")
-                continue
-
-        if response.status_code == 200:
-            data = response.json()
-
-            if data['response']['header']['resultCode'] == '00':
-                items = data['response']['body']['items']['item']
-
-                # 오늘과 내일 날씨 정보 추출
-                weather_info = parse_weather_data(items, region_name)
-                return weather_info
-            else:
-                return f"❌ 기상청 API 오류: {data['response']['header']['resultMsg']}"
-        else:
-            return f"❌ API 요청 실패: {response.status_code}"
-
-    except Exception as e:
-        return f"❌ 날씨 정보 조회 오류: {e}"
-
-def parse_weather_data(items, region_name):
-    """기상청 API 응답 데이터 파싱"""
-    try:
-        # 오늘과 내일 날씨 데이터 분류
-        today = datetime.datetime.now().strftime('%Y%m%d')
-        tomorrow = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%Y%m%d')
-
-        today_data = {}
-        tomorrow_data = {}
-
-        for item in items:
-            fcst_date = item['fcstDate']
-            fcst_time = item['fcstTime']
-            category = item['category']
-            fcst_value = item['fcstValue']
-
-            # 오늘 데이터
-            if fcst_date == today:
-                if fcst_time not in today_data:
-                    today_data[fcst_time] = {}
-                today_data[fcst_time][category] = fcst_value
-
-            # 내일 데이터
-            elif fcst_date == tomorrow:
-                if fcst_time not in tomorrow_data:
-                    tomorrow_data[fcst_time] = {}
-                tomorrow_data[fcst_time][category] = fcst_value
-
-        # 날씨 정보 포맷팅
-        weather_text = f"🌤️ <strong>{region_name} 날씨 정보</strong>\n\n"
-
-        # 오늘 날씨 (대표 시간: 12시)
-        if '1200' in today_data:
-            data = today_data['1200']
-            weather_text += "📅 <strong>오늘</strong>\n"
-            weather_text += format_weather_detail(data)
-            weather_text += "\n"
-
-        # 내일 날씨 (대표 시간: 12시)
-        if '1200' in tomorrow_data:
-            data = tomorrow_data['1200']
-            weather_text += "📅 <strong>내일</strong>\n"
-            weather_text += format_weather_detail(data)
-
-        return weather_text
-
-    except Exception as e:
-        return f"❌ 날씨 데이터 파싱 오류: {e}"
-
-def format_weather_detail(data):
-    """날씨 상세 정보 포맷팅"""
-    try:
-        # 기상청 코드 매핑
-        sky_codes = {
-            '1': '맑음 ☀️',
-            '3': '구름많음 ⛅',
-            '4': '흐림 ☁️'
-        }
-
-        pty_codes = {
-            '0': '없음',
-            '1': '비 🌧️',
-            '2': '비/눈 🌨️',
-            '3': '눈 ❄️',
-            '4': '소나기 🌦️'
-        }
-
-        detail = ""
-
-        # 하늘상태
-        if 'SKY' in data:
-            sky = sky_codes.get(data['SKY'], '정보없음')
-            detail += f"• 하늘상태: {sky}\n"
-
-        # 강수형태
-        if 'PTY' in data:
-            pty = pty_codes.get(data['PTY'], '정보없음')
-            if data['PTY'] != '0':
-                detail += f"• 강수형태: {pty}\n"
-
-        # 기온
-        if 'TMP' in data:
-            detail += f"• 기온: {data['TMP']}°C 🌡️\n"
-
-        # 강수확률
-        if 'POP' in data:
-            detail += f"• 강수확률: {data['POP']}% 💧\n"
-
-        # 습도
-        if 'REH' in data:
-            detail += f"• 습도: {data['REH']}% 💨\n"
-
-        # 풍속
-        if 'WSD' in data:
-            detail += f"• 풍속: {data['WSD']}m/s 💨\n"
-
-        return detail
-
-    except Exception as e:
-        return f"상세 정보 처리 오류: {e}\n"
-
-def get_smart_weather_info(region_name, travel_date=None):
-    """스마트 날씨 조회: 단기예보 우선, 실패 시 과거 데이터 폴백"""
-    import datetime
-
-    try:
-        # 1. 먼저 단기예보(미래 날씨) 시도 - 현재 시간 기준 3일 이내
-        now = datetime.datetime.now()
-
-        # 여행 날짜가 없으면 현재 날짜로 가정
-        if not travel_date:
-            travel_dt = now
-        else:
-            try:
-                if isinstance(travel_date, str):
-                    if len(travel_date) == 8:  # YYYYMMDD
-                        travel_dt = datetime.datetime.strptime(travel_date, '%Y%m%d')
-                    else:
-                        travel_dt = datetime.datetime.strptime(travel_date, '%Y-%m-%d')
-                else:
-                    travel_dt = travel_date
-            except Exception as e:
-                print(f"날짜 파싱 오류: {e}")
-                travel_dt = now
-
-        days_diff = (travel_dt - now).days
-        print(f"📅 여행일: {travel_dt.strftime('%Y-%m-%d')}, 현재로부터 {days_diff}일 후")
-
-        # 단기예보 가능 기간: 오늘~3일 후 (기상청 API 제공 범위)
-        if 0 <= days_diff <= 3:
-            print(f"🌤️ {region_name} 단기예보 조회 중... ({days_diff}일 후)")
-            future_weather = get_weather_info(region_name)
-            if not future_weather.startswith("❌"):
-                return f"📍 <strong>{region_name} 예상 날씨</strong> (여행일 기준)\n\n{future_weather}"
-
-        # 2. 단기예보 실패 시 과거 동일 기간 날씨로 폴백
-        print(f"📅 {region_name} 과거 동일 기간 날씨 조회 중...")
-
-        # 작년 동일 기간 날짜 계산
-        now = datetime.datetime.now()
-        if travel_date:
-            try:
-                if isinstance(travel_date, str) and len(travel_date) == 8:
-                    travel_dt = datetime.datetime.strptime(travel_date, '%Y%m%d')
-                else:
-                    travel_dt = now
-                # 작년 동일 날짜
-                last_year_date = travel_dt.replace(year=travel_dt.year - 1)
-            except:
-                last_year_date = now.replace(year=now.year - 1)
-        else:
-            # 여행 날짜 없으면 작년 이맘때
-            last_year_date = now.replace(year=now.year - 1)
-
-        historical_date = last_year_date.strftime('%Y%m%d')
-        historical_weather = get_historical_weather_info(region_name, historical_date)
-
-        if not historical_weather.startswith("❌"):
-            # 과거 날씨에서 평균 기온만 추출
-            simplified_weather = simplify_historical_weather(historical_weather, region_name, last_year_date.strftime('%Y-%m-%d'))
-            return f"📊 <strong>{region_name} 참고 날씨</strong> (작년 동일 기간)\n\n{simplified_weather}\n\n💡 <em>실제 여행 시 최신 예보를 확인해주세요!</em>"
-
-        # 3. 모든 시도 실패 시 일반적인 계절 정보
-        month = now.month if not travel_date else travel_dt.month
-        seasonal_info = get_seasonal_weather_info(region_name, month)
-        return seasonal_info
-
-    except Exception as e:
-        return f"📍 <strong>{region_name}</strong>\n날씨 정보를 가져올 수 없어 일반적인 계절 정보를 제공합니다.\n\n{get_seasonal_weather_info(region_name, datetime.datetime.now().month)}"
-
-def get_seasonal_weather_info(region_name, month):
-    """계절별 일반적인 날씨 정보 제공"""
-    seasonal_data = {
-        1: {"temp": "영하~5°C", "desc": "춥고 건조", "clothes": "두꺼운 외투, 목도리 필수"},
-        2: {"temp": "0~8°C", "desc": "추위가 절정", "clothes": "패딩, 장갑 권장"},
-        3: {"temp": "5~15°C", "desc": "봄의 시작, 일교차 큼", "clothes": "얇은 외투, 레이어드"},
-        4: {"temp": "10~20°C", "desc": "따뜻한 봄날씨", "clothes": "가디건, 얇은 재킷"},
-        5: {"temp": "15~25°C", "desc": "화창하고 쾌적", "clothes": "반팔, 긴팔 셔츠"},
-        6: {"temp": "20~28°C", "desc": "더워지기 시작", "clothes": "반팔, 선크림 필수"},
-        7: {"temp": "23~32°C", "desc": "무덥고 습함, 장마", "clothes": "시원한 옷, 우산 준비"},
-        8: {"temp": "25~33°C", "desc": "가장 더운 시기", "clothes": "통풍 잘되는 옷"},
-        9: {"temp": "20~28°C", "desc": "선선해지기 시작", "clothes": "반팔~얇은 긴팔"},
-        10: {"temp": "15~23°C", "desc": "가을 단풍, 쾌적", "clothes": "가디건, 얇은 외투"},
-        11: {"temp": "8~18°C", "desc": "쌀쌀한 가을", "clothes": "두꺼운 외투 준비"},
-        12: {"temp": "0~8°C", "desc": "추위 시작", "clothes": "코트, 목도리"}
-    }
-
-    info = seasonal_data.get(month, seasonal_data[datetime.datetime.now().month])
-
-    return f"""🌡️ <strong>평균 기온</strong>: {info['temp']}
-☁️ <strong>날씨 특징</strong>: {info['desc']}
-👕 <strong>복장 추천</strong>: {info['clothes']}
-
-💡 <em>일반적인 {month}월 날씨 정보입니다. 여행 전 최신 예보를 확인해주세요!</em>"""
-
-def is_weather_query(query):
-    """쿼리가 날씨 관련 질문인지 판단"""
-    weather_keywords = [
-        '날씨', '기온', '온도', '비', '눈', '바람', '습도', '맑음', '흐림',
-        '강수', '기상', '일기예보', '예보', '우천', '강우', '폭우', '태풍',
-        'weather', '온도가', '덥', '춥', '시원', '따뜻'
-    ]
-
-    query_lower = query.lower()
-    return any(keyword in query_lower for keyword in weather_keywords)
-
-def is_historical_weather_query(query):
-    """쿼리가 과거 날씨 관련 질문인지 판단"""
-    import re
-
-    historical_keywords = [
-        '지난', '작년', '전년', '과거', '예전', '이전', '지난주', '지난달', '지난해',
-        '어제', '그때', '당시', '년전', '달전', '주전', '일전',
-        '작년 이맘때', '지난번', '그 당시', '몇년전', '몇달전'
-    ]
-
-    weather_keywords = [
-        '날씨', '기온', '온도', '비', '눈', '바람', '습도', '강수', '기상'
-    ]
-
-    query_lower = query.lower()
-
-    # 일반적인 과거 키워드 체크
-    has_historical = any(keyword in query_lower for keyword in historical_keywords)
-    has_weather = any(keyword in query_lower for keyword in weather_keywords)
-
-    # 구체적인 날짜 패턴 체크 (과거로 간주)
-    date_patterns = [
-        r'\d{1,2}월\s*\d{1,2}일',  # 10월 4일
-        r'\d{4}년\s*\d{1,2}월\s*\d{1,2}일',  # 2023년 10월 4일
-        r'\d{1,2}/\d{1,2}',  # 10/4
-        r'\d{4}/\d{1,2}/\d{1,2}',  # 2023/10/4
-        r'\d{1,2}-\d{1,2}',  # 10-4
-        r'\d{4}-\d{1,2}-\d{1,2}'  # 2023-10-4
-    ]
-
-    # 추가 날짜 패턴들 (년도 포함)
-    additional_patterns = [
-        r'20\d{2}년',  # 2023년, 2022년 등
-        r'20\d{2}[.-/]\d{1,2}[.-/]\d{1,2}',  # 2023-10-15, 2023.10.15 등
-        r'20\d{2}년\s*\d{1,2}월',  # 2023년 10월
-    ]
-
-    date_patterns.extend(additional_patterns)
-    has_specific_date = any(re.search(pattern, query_lower) for pattern in date_patterns)
-
-    return (has_historical or has_specific_date) and has_weather
-
-def get_historical_weather_info(region_name, date_str):
-    """기상청 API로 과거 날씨 정보 가져오기 (지상관측 일자료)"""
-    if not WEATHER_API_KEY:
-        return "❌ 기상청 API 키가 설정되지 않았습니다."
-
-    try:
-        # 지역 좌표 가져오기
-        coords = get_coordinates_for_region(region_name)
-        if not coords:
-            return f"❌ {region_name}의 좌표 정보를 찾을 수 없습니다."
-
-        # 날짜 형식 변환 (YYYYMMDD)
-        try:
-            if len(date_str) == 8 and date_str.isdigit():
-                formatted_date = date_str
-            else:
-                # 다양한 날짜 형식 파싱
-                import re
-                # YYYY-MM-DD, YYYY/MM/DD 등의 형식을 YYYYMMDD로 변환
-                date_clean = re.sub(r'[^\d]', '', date_str)
-                if len(date_clean) == 8:
-                    formatted_date = date_clean
-                else:
-                    return "❌ 날짜 형식이 올바르지 않습니다. (예: 20231015, 2023-10-15)"
-        except:
-            return "❌ 날짜 형식을 처리할 수 없습니다."
-
-        # 기상청 지상관측 일자료 API URL
-        url = 'http://apis.data.go.kr/1360000/AsosDalyInfoService/getWthrDataList'
-
-        params = {
-            'serviceKey': WEATHER_API_KEY,
-            'pageNo': '1',
-            'numOfRows': '1',
-            'dataType': 'JSON',
-            'dataCd': 'ASOS',
-            'dateCd': 'DAY',
-            'startDt': formatted_date,
-            'endDt': formatted_date,
-            'stnIds': get_station_id_for_region(region_name)  # 지역별 관측소 ID
-        }
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-
-        print(f"📅 과거 날씨 조회: {region_name} ({formatted_date})")
-
-        response = requests.get(url, params=params, headers=headers, timeout=30)
-
-        if response.status_code == 200:
-            try:
-                data = response.json()
-            except Exception as json_error:
-                return f"❌ JSON 파싱 오류: {json_error}, 응답: {response.text[:200]}"
-
-            if data['response']['header']['resultCode'] == '00':
-                items = data['response']['body']['items']
-
-                if 'item' in items and len(items['item']) > 0:
-                    item = items['item'][0]
-                    return format_historical_weather_data(item, region_name, formatted_date)
-                else:
-                    return f"❌ {formatted_date}의 {region_name} 관측 데이터가 없습니다."
-            else:
-                return f"❌ 기상청 API 오류: {data['response']['header']['resultMsg']}"
-        else:
-            return f"❌ API 요청 실패: {response.status_code}"
-
-    except Exception as e:
-        return f"❌ 과거 날씨 정보 조회 오류: {e}"
-
-def get_station_id_for_region(region_name):
-    """지역명에 해당하는 기상관측소 ID 반환"""
-    station_mapping = {
-        # 주요 도시별 관측소 ID (ASOS)
-        '서울': '108',
-        '서울특별시': '108',
-        '부산': '159',
-        '부산광역시': '159',
-        '대구': '143',
-        '대구광역시': '143',
-        '인천': '112',
-        '인천광역시': '112',
-        '광주': '156',
-        '광주광역시': '156',
-        '대전': '133',
-        '대전광역시': '133',
-        '울산': '152',
-        '울산광역시': '152',
-        '제주': '184',
-        '제주도': '184',
-        '제주특별자치도': '184',
-        '강릉': '105',
-        '강원': '105',
-        '강원도': '105',
-        '강원특별자치도': '105',
-        '춘천': '101',
-        '원주': '114',
-        '수원': '119',
-        '경기': '119',
-        '경기도': '119',
-        '청주': '131',
-        '충북': '131',
-        '충청북도': '131',
-        '천안': '232',
-        '충남': '232',
-        '충청남도': '232',
-        '전주': '146',
-        '전북': '146',
-        '전라북도': '146',
-        '전라북도특별자치도': '146',
-        '광주': '156',
-        '전남': '156',
-        '전라남도': '156',
-        '안동': '136',
-        '경북': '136',
-        '경상북도': '136',
-        '창원': '155',
-        '경남': '155',
-        '경상남도': '155'
-    }
-
-    return station_mapping.get(region_name, '108')  # 기본값: 서울
-
-def format_historical_weather_data(data, region_name, date_str):
-    """과거 날씨 데이터 포맷팅"""
-    try:
-        # 날짜 포맷팅
-        year = date_str[:4]
-        month = date_str[4:6]
-        day = date_str[6:8]
-        formatted_date = f"{year}년 {month}월 {day}일"
-
-        weather_text = f"📅 <strong>{region_name} {formatted_date} 날씨 기록</strong>\n\n"
-
-        # 기온 정보
-        if 'avgTa' in data and data['avgTa']:
-            weather_text += f"🌡️ <strong>평균기온</strong>: {data['avgTa']}°C\n"
-        if 'maxTa' in data and data['maxTa']:
-            weather_text += f"🔥 <strong>최고기온</strong>: {data['maxTa']}°C\n"
-        if 'minTa' in data and data['minTa']:
-            weather_text += f"❄️ <strong>최저기온</strong>: {data['minTa']}°C\n"
-
-        # 강수량
-        if 'sumRn' in data and data['sumRn'] and data['sumRn'].strip():
-            rain_amount = float(data['sumRn'])
-            if rain_amount > 0:
-                weather_text += f"🌧️ <strong>강수량</strong>: {data['sumRn']}mm\n"
-            else:
-                weather_text += f"☀️ <strong>강수량</strong>: 0mm (맑음)\n"
-        else:
-            weather_text += f"☀️ <strong>강수량</strong>: 0mm (맑음)\n"
-
-        # 바람
-        if 'avgWs' in data and data['avgWs']:
-            weather_text += f"💨 <strong>평균풍속</strong>: {data['avgWs']}m/s\n"
-        if 'maxWs' in data and data['maxWs']:
-            weather_text += f"🌪️ <strong>최대풍속</strong>: {data['maxWs']}m/s\n"
-
-        # 습도
-        if 'avgRhm' in data and data['avgRhm']:
-            weather_text += f"💧 <strong>평균습도</strong>: {data['avgRhm']}%\n"
-
-        # 일조시간
-        if 'sumSs' in data and data['sumSs']:
-            weather_text += f"☀️ <strong>일조시간</strong>: {data['sumSs']}시간\n"
-
-        return weather_text
-
-    except Exception as e:
-        return f"❌ 과거 날씨 데이터 포맷팅 오류: {e}"
-
-def simplify_historical_weather(historical_weather_text, region_name, date_str):
-    """과거 날씨 데이터에서 평균 기온만 추출하여 단순화"""
-    try:
-        import re
-
-        # 평균기온 정보 추출
-        avg_temp_match = re.search(r'🌡️ <strong>평균기온</strong>: ([^°]+)°C', historical_weather_text)
-
-        if avg_temp_match:
-            avg_temp = avg_temp_match.group(1)
-            return f"🌡️ <strong>평균기온</strong>: {avg_temp}°C"
-        else:
-            # 평균기온 정보가 없는 경우 대체 처리
-            return "🌡️ <strong>기온 정보</strong>: 데이터 없음"
-
-    except Exception as e:
-        return f"🌡️ <strong>기온 정보</strong>: 처리 오류 ({e})"
-
-def extract_date_from_query(query):
-    """쿼리에서 날짜 추출"""
-    import re
-    import datetime
-
-    query_lower = query.lower()
-
-    # 상대적 날짜 패턴
-    if '어제' in query_lower:
-        yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
-        return yesterday.strftime('%Y%m%d')
-    elif '지난주' in query_lower:
-        last_week = datetime.datetime.now() - datetime.timedelta(days=7)
-        return last_week.strftime('%Y%m%d')
-    elif '지난달' in query_lower:
-        last_month = datetime.datetime.now() - datetime.timedelta(days=30)
-        return last_month.strftime('%Y%m%d')
-    elif '작년' in query_lower or '지난해' in query_lower:
-        last_year = datetime.datetime.now() - datetime.timedelta(days=365)
-        return last_year.strftime('%Y%m%d')
-
-    # 절대적 날짜 패턴 (YYYY-MM-DD, YYYY/MM/DD 등)
-    date_patterns = [
-        r'(\d{4})[.-/](\d{1,2})[.-/](\d{1,2})',  # 2023-10-15, 2023.10.15, 2023/10/15
-        r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일',  # 2023년 10월 15일
-        r'(\d{1,2})월\s*(\d{1,2})일',              # 10월 15일 (올해)
-        r'(\d{8})',                                # 20231015
-    ]
-
-    for pattern in date_patterns:
-        match = re.search(pattern, query)
-        if match:
-            groups = match.groups()
-            try:
-                if len(groups) == 3:
-                    year, month, day = groups
-                    if len(year) == 4:
-                        return f"{year}{month.zfill(2)}{day.zfill(2)}"
-                elif len(groups) == 2:  # 월일만 있는 경우 올해로 가정
-                    month, day = groups
-                    current_year = datetime.datetime.now().year
-                    return f"{current_year}{month.zfill(2)}{day.zfill(2)}"
-                elif len(groups) == 1 and len(groups[0]) == 8:  # YYYYMMDD
-                    return groups[0]
-            except:
-                continue
-
-    return None
-
-def interactive_mode():
-    """대화형 모드"""
-    print("\n" + "="*60)
-    print("🌟 하이브리드 최적화 여행 추천 RAG 시스템 (Amazon Bedrock)")
-    print("="*60)
-    print("사용법: 여행 지역과 기간을 입력하세요")
-    print("예시: '부산 2박 3일 여행 추천', '제주도 맛집 추천'")
-    print("특징: SQL 필터링 + 벡터 유사도를 결합한 고속 검색")
-    print("AI 모델: Amazon Bedrock Claude")
-    print("종료: 'quit' 또는 'exit' 입력")
-    print("-"*60)
-    
-    while True:
-        try:
-            user_input = input("\n💬 여행 질문을 입력하세요: ").strip()
-            
-            if user_input.lower() in ['quit', 'exit', '종료']:
-                print("👋 여행 추천 시스템을 종료합니다!")
-                break
-                
-            if not user_input:
-                print("⚠️ 질문을 입력해주세요.")
-                continue
-            
-            print("\n" + "-"*40)
-            get_travel_recommendation(user_input, stream=True)
-            print("-"*40)
-            
-        except KeyboardInterrupt:
-            print("\n👋 여행 추천 시스템을 종료합니다!")
-            break
-        except Exception as e:
-            print(f"❌ 오류 발생: {e}")
-
 # # LangGraph 여행 대화 시스템
 
 # LangGraph 의존성 임포트 (선택적)
@@ -1729,7 +788,6 @@ class TravelState(TypedDict):
     query_type: str
     need_rag: bool
     need_search: bool
-    need_tool: bool
     need_confirmation: bool  # 일정 확정 여부
     history: str
     rag_results: List
@@ -1771,7 +829,6 @@ def classify_query(state: TravelState) -> TravelState:
     travel_keywords = ["추천", "여행", "일정", "계획", "코스", "가볼만한", "여행지", "관광"]
     location_keywords = ["서울", "부산", "제주", "경기", "강원", "장소", "위치", "어디"]
     food_keywords = ["맛집", "음식", "식당", "먹을", "카페", "레스토랑"]
-    booking_keywords = ["예약", "등록", "신청", "결제", "예매"]
     
     # 확정 키워드 (개선된 패턴 매칭)
     strong_confirmation_keywords = ["확정", "결정", "확인", "이걸로", "좋아", "맞아", "그래", "됐어", "완료", "ok", "오케이"]
@@ -1786,7 +843,6 @@ def classify_query(state: TravelState) -> TravelState:
     # 복합적 분류 로직
     need_rag = any(keyword in user_input for keyword in travel_keywords) or is_weather_request
     need_search = any(keyword in user_input for keyword in location_keywords) and not is_weather_request
-    need_tool = any(keyword in user_input for keyword in booking_keywords)
 
     # 음식 관련 질의도 RAG로 처리
     if any(keyword in user_input for keyword in food_keywords):
@@ -1823,16 +879,15 @@ def classify_query(state: TravelState) -> TravelState:
     else:
         print(f"   ❌ 확정 불가: 여행 일정 없음")
     
-    query_type = "complex" if sum([need_rag, need_search, need_tool]) > 1 else "simple"
+    query_type = "complex" if sum([need_rag, need_search]) > 1 else "simple"
     
-    print(f"   분류 결과 - RAG: {need_rag}, Search: {need_search}, Tool: {need_tool}, 확정: {need_confirmation}")
+    print(f"   분류 결과 - RAG: {need_rag}, Search: {need_search}, 확정: {need_confirmation}")
     print(f"   여행 일정 존재: {has_travel_plan}")
     
     return {
         **state,
         "need_rag": need_rag,
         "need_search": need_search,
-        "need_tool": need_tool,
         "need_confirmation": need_confirmation,
         "query_type": query_type
     }
@@ -2151,26 +1206,6 @@ def search_processing_node(state: TravelState) -> TravelState:
             "conversation_context": f"장소 검색 중 오류가 발생했습니다: {str(e)}"
         }
 
-def tool_execution_node(state: TravelState) -> TravelState:
-    """예약/등록 처리 노드"""
-    if not state.get("messages"):
-        return state
-    
-    user_query = state["messages"][-1]
-    print(f"🔧 도구 실행: '{user_query}'")
-    
-    # 실제 예약 시스템 연동은 향후 구현
-    # 현재는 모의 응답 제공
-    mock_result = {
-        "status": "pending",
-        "message": "예약 기능은 현재 준비 중입니다. 고객센터로 문의해주세요.",
-        "action_required": "manual_booking"
-    }
-    
-    return {
-        **state,
-        "tool_results": mock_result
-    }
 
 def general_chat_node(state: TravelState) -> TravelState:
     """일반 대화 처리 노드"""
@@ -3205,10 +2240,6 @@ def route_execution(state: TravelState) -> str:
     if state.get("need_search"):
         return "search_processing"
     
-    # 도구 실행
-    if state.get("need_tool"):
-        return "tool_execution"
-    
     # 기본: 일반 채팅
     return "general_chat"
 
@@ -3234,7 +2265,6 @@ def create_travel_workflow():
     workflow.add_node("classify", classify_query)
     workflow.add_node("rag_processing", rag_processing_node)
     workflow.add_node("search_processing", search_processing_node)
-    workflow.add_node("tool_execution", tool_execution_node)
     workflow.add_node("general_chat", general_chat_node)
     workflow.add_node("confirmation_processing", confirmation_processing_node)
     workflow.add_node("integrate_response", integrate_response_node)
@@ -3246,7 +2276,6 @@ def create_travel_workflow():
     # 모든 처리 노드들이 통합 노드로 수렴
     workflow.add_edge("rag_processing", "integrate_response")
     workflow.add_edge("search_processing", "integrate_response")
-    workflow.add_edge("tool_execution", "integrate_response")
     workflow.add_edge("general_chat", "integrate_response")
     workflow.add_edge("confirmation_processing", "integrate_response")
     
@@ -3279,166 +2308,20 @@ def get_current_travel_state_ref():
     global current_travel_state
     return current_travel_state
 
-async def get_travel_recommendation_langgraph_stream(query: str):
-    """LangGraph 기반 실시간 스트리밍 여행 추천"""
-    global current_travel_state
-    import asyncio
-    import datetime
 
-    if not travel_workflow:
-        # LangGraph 미사용 시 기존 함수로 폴백
-        yield {'type': 'status', 'content': 'LangGraph 시스템 준비 중...'}
-        result = get_travel_recommendation(query, stream=False)
-
-        # 텍스트를 청크로 나누어 스트리밍
-        chunks = [result[i:i+10] for i in range(0, len(result), 10)]
-        for chunk in chunks:
-            yield {'type': 'content', 'content': chunk}
-            await asyncio.sleep(0.1)
-
-        yield {'type': 'metadata', 'travel_plan': {}, 'tool_results': {}}
-        return
-
-    print(f"🚀 LangGraph 스트리밍 워크플로우 실행: '{query}'")
-
-    try:
-        # 확정이 아닌 새 여행 추천 요청시에만 기존 상태 초기화
-        is_confirmation = any(keyword in query.lower() for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이"])
-        is_new_travel_request = any(keyword in query.lower() for keyword in ["추천", "여행", "일정", "계획", "박", "일"])
-
-        if is_confirmation and current_travel_state.get("travel_plan"):
-            print("🎯 확정 요청 - 기존 상태 유지")
-            # 기존 상태 유지하면서 마지막 쿼리만 업데이트
-            current_travel_state["last_query"] = query
-            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
-        elif is_new_travel_request and not is_confirmation:
-            print("🔄 새로운 여행 추천 - 기존 상태 초기화")
-            current_travel_state = {
-                "last_query": query,
-                "travel_plan": {},
-                "places": [],
-                "context": "",
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-        else:
-            print("🔍 기타 요청 - 기존 상태 유지하며 쿼리 추가")
-            # 날씨 질문 등 기타 요청시 기존 상태 유지
-            current_travel_state["last_query"] = query
-            current_travel_state["timestamp"] = datetime.datetime.now().isoformat()
-
-        # 상태 생성
-        if not conversation_history:
-            conversation_history = []
-
-        # 메시지 히스토리에 새 쿼리 추가
-        messages = conversation_history + [query]
-
-        # 전역 상태에서 기존 여행 계획 가져오기 (컨텍스트 유지)
-        existing_travel_plan = current_travel_state.get("travel_plan", {})
-        print(f"🔄 기존 여행 계획 상태: {bool(existing_travel_plan)}")
-
-        initial_state = {
-            "messages": messages,
-            "query_type": "unknown",
-            "need_rag": False,
-            "need_search": False,
-            "need_tool": False,
-            "need_confirmation": False,
-            "history": " ".join(messages),
-            "rag_results": [],
-            "search_results": [],
-            "tool_results": {},
-            "travel_plan": existing_travel_plan,  # 기존 여행 계획 포함
-            "user_preferences": {},
-            "conversation_context": "",
-            "formatted_ui_response": {}
-        }
-
-        yield {'type': 'status', 'content': '🔍 여행 요청을 분석하고 있습니다...'}
-
-        # 워크플로우 실행 (스트리밍)
-        response_text = ""
-        final_state = None
-
-        # LangGraph 워크플로우를 단계별로 실행하면서 스트리밍
-        for step_output in travel_workflow.stream(initial_state):
-            print(f"🔄 워크플로우 단계: {step_output}")
-
-            # 각 단계의 출력을 분석해서 스트리밍 데이터 생성
-            if isinstance(step_output, dict):
-                for node_name, node_state in step_output.items():
-                    if node_name == "classify_query":
-                        yield {'type': 'status', 'content': '📋 질문 유형을 분석했습니다...'}
-                    elif node_name == "handle_rag":
-                        yield {'type': 'status', 'content': '🔍 관련 여행지 정보를 검색했습니다...'}
-                    elif node_name == "generate_response":
-                        yield {'type': 'status', 'content': '✨ AI가 추천을 생성하고 있습니다...'}
-
-                        # 응답 텍스트가 있으면 스트리밍
-                        if 'conversation_context' in node_state:
-                            new_content = node_state['conversation_context']
-                            if new_content and new_content != response_text:
-                                chunk = new_content[len(response_text):]
-                                response_text = new_content
-
-                                # 텍스트를 작은 청크로 스트리밍
-                                for char in chunk:
-                                    yield {'type': 'content', 'content': char}
-                                    await asyncio.sleep(0.02)
-
-                    final_state = node_state
-
-        # 최종 상태 업데이트
-        if final_state:
-            # places는 tool_results가 아닌 travel_plan에서 직접 가져오기
-            places = []
-            if final_state.get("tool_results", {}).get("places"):
-                # 확정 시 tool_results에서 places 가져오기
-                places = final_state.get("tool_results", {}).get("places", [])
-            elif final_state.get("travel_plan", {}).get("places"):
-                # 일반 여행 추천 시 travel_plan에서 places 가져오기
-                places = final_state.get("travel_plan", {}).get("places", [])
-
-            current_travel_state.update({
-                "travel_plan": final_state.get('travel_plan', {}),
-                "places": places,
-                "context": final_state.get('conversation_context', ''),
-                "last_query": query,
-                "timestamp": datetime.datetime.now().isoformat()
-            })
-            print(f"💾 스트리밍 여행 상태 저장 완료: {len(places)}개 장소")
-
-            # 메타데이터 전송
-            yield {
-                'type': 'metadata',
-                'travel_plan': final_state.get('travel_plan', {}),
-                'action_required': final_state.get('tool_results', {}).get('action_required'),
-                'tool_results': final_state.get('tool_results', {})
-            }
-
-        print("✅ LangGraph 스트리밍 워크플로우 완료!")
-
-    except Exception as e:
-        print(f"❌ LangGraph 스트리밍 워크플로우 오류: {e}")
-        yield {'type': 'status', 'content': f'⚠️ 처리 중 오류가 발생했습니다: {str(e)}'}
-
-        # 오류 시 기존 시스템으로 폴백
-        result = get_travel_recommendation(query, stream=False)
-        yield {'type': 'content', 'content': result}
-        yield {'type': 'metadata', 'travel_plan': {}, 'tool_results': {}}
-
-def get_travel_recommendation_langgraph(query: str, conversation_history: List[str] = None, session_id: str = "default") -> dict:
+async def get_travel_recommendation_langgraph(query: str, conversation_history: List[str] = None, session_id: str = "default") -> dict:
     """LangGraph 기반 여행 추천 (개선된 상태 관리 - 새 추천시 덮어쓰기)"""
     import datetime
 
     if not travel_workflow:
-        # LangGraph 미사용 시 기존 함수로 폴백
-        response = get_travel_recommendation(query, stream=False)
+        # LangGraph 미사용 시 에러 반환
         return {
-            "response": response,
+            "response": "죄송합니다. 현재 여행 추천 시스템을 초기화하는 중입니다.",
             "travel_plan": {},
             "action_required": None,
-            "conversation_context": response
+            "conversation_context": "시스템 초기화 중",
+            "success": False,
+            "error": "LangGraph workflow not available"
         }
     
     print(f"🚀 LangGraph 워크플로우 실행: '{query}' (세션: {session_id})")
@@ -3486,7 +2369,6 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
             "query_type": "",
             "need_rag": False,
             "need_search": False,
-            "need_tool": False,
             "need_confirmation": False,
             "history": " ".join(messages),
             "rag_results": [],
@@ -3498,8 +2380,8 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
             "formatted_ui_response": {}
         }
 
-        # 워크플로우 실행
-        final_state = travel_workflow.invoke(initial_state)
+        # 워크플로우 실행 (비동기)
+        final_state = await travel_workflow.ainvoke(initial_state)
 
         # 전역 상태 업데이트 (새 추천으로 덮어쓰기)
         if final_state.get("travel_plan"):
@@ -3535,52 +2417,12 @@ def get_travel_recommendation_langgraph(query: str, conversation_history: List[s
         
     except Exception as e:
         print(f"❌ LangGraph 워크플로우 오류: {e}")
-        # 오류 시 기존 시스템으로 폴백
-        response = get_travel_recommendation(query, stream=False)
+        # 오류 시 에러 응답 반환
         return {
-            "response": response,
+            "response": f"죄송합니다. 처리 중 오류가 발생했습니다: {str(e)}",
             "travel_plan": {},
             "action_required": None,
-            "conversation_context": response,
+            "conversation_context": f"Error: {str(e)}",
             "success": False,
             "error": str(e)
         }
-
-# =============================================================================
-# 메인 실행부
-# =============================================================================
-
-if __name__ == "__main__":
-    # AWS 자격 증명 확인
-    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-        print("⚠️ 경고: AWS 자격 증명이 설정되지 않았습니다.")
-        print("환경변수 AWS_ACCESS_KEY_ID와 AWS_SECRET_ACCESS_KEY를 설정하거나")
-        print("AWS CLI로 자격 증명을 구성해주세요.")
-        print("자세한 내용: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-quickstart.html")
-        sys.exit(1)
-    
-    print("\n🚀 하이브리드 최적화 RAG 시스템 (Amazon Bedrock) 초기화 완료!")
-    print("📊 특징: SQL 1차 필터링 + 벡터 2차 검색으로 고속 정확 검색")
-    print("🤖 AI 모델: Amazon Bedrock Claude")
-
-    # 백엔드 시작 시 인기 문서 사전 캐싱
-    print("🔥 인기 문서 사전 캐싱 시작...")
-    if llm_cache.preload_popular_documents():
-        print("✅ 인기 문서 캐싱 완료")
-
-    # 주요 지역 문서 사전 캐싱
-    print("🏗️ 주요 지역 문서 사전 캐싱 시작...")
-    major_regions = ['서울특별시', '부산광역시', '제주특별자치도', '경기도']
-    for region in major_regions:
-        if llm_cache.preload_region_documents(region):
-            print(f"✅ {region} 캐싱 완료")
-
-    print("🎯 Redis 문서 캐시 프리로딩 완료!")
-
-    try:
-        interactive_mode()
-            
-    except KeyboardInterrupt:
-        print("\n👋 시스템을 종료합니다.")
-    except Exception as e:
-        print(f"❌ 오류 발생: {e}")
