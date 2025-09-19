@@ -24,16 +24,6 @@ async def lifespan(app: FastAPI):
     # 앱 시작 시 데이터베이스 테이블 생성 (OAuth 테이블 추가를 위해 임시 활성화)
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created/updated")
-
-    # Redis + FAISS 하이브리드 캐시 사전 초기화 (첫 요청 지연 방지)
-    try:
-        logger.info("🚀 Redis + FAISS 하이브리드 캐시 사전 초기화 시작...")
-        from LLM_RAG import initialize_redis_faiss_cache
-        initialize_redis_faiss_cache()
-        logger.info("✅ Redis + FAISS 하이브리드 캐시 사전 초기화 완료")
-    except Exception as e:
-        logger.warning(f"⚠️ Redis + FAISS 하이브리드 캐시 사전 초기화 실패: {e}")
-
     yield
     # 앱 종료 시 정리 작업 (필요시)
 
