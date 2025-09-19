@@ -658,12 +658,21 @@ class HybridOptimizedRetriever(BaseRetriever):
             conditions = []
             
             if regions:
-                region_conditions = " OR ".join([f"cmetadata->>'region' ILIKE '%{region}%'" for region in regions])
-                conditions.append(f"({region_conditions})")
+                region_conditions = []
+                for region in regions:
+                    # 서울특별시 -> 서울로 변환하여 검색
+                    region_simple = region.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
+                    region_conditions.append(f"cmetadata->>'region' ILIKE '%{region_simple}%'")
+                conditions.append(f"({' OR '.join(region_conditions)})")
             
             if cities:
-                city_conditions = " OR ".join([f"cmetadata->>'city' ILIKE '%{city}%'" for city in cities])
-                conditions.append(f"({city_conditions})")
+                city_conditions = []
+                for city in cities:
+                    # city 필드와 region 필드 모두에서 검색 (서울의 경우)
+                    city_simple = city.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
+                    city_conditions.append(f"cmetadata->>'city' ILIKE '%{city_simple}%'")
+                    city_conditions.append(f"cmetadata->>'region' ILIKE '%{city_simple}%'")
+                conditions.append(f"({' OR '.join(city_conditions)})")
             
             if categories:
                 category_conditions = " OR ".join([f"cmetadata->>'category' ILIKE '%{category}%'" for category in categories])
