@@ -478,12 +478,21 @@ class HybridOptimizedRetriever(BaseRetriever):
             conditions = []
             
             if regions:
-                region_conditions = " OR ".join([f"cmetadata->>'region' ILIKE '%{region}%'" for region in regions])
-                conditions.append(f"({region_conditions})")
+                region_conditions = []
+                for region in regions:
+                    # 서울특별시 -> 서울로 변환하여 검색
+                    region_simple = region.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
+                    region_conditions.append(f"cmetadata->>'region' ILIKE '%{region_simple}%'")
+                conditions.append(f"({' OR '.join(region_conditions)})")
             
             if cities:
-                city_conditions = " OR ".join([f"cmetadata->>'city' ILIKE '%{city}%'" for city in cities])
-                conditions.append(f"({city_conditions})")
+                city_conditions = []
+                for city in cities:
+                    # city 필드와 region 필드 모두에서 검색 (서울의 경우)
+                    city_simple = city.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
+                    city_conditions.append(f"cmetadata->>'city' ILIKE '%{city_simple}%'")
+                    city_conditions.append(f"cmetadata->>'region' ILIKE '%{city_simple}%'")
+                conditions.append(f"({' OR '.join(city_conditions)})")
             
             if categories:
                 category_conditions = " OR ".join([f"cmetadata->>'category' ILIKE '%{category}%'" for category in categories])
@@ -687,19 +696,19 @@ def search_places(query):
     try:
         print(f"🔍 하이브리드 검색: '{query}'")
 
-        # 캐시된 검색 결과 확인
-        cached_docs = llm_cache.get_cached_search_results(query)
-        if cached_docs:
-            print("⚡ 캐시된 검색 결과 반환!")
-            return cached_docs
+        # 캐시된 검색 결과 확인 - 임시 주석 처리
+        # cached_docs = llm_cache.get_cached_search_results(query)
+        # if cached_docs:
+        #     print("⚡ 캐시된 검색 결과 반환!")
+        #     return cached_docs
 
         print("🔍 새로운 검색 실행...")
 
         # HybridOptimizedRetriever 직접 사용
         docs = retriever._get_relevant_documents(query)
 
-        # 검색 결과 캐싱 (30분)
-        llm_cache.cache_search_results(query, docs, expire=1800)
+        # 검색 결과 캐싱 (30분) - 임시 주석 처리
+        # llm_cache.cache_search_results(query, docs, expire=1800)
 
         return docs
 
@@ -711,13 +720,13 @@ def get_travel_recommendation_optimized(query, stream=True):
     """최적화된 Redis 캐싱 + 스트림"""
     def _generate_stream():
         try:
-            # 검색 단계는 항상 캐싱 활용
-            cached_docs = llm_cache.get_cached_search_results(query)
-            if cached_docs:
-                docs = cached_docs
-            else:
-                docs = retriever._get_relevant_documents(query)
-                llm_cache.cache_search_results(query, docs, expire=1800)
+            # 검색 단계는 항상 캐싱 활용 - 임시 주석 처리
+            # cached_docs = llm_cache.get_cached_search_results(query)
+            # if cached_docs:
+            #     docs = cached_docs
+            # else:
+            docs = retriever._get_relevant_documents(query)
+            # llm_cache.cache_search_results(query, docs, expire=1800)
 
             context = format_docs(docs)
             prompt_value = rag_prompt.invoke({"context": context, "question": query})
@@ -740,9 +749,9 @@ def get_travel_recommendation_optimized(query, stream=True):
             if buffer:
                 yield buffer
 
-            # 🎯 스트림 완료 후 전체 응답 캐싱
-            if len(full_response) > 50:
-                llm_cache.cache_response(query, full_response, expire=3600)
+            # 🎯 스트림 완료 후 전체 응답 캐싱 - 임시 주석 처리
+            # if len(full_response) > 50:
+            #     llm_cache.cache_response(query, full_response, expire=3600)
 
         except Exception as e:
             yield f"❌ 추천 생성 오류: {e}"
@@ -751,18 +760,18 @@ def get_travel_recommendation_optimized(query, stream=True):
         if stream:
             return _generate_stream()
         else:
-            # 비스트림: 캐시 확인 후 일반 처리
-            cached_response = llm_cache.get_cached_response(query)
-            if cached_response:
-                return cached_response
+            # 비스트림: 캐시 확인 후 일반 처리 - 임시 주석 처리
+            # cached_response = llm_cache.get_cached_response(query)
+            # if cached_response:
+            #     return cached_response
 
-            # 검색 단계는 항상 캐싱 활용
-            cached_docs = llm_cache.get_cached_search_results(query)
-            if cached_docs:
-                docs = cached_docs
-            else:
-                docs = retriever._get_relevant_documents(query)
-                llm_cache.cache_search_results(query, docs, expire=1800)
+            # 검색 단계는 항상 캐싱 활용 - 임시 주석 처리
+            # cached_docs = llm_cache.get_cached_search_results(query)
+            # if cached_docs:
+            #     docs = cached_docs
+            # else:
+            docs = retriever._get_relevant_documents(query)
+            # llm_cache.cache_search_results(query, docs, expire=1800)
 
             context = format_docs(docs)
             prompt_value = rag_prompt.invoke({"context": context, "question": query})
@@ -772,7 +781,7 @@ def get_travel_recommendation_optimized(query, stream=True):
                 response_text = response.content
             else:
                 response_text = str(response)
-            llm_cache.cache_response(query, response_text, expire=3600)
+            # llm_cache.cache_response(query, response_text, expire=3600)
             return response_text
 
     except Exception as e:
