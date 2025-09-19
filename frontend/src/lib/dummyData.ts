@@ -29,7 +29,7 @@ export interface CategorySection {
 const getRecommendationConfig = async (): Promise<any> => {
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-    const response = await fetch(`${API_BASE_URL}/proxy/api/v2/recommendations/config`, {
+    const response = await fetch(`${API_BASE_URL}/api/v2/recommendations/config`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     })
@@ -149,13 +149,27 @@ const getAuthToken = async (): Promise<string | null> => {
     const { getSession } = await import('next-auth/react')
     const session = await getSession()
 
+    console.log('🔍 세션 상태 확인:', {
+      hasSession: !!session,
+      hasBackendToken: !!(session as any)?.backendToken,
+      userEmail: session?.user?.email
+    })
+
     if (session && (session as any).backendToken) {
+      console.log('✅ Next-auth에서 백엔드 토큰 획득')
+      console.log('🔍 백엔드 토큰 길이:', (session as any).backendToken.length)
       return (session as any).backendToken
     }
 
     // fallback: localStorage에서 토큰을 가져오기
     const token = localStorage.getItem('access_token')
-    return token
+    if (token) {
+      console.log('✅ localStorage에서 토큰 획득')
+      return token
+    }
+
+    console.warn('❌ 토큰을 찾을 수 없음')
+    return null
   } catch (error) {
     console.error('토큰 가져오기 오류:', error)
     return null
@@ -197,7 +211,9 @@ export const fetchRecommendations = async (
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
     // 인증 토큰 가져오기
+    console.log('🔍 토큰 가져오기 시작')
     const token = await getAuthToken()
+    console.log('🔍 토큰 가져오기 결과:', !!token)
 
     // 헤더 설정
     const headers: Record<string, string> = {
@@ -208,6 +224,11 @@ export const fetchRecommendations = async (
     // 토큰이 있으면 Authorization 헤더 추가
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
+      console.log('🔐 JWT 토큰 포함하여 API 호출:', token.substring(0, 20) + '...')
+      console.log('🔍 실제 토큰 길이:', token.length)
+      console.log('🔍 토큰 전체:', token) // 디버깅용 - 나중에 제거
+    } else {
+      console.warn('⚠️ JWT 토큰이 없어 비로그인 상태로 API 호출')
     }
 
     // v2 추천 시스템 API 사용
@@ -216,8 +237,8 @@ export const fetchRecommendations = async (
       params.append('region', region)
     }
 
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
-    // console.log('v2 추천 API 호출:', url)
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/personalized?${params.toString()}`
+    console.log('v2 추천 API 호출:', url)
 
     // 3초 타임아웃으로 빠른 실패 처리
     const timeoutPromise = new Promise((_, reject) =>
@@ -247,7 +268,11 @@ export const fetchRecommendations = async (
     let recommendations
     try {
       recommendations = await response.json()
-      // console.log('v2 API 응답:', recommendations)
+      console.log('🎯 v2 API 응답 (우선순위 태그 확인):', {
+        featured: recommendations.featured?.table_name,
+        feedCategories: recommendations.feed?.map((item: any) => item.table_name).slice(0, 5),
+        totalCount: recommendations.total_count
+      })
     } catch (jsonError) {
       console.error('v2 추천 API 응답 JSON 파싱 오류:', jsonError)
       throw new Error('v2 API 응답 데이터 형식 오류')
@@ -266,7 +291,7 @@ export const fetchRecommendations = async (
         }
 
 
-        // console.log('v2 API 응답 아이템 수:', allItems.length)
+        console.log('v2 API 응답 아이템 수:', allItems.length)
         transformedData = transformRecommendationsToSections(allItems, maxSections, maxItemsPerSection)
         console.log('변환된 섹션 데이터:', transformedData)
       } else {
@@ -308,7 +333,7 @@ const fetchV2ExploreFeedWithCategories = async (
       'accept': 'application/json',
     }
 
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/explore`
     // console.log('v2 탐색 피드 API 호출 (카테고리별):', url)
 
     const response = await fetch(url, { headers })
@@ -397,7 +422,7 @@ const fetchPopularPlacesByBookmarks = async (
       params.append('region', region)
     }
 
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/personalized?${params.toString()}`
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/personalized?${params.toString()}`
     // console.log('인기 장소 API 호출 (bookmark_cnt 기준):', url)
 
     const response = await fetch(url, { headers })
@@ -479,7 +504,7 @@ const fetchV2ExploreFeed = async (): Promise<{ data: CitySection[], hasMore: boo
       'accept': 'application/json',
     }
 
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/explore`
     // console.log('v2 탐색 피드 API 호출:', url)
 
     const response = await fetch(url, { headers })
@@ -718,7 +743,7 @@ const fetchRegionCategorySection = async (
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
     // 🎯 개별 지역 섹션 API 사용 (우선순위 태그 필터링 적용됨)
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?limit=${limit}`
+    const url = `${API_BASE_URL}/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?limit=${limit}`
 
     console.log(`🔧 개별 섹션 API 호출: ${region}/${category}`)
 
@@ -773,7 +798,7 @@ export const fetchAllRegionsAllCategories = async (
     }
 
     // 백엔드 설정에서 사용 가능한 지역과 카테고리 가져오기
-    const configResponse = await fetch(`${API_BASE_URL}/proxy/api/v2/recommendations/regions`, { headers })
+    const configResponse = await fetch(`${API_BASE_URL}/api/v2/recommendations/regions`, { headers })
     let availableRegions: string[] = []
     let availableCategories: string[] = []
 
@@ -862,7 +887,7 @@ export const fetchPopularSectionByRegion = async (
     }
 
     // v2 탐색 피드 API를 사용해서 인기순 데이터 가져오기
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/explore`
     // console.log('지역별 인기순 섹션 API 호출:', url, 'region:', region)
 
     const response = await fetch(url, { headers })
@@ -952,7 +977,7 @@ export const fetchPopularSectionsForNewUsers = async (
     }
 
     // v2 탐색 피드 API를 사용해서 인기순 데이터 가져오기
-    const url = `${API_BASE_URL}/proxy/api/v2/recommendations/main-feed/explore`
+    const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/explore`
     // console.log('신규 사용자 인기순 섹션 API 호출:', url)
 
     const response = await fetch(url, { headers })

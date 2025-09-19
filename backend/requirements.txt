@@ -32,3 +32,4 @@ langchain-experimental>=0.0.1
 langgraph>=0.0.40
 open_clip_torch>=2.20.0
 torch>=2.0.0
+faiss-cpu>=1.7.0,<1.8.0
