@@ -70,7 +70,7 @@ REQUEST_SEMAPHORE = Semaphore(MAX_PARALLEL_REQUESTS)
 def generate_cache_key(prefix: str, user_id: Optional[str], region: Optional[str], 
                       category: Optional[str], limit: int, **kwargs) -> str:
     """
-    캐시 키 생성 함수
+    캐시 키 생성 함수 (사용자 우선순위 태그 포함)
     """
     # 사용자별로 다른 캐시를 사용 (개인화 추천)
     user_part = f"user_{user_id}" if user_id else "anonymous"
@@ -93,27 +93,29 @@ def generate_cache_key(prefix: str, user_id: Optional[str], region: Optional[str
     return f"{prefix}:{user_part}:{param_hash}"
 
 def get_recommendations_cache(cache_key: str) -> Optional[List[Dict[str, Any]]]:
-    """캐시에서 추천 데이터 조회"""
-    try:
-        cached_data = cache.get(cache_key)
-        if cached_data:
-            logger.info(f"Cache hit: {cache_key}")
-            return cached_data
-        return None
-    except Exception as e:
-        logger.error(f"Cache get error: {e}")
-        return None
+    """캐시에서 추천 데이터 조회 (주석처리)"""
+    # try:
+    #     cached_data = cache.get(cache_key)
+    #     if cached_data:
+    #         logger.info(f"Cache hit: {cache_key}")
+    #         return cached_data
+    #     return None
+    # except Exception as e:
+    #     logger.error(f"Cache get error: {e}")
+    #     return None
+    return None
 
 def set_recommendations_cache(cache_key: str, data: List[Dict[str, Any]], expire: int = 900) -> bool:
-    """캐시에 추천 데이터 저장 (기본 15분)"""
-    try:
-        success = cache.set(cache_key, data, expire=expire)
-        if success:
-            logger.info(f"Cache set: {cache_key} (expire: {expire}s)")
-        return success
-    except Exception as e:
-        logger.error(f"Cache set error: {e}")
-        return False
+    """캐시에 추천 데이터 저장 (기본 15분) - 주석처리"""
+    # try:
+    #     success = cache.set(cache_key, data, expire=expire)
+    #     if success:
+    #         logger.info(f"Cache set: {cache_key} (expire: {expire}s)")
+    #     return success
+    # except Exception as e:
+    #     logger.error(f"Cache set error: {e}")
+    #     return False
+    return False
 
 
 # ============================================================================
@@ -125,25 +127,27 @@ async def fetch_recommendations_with_fallback(
     region: Optional[str],
     category: Optional[str],
     limit: int,
-    fast_mode: bool = False  # 메인 페이지용 고속 모드
+    fast_mode: bool = False,  # 메인 페이지용 고속 모드
+    priority_tag: Optional[str] = None  # 사용자 우선순위 태그
 ) -> List[Dict[str, Any]]:
     """
     안전한 추천 데이터 조회 (통합 엔진 사용) - Redis 캐싱 적용
     """
-    # 캐시 키 생성
+    # 캐시 키 생성 (우선순위 태그 포함)
     cache_key = generate_cache_key(
         prefix="rec_main",
         user_id=user_id,
         region=region,
         category=category,
         limit=limit,
-        fast_mode=fast_mode
+        fast_mode=fast_mode,
+        priority_tag=priority_tag or "none"
     )
     
-    # 캐시에서 조회 시도
-    cached_result = get_recommendations_cache(cache_key)
-    if cached_result is not None:
-        return cached_result
+    # 캐시에서 조회 시도 (주석처리)
+    # cached_result = get_recommendations_cache(cache_key)
+    # if cached_result is not None:
+    #     return cached_result
     
     async with REQUEST_SEMAPHORE:
         try:
@@ -162,10 +166,10 @@ async def fetch_recommendations_with_fallback(
                 timeout=RECOMMENDATION_TIMEOUT
             )
             
-            # 결과가 있으면 캐시에 저장 (메인페이지는 5분, 일반은 15분)
-            if result:
-                expire_time = 300 if fast_mode else 900  # 5분 or 15분
-                set_recommendations_cache(cache_key, result, expire=expire_time)
+            # 결과가 있으면 캐시에 저장 (메인페이지는 5분, 일반은 15분) - 주석처리
+            # if result:
+            #     expire_time = 300 if fast_mode else 900  # 5분 or 15분
+            #     set_recommendations_cache(cache_key, result, expire=expire_time)
             
             return result if result else []
 
@@ -181,7 +185,8 @@ async def fetch_explore_data_parallel(
     user_id: Optional[str],
     regions: List[str],
     categories: List[str],
-    fast_mode: bool = True  # explore는 기본적으로 fast_mode
+    fast_mode: bool = True,  # explore는 기본적으로 fast_mode
+    priority_tag: Optional[str] = None  # 사용자 우선순위 태그
 ) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
     """
     탐색 데이터를 병렬로 안전하게 조회
@@ -193,7 +198,8 @@ async def fetch_explore_data_parallel(
             region=region,
             category=category,
             limit=5,  # 성능 개선을 위해 감소
-            fast_mode=fast_mode  # fast_mode 전달
+            fast_mode=fast_mode,  # fast_mode 전달
+            priority_tag=priority_tag or "none"
         )
         for region in regions
         for category in categories
@@ -244,22 +250,7 @@ async def get_main_personalized_feed(
     try:
         user_id = str(current_user.user_id) if current_user else None
 
-        # 전체 응답 캐싱을 위한 캐시 키 생성
-        response_cache_key = generate_cache_key(
-            prefix="main_personalized",
-            user_id=user_id,
-            region=region,
-            category=None,
-            limit=limit
-        )
-        
-        # 캐시된 응답 조회
-        cached_response = cache.get(response_cache_key)
-        if cached_response is not None:
-            logger.info(f"🚀 Main personalized feed cache hit: {response_cache_key}")
-            return cached_response
-
-        # priority_tag 가져오기 (explore와 동일한 방식)
+        # priority_tag 가져오기 (캐시 키에 포함하기 위해 먼저 조회)
         user_priority_tag = "none"
         if user_id:
             try:
@@ -267,7 +258,25 @@ async def get_main_personalized_feed(
                 priority = await engine.get_user_priority_tag(user_id)
                 user_priority_tag = priority or "none"
             except Exception as e:
-                logger.warning(f"Failed to get user priority for personalized: {e}")
+                logger.warning(f"Failed to get user priority for cache key: {e}")
+
+        # 전체 응답 캐싱을 위한 캐시 키 생성 (우선순위 태그 포함)
+        response_cache_key = generate_cache_key(
+            prefix="main_personalized",
+            user_id=user_id,
+            region=region,
+            category=None,
+            limit=limit,
+            priority_tag=user_priority_tag  # 우선순위 태그 추가
+        )
+        
+        # 캐시된 응답 조회 (주석처리)
+        # cached_response = cache.get(response_cache_key)
+        # if cached_response is not None:
+        #     logger.info(f"🚀 Main personalized feed cache hit: {response_cache_key}")
+        #     return cached_response
+
+        # user_priority_tag는 이미 위에서 조회됨
 
         logger.info(f"🔍 Getting personalized feed for user: {user_id}, priority_tag: {user_priority_tag}, limit: {limit}")
         print(f"🔍 DEBUG: user_id={user_id}, priority_tag={user_priority_tag}")
@@ -281,7 +290,8 @@ async def get_main_personalized_feed(
                 region=region,
                 category=None,
                 limit=limit,
-                fast_mode=True
+                fast_mode=True,
+                priority_tag=user_priority_tag
             )
             # 개인화 추천이 실패하면 experience 카테고리의 인기 추천으로 폴백
             if not recommendations:
@@ -295,7 +305,8 @@ async def get_main_personalized_feed(
                         region=None,
                         category=category,
                         limit=limit // len(experience_categories) + 2,
-                        fast_mode=True
+                        fast_mode=True,
+                        priority_tag="none"  # 인기 추천이므로 우선순위 태그 없음
                     )
                     if category_recs:
                         experience_recommendations.extend(category_recs)
@@ -312,7 +323,8 @@ async def get_main_personalized_feed(
                 region=region,  # 지역 필터 적용
                 category=None,
                 limit=limit,
-                fast_mode=True  # 메인 피드는 항상 고속 모드
+                fast_mode=True,  # 메인 피드는 항상 고속 모드
+                priority_tag=user_priority_tag
             )
 
         logger.info(f"🔍 Initial recommendations count: {len(recommendations) if recommendations else 0}")
@@ -359,8 +371,8 @@ async def get_main_personalized_feed(
         }
         
         # 결과를 캐시에 저장 (5분 캐싱)
-        cache.set(response_cache_key, response_data, expire=300)
-        logger.info(f"🚀 Main personalized feed cached: {response_cache_key}")
+        # cache.set(response_cache_key, response_data, expire=300)
+        # logger.info(f"🚀 Main personalized feed cached: {response_cache_key}")
         
         return response_data
 
@@ -401,11 +413,11 @@ async def get_main_explore_feed(
             categories_count=len(categories) if categories else 0
         )
         
-        # 캐시된 응답 조회
-        cached_response = cache.get(explore_cache_key)
-        if cached_response is not None:
-            logger.info(f"🚀 Main explore feed cache hit: {explore_cache_key}")
-            return cached_response
+        # 캐시된 응답 조회 (주석처리)
+        # cached_response = cache.get(explore_cache_key)
+        # if cached_response is not None:
+        #     logger.info(f"🚀 Main explore feed cache hit: {explore_cache_key}")
+        #     return cached_response
 
         # 동적 지역/카테고리 순서 결정 (하드코딩 제거)
         if not regions or not categories:
@@ -447,20 +459,21 @@ async def get_main_explore_feed(
 
         logger.info(f"🔑 Cache key generated: {cache_key}")
 
-        # 캐시에서 조회 시도
-        from cache_utils import cache
-        cached_result = cache.get(cache_key)
-        if cached_result is not None:
-            logger.info(f"🎯 Cache hit for explore feed: {cache_key}")
-            return cached_result
-        else:
-            logger.info(f"🔍 Cache miss for explore feed: {cache_key}")
+        # 캐시에서 조회 시도 (주석처리)
+        # from cache_utils import cache
+        # cached_result = cache.get(cache_key)
+        # if cached_result is not None:
+        #     logger.info(f"🎯 Cache hit for explore feed: {cache_key}")
+        #     return cached_result
+        # else:
+        #     logger.info(f"🔍 Cache miss for explore feed: {cache_key}")
 
         # 병렬로 제한된 섹션 데이터 조회
         explore_data = await fetch_explore_data_parallel(
             user_id=user_id,
             regions=limited_regions,
-            categories=limited_categories
+            categories=limited_categories,
+            priority_tag=user_priority_tag
         )
 
         # 응답에 메타데이터 추가
@@ -482,9 +495,9 @@ async def get_main_explore_feed(
             }
         }
 
-        # 🚀 응답을 새로운 캐시 키로 저장 (8분 TTL - 메인페이지용 최적화)
-        cache.set(explore_cache_key, result, expire=480)
-        logger.info(f"🚀 Main explore feed cached: {explore_cache_key}")
+        # 🚀 응답을 새로운 캐시 키로 저장 (8분 TTL - 메인페이지용 최적화) - 주석처리
+        # cache.set(explore_cache_key, result, expire=480)
+        # logger.info(f"🚀 Main explore feed cached: {explore_cache_key}")
 
         return result
 
@@ -524,11 +537,11 @@ async def get_explore_section(
             offset=offset
         )
         
-        # 캐시된 응답 조회
-        cached_section = cache.get(section_cache_key)
-        if cached_section is not None:
-            logger.info(f"🚀 Explore section cache hit: {section_cache_key}")
-            return cached_section
+        # 캐시된 응답 조회 (주석처리)
+        # cached_section = cache.get(section_cache_key)
+        # if cached_section is not None:
+        #     logger.info(f"🚀 Explore section cache hit: {section_cache_key}")
+        #     return cached_section
 
         logger.info(f"Getting section data: {region}/{category} for user: {user_id}")
 
@@ -592,7 +605,8 @@ async def get_explore_section(
                     region=region,
                     category=target_category,
                     limit=limit + offset,  # offset 만큼 더 조회
-                    fast_mode=False  # 상세 섭션은 전체 기능 사용
+                    fast_mode=False,  # 상세 섭션은 전체 기능 사용
+                    priority_tag=user_priority or "none"
                 ),
                 timeout=10.0  # 10초 타임아웃
             )
@@ -622,9 +636,9 @@ async def get_explore_section(
             "message": f"Found {len(paginated_recommendations)} recommendations"
         }
         
-        # 결과를 캐시에 저장 (개별 섹션은 15분 캐싱)
-        cache.set(section_cache_key, section_response, expire=900)
-        logger.info(f"🚀 Explore section cached: {section_cache_key}")
+        # 결과를 캐시에 저장 (개별 섹션은 15분 캐싱) - 주석처리
+        # cache.set(section_cache_key, section_response, expire=900)
+        # logger.info(f"🚀 Explore section cached: {section_cache_key}")
         
         return section_response
 
@@ -650,31 +664,33 @@ async def health_check():
         cache_status = "healthy"
         cache_info = {"cached_keys": 0}
         try:
-            # 테스트 캐시 쓰기/읽기
-            test_key = "health_check_test"
-            test_value = {"status": "ok", "timestamp": asyncio.get_event_loop().time()}
-            cache.set(test_key, test_value, expire=60)
-            read_value = cache.get(test_key)
-            
-            if read_value and read_value.get("status") == "ok":
-                cache_status = "healthy"
-                # Redis 캐시 키 개수 확인
-                try:
-                    if hasattr(cache, 'redis'):
-                        rec_keys = len(cache.redis.keys("rec_*"))
-                        main_keys = len(cache.redis.keys("main_*"))
-                        explore_keys = len(cache.redis.keys("explore_*"))
-                        cache_info = {
-                            "rec_keys": rec_keys,
-                            "main_keys": main_keys,
-                            "explore_keys": explore_keys,
-                            "total_rec_cache": rec_keys + main_keys + explore_keys
-                        }
-                except Exception:
-                    cache_info["note"] = "키 개수 확인 불가"
-                    
-            else:
-                cache_status = "write/read error"
+            # 테스트 캐시 쓰기/읽기 (주석처리)
+            # test_key = "health_check_test"
+            # test_value = {"status": "ok", "timestamp": asyncio.get_event_loop().time()}
+            # cache.set(test_key, test_value, expire=60)
+            # read_value = cache.get(test_key)
+            # 
+            # if read_value and read_value.get("status") == "ok":
+            #     cache_status = "healthy"
+            #     # Redis 캐시 키 개수 확인
+            #     try:
+            #         if hasattr(cache, 'redis'):
+            #             rec_keys = len(cache.redis.keys("rec_*"))
+            #             main_keys = len(cache.redis.keys("main_*"))
+            #             explore_keys = len(cache.redis.keys("explore_*"))
+            #             cache_info = {
+            #                 "rec_keys": rec_keys,
+            #                 "main_keys": main_keys,
+            #                 "explore_keys": explore_keys,
+            #                 "total_rec_cache": rec_keys + main_keys + explore_keys
+            #             }
+            #     except Exception:
+            #         cache_info["note"] = "키 개수 확인 불가"
+            #         
+            # else:
+            #     cache_status = "write/read error"
+            cache_status = "disabled"
+            cache_info = {"cached_keys": 0}
         except Exception as e:
             cache_status = f"error: {str(e)[:50]}"
 
@@ -686,7 +702,8 @@ async def health_check():
             region=None,
             category=None,
             limit=1,
-            fast_mode=True  # 헬스체크는 빠르게
+            fast_mode=True,  # 헬스체크는 빠르게
+            priority_tag="none"
         )
         response_time = round((time.time() - start_time) * 1000, 1)  # ms
 
@@ -714,17 +731,18 @@ async def health_check():
 
 @router.delete("/cache/clear")
 async def clear_cache():
-    """추천 캐시 삭제"""
-    try:
-        cleared = 0
-        if hasattr(cache, 'redis'):
-            for pattern in ["rec_*", "main_*", "explore_*"]:
-                keys = cache.redis.keys(pattern)
-                if keys:
-                    cleared += cache.redis.delete(*keys)
-        return {"cleared_keys": cleared, "message": f"{cleared}개 캐시 삭제됨"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """추천 캐시 삭제 (주석처리)"""
+    # try:
+    #     cleared = 0
+    #     if hasattr(cache, 'redis'):
+    #         for pattern in ["rec_*", "main_*", "explore_*"]:
+    #             keys = cache.redis.keys(pattern)
+    #             if keys:
+    #                 cleared += cache.redis.delete(*keys)
+    #     return {"cleared_keys": cleared, "message": f"{cleared}개 캐시 삭제됨"}
+    # except Exception as e:
+    #     raise HTTPException(status_code=500, detail=str(e))
+    return {"cleared_keys": 0, "message": "캐시가 비활성화되어 있습니다"}
 
 
 # ============================================================================
