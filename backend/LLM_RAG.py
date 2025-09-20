@@ -207,12 +207,22 @@ def _fallback_intent_classification(query: str, has_travel_plan: bool = False) -
     """폴백: 개선된 키워드 기반 의도 분류"""
     query_lower = query.lower()
 
-    # 확정 관련 키워드 (더 정확하게)
-    confirmation_keywords = ["확정", "결정", "좋아", "이걸로", "ok", "오케이", "맞아", "네", "응", "그래"]
-    strong_confirmation = ["확정", "결정", "이걸로", "ok", "오케이"]
+    # 확정 관련 키워드 (더 포괄적으로)
+    confirmation_keywords = [
+        "확정", "결정", "좋아", "이걸로", "ok", "오케이", "맞아", "네", "응", "그래",
+        "좋다", "좋네", "좋아요", "좋습니다", "괜찮아", "괜찮다", "괜찮네", "괜찮습니다",
+        "이거", "이것", "이걸", "이거로", "이것으로", "이걸로", "이거로 해", "이것으로 해",
+        "그래", "그래요", "그래요", "그렇다", "그렇네", "그렇습니다",
+        "맞다", "맞네", "맞습니다", "맞아요", "맞아", "맞습니다",
+        "네", "네요", "네", "예", "예요", "예", "예스", "yes", "y",
+        "확인", "확인해", "확인해요", "확인합니다", "확인됐어", "확인됐습니다"
+    ]
+    strong_confirmation = ["확정", "결정", "이걸로", "ok", "오케이", "확인", "yes"]
     
     if has_travel_plan and any(word in query_lower for word in confirmation_keywords):
         confirmation_type = "strong" if any(word in query_lower for word in strong_confirmation) else "weak"
+        matched_keywords = [word for word in confirmation_keywords if word in query_lower]
+        print(f"🎯 확정 키워드 감지: {matched_keywords} (타입: {confirmation_type})")
         return {
             "primary_intent": "confirmation",
             "secondary_intent": "none",
@@ -1090,6 +1100,13 @@ def classify_query(state: TravelState) -> TravelState:
         print(f"   - RAG 필요: {need_rag}")
         print(f"   - 검색 필요: {need_search}")
         print(f"   - 확정 필요: {need_confirmation}")
+        print(f"   - 기존 여행 계획 존재: {has_travel_plan}")
+        
+        # 확정 처리 디버깅
+        if need_confirmation:
+            print(f"🎯 확정 처리 활성화됨!")
+        elif intent_result['primary_intent'] == 'confirmation':
+            print(f"⚠️ 확정 의도 감지되었지만 need_confirmation이 False입니다.")
 
     except Exception as e:
         print(f"⚠️ LLM 분류 실패, 폴백 사용: {e}")

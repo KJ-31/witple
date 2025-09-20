@@ -56,6 +56,7 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
 
   const [pendingResponseId, setPendingResponseId] = useState<number | null>(null)
   const modalClosedDuringResponseRef = useRef(false)
+  const [isProcessing, setIsProcessing] = useState(false) // 중복 요청 방지
   
   // 토스트 메시지 상태
   const [toast, setToast] = useState<{
@@ -199,6 +200,14 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
 
   const handleChatSubmit = async (messageText: string) => {
     if (!messageText.trim()) return
+    
+    // 중복 요청 방지
+    if (isProcessing) {
+      console.log('⚠️ 이미 처리 중인 요청이 있습니다. 중복 요청을 무시합니다.')
+      return
+    }
+    
+    setIsProcessing(true)
 
     // 새로운 여행 요청인지 감지 (간단한 키워드 기반)
     const messageTextLower = messageText.toLowerCase()
@@ -313,7 +322,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       // pendingResponseId 초기화 및 플래그 리셋
       setPendingResponseId(null)
       modalClosedDuringResponseRef.current = false
-
+      
+      // 처리 완료
+      setIsProcessing(false)
 
     } catch (error) {
       console.error('Chat API error:', error)
@@ -338,6 +349,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       // pendingResponseId 초기화 및 플래그 리셋
       setPendingResponseId(null)
       modalClosedDuringResponseRef.current = false
+      
+      // 에러 발생 시에도 처리 완료
+      setIsProcessing(false)
 
     }
   }
