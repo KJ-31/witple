@@ -28,7 +28,7 @@ export default function BottomNavigation() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-[#0F1A31]/95 backdrop-blur-md border-t border-[#1F3C7A]/30 z-50">
-      <div className="flex items-center justify-around px-4 py-5 max-w-md mx-auto">
+      <div className="flex items-center justify-evenly px-4 py-5 max-w-md mx-auto">
         <Link
           href="/"
           className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/')
@@ -42,18 +42,6 @@ export default function BottomNavigation() {
           </svg>
         </Link>
 
-        <Link
-          href="/recommendations"
-          className={`flex flex-col items-center py-1 px-2 transition-colors ${isActive('/recommendations')
-              ? 'text-[#3E68FF]'
-              : 'text-[#6FA0E6] hover:text-[#3E68FF]'
-            }`}
-          aria-label="추천"
-        >
-          <svg className="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-          </svg>
-        </Link>
 
         <Link
           href="/plan/calendar"
