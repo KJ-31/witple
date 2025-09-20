@@ -34,6 +34,9 @@ except Exception as e:
 
 router = APIRouter()
 
+# 요청 처리 상태 관리 (간단한 메모리 기반)
+processing_requests = set()
+
 # 확장된 캐시 메서드 구현
 def _generate_cache_key(query: str, cache_type: str = "response") -> str:
     """쿼리 기반 캐시 키 생성"""
@@ -122,6 +125,18 @@ async def chat_with_llm(chat_message: ChatMessage):
     사용자의 메시지를 받아 LangGraph 기반 여행 추천 시스템으로 응답을 생성합니다.
     LangGraph가 사용 불가능할 때는 기존 RAG 시스템으로 폴백합니다.
     """
+    # 중복 요청 방지
+    request_key = f"{chat_message.message[:50]}_{hash(chat_message.message)}"
+    if request_key in processing_requests:
+        print(f"⚠️ 중복 요청 감지, 무시: {request_key}")
+        return ChatResponse(
+            response="이미 처리 중인 요청입니다. 잠시만 기다려주세요.",
+            success=False,
+            error="Duplicate request"
+        )
+    
+    processing_requests.add(request_key)
+    
     try:
         if get_travel_recommendation_langgraph is None:
             # LLM 시스템 사용 불가능
@@ -218,6 +233,10 @@ async def chat_with_llm(chat_message: ChatMessage):
             response_html=error_html,
             response_lines=error_lines
         )
+    
+    finally:
+        # 요청 처리 완료 후 키 제거
+        processing_requests.discard(request_key)
 
 @router.get("/chat/health")
 async def chat_health():
