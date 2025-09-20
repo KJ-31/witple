@@ -402,15 +402,16 @@ async def update_profile_preferences(
         # 캐시 무효화 - 사용자 취향 변경 시 추천 캐시 삭제
         user_id = str(current_user.user_id)
 
-        # 개인화 추천 캐시 삭제 (다양한 파라미터 조합)
+        # 개인화 추천 캐시 삭제 (모든 우선순위 태그 조합 포함) - 개선됨
         cache_patterns = [
             f"personalized:{user_id}:*",
             f"recommendations:{user_id}",
             f"user:{user_id}",
-            f"rec_main:user_{user_id}:*",      # 메인 페이지 개인화 추천
-            f"main_personalized:user_{user_id}:*",  # 메인 페이지 전체 응답
-            f"main_explore:user_{user_id}:*",       # 메인 페이지 탐색 섹션
-            f"explore_feed_v3:{user_id}:*"          # 탐색 피드 v3
+            f"rec_main:user_{user_id}:*",           # 메인 페이지 개인화 추천 (모든 우선순위 태그)
+            f"main_personalized:user_{user_id}:*", # 메인 페이지 전체 응답 (모든 우선순위 태그)
+            f"main_explore:user_{user_id}:*",      # 메인 페이지 탐색 섹션 (모든 우선순위 태그)
+            f"explore_feed_v3:{user_id}:*",        # 탐색 피드 v3 (모든 우선순위 태그)
+            f"explore_section:user_{user_id}:*"    # 개별 섹션 캐시 (모든 우선순위 태그)
         ]
 
         # Redis SCAN을 사용하여 패턴 매칭 키들 삭제
