@@ -204,17 +204,46 @@ def classify_query_intent(query: str, has_travel_plan: bool = False) -> dict:
     return _fallback_intent_classification(query, has_travel_plan)
 
 def _fallback_intent_classification(query: str, has_travel_plan: bool = False) -> dict:
-    """폴백: 단순 키워드 기반 의도 분류"""
+    """폴백: 개선된 키워드 기반 의도 분류"""
     query_lower = query.lower()
 
-    # 확정 관련 키워드
-    if has_travel_plan and any(word in query_lower for word in ["확정", "결정", "좋아", "네", "예", "응", "ok"]):
+    # 확정 관련 키워드 (더 정확하게)
+    confirmation_keywords = ["확정", "결정", "좋아", "이걸로", "ok", "오케이", "맞아", "네", "응", "그래"]
+    strong_confirmation = ["확정", "결정", "이걸로", "ok", "오케이"]
+    
+    if has_travel_plan and any(word in query_lower for word in confirmation_keywords):
+        confirmation_type = "strong" if any(word in query_lower for word in strong_confirmation) else "weak"
         return {
             "primary_intent": "confirmation",
             "secondary_intent": "none",
-            "confidence_level": "medium",
-            "confirmation_type": "weak",
+            "confidence_level": "high" if confirmation_type == "strong" else "medium",
+            "confirmation_type": confirmation_type,
             "requires_rag": False,
+            "requires_search": False
+        }
+
+    # 새로운 여행 요청 감지 (개선된 로직)
+    travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러", "구경", "관광"]
+    duration_keywords = ["박", "일", "당일", "하루", "이틀", "사흘"]
+    region_keywords = ["서울", "부산", "제주", "강릉", "경주", "전주", "대구", "광주", "인천", "춘천", "여수"]
+    question_patterns = ["어디", "뭐", "뭘", "어떤", "추천해", "알려줘", "가볼만한"]
+    
+    has_travel_keywords = any(keyword in query_lower for keyword in travel_keywords)
+    has_duration_keywords = any(keyword in query_lower for keyword in duration_keywords)
+    has_region_keywords = any(keyword in query_lower for keyword in region_keywords)
+    has_question_patterns = any(pattern in query_lower for pattern in question_patterns)
+    
+    is_new_travel_request = has_travel_keywords or has_duration_keywords or has_region_keywords or has_question_patterns
+    
+    # 기존 여행 계획이 있고 새로운 여행 요청인 경우
+    if has_travel_plan and is_new_travel_request:
+        print("🔄 기존 계획 있지만 새로운 여행 요청 감지 - travel_planning으로 분류")
+        return {
+            "primary_intent": "travel_planning",
+            "secondary_intent": "reset_previous",
+            "confidence_level": "high",
+            "confirmation_type": "none",
+            "requires_rag": True,
             "requires_search": False
         }
 
@@ -233,7 +262,7 @@ def _fallback_intent_classification(query: str, has_travel_plan: bool = False) -
     return {
         "primary_intent": "travel_planning",
         "secondary_intent": "none",
-        "confidence_level": "low",
+        "confidence_level": "medium",
         "confirmation_type": "none",
         "requires_rag": True,
         "requires_search": False
@@ -1027,10 +1056,20 @@ def classify_query(state: TravelState) -> TravelState:
         # LLM 기반 의도 분류
         intent_result = classify_query_intent(user_input, has_travel_plan)
 
-        # 새로운 여행 요청 감지 (기존 로직 유지)
-        if has_travel_plan and intent_result["primary_intent"] == "travel_planning":
+        # 새로운 여행 요청 감지 (개선된 로직)
+        if (has_travel_plan and 
+            intent_result["primary_intent"] == "travel_planning" and 
+            intent_result.get("secondary_intent") == "reset_previous"):
             # 새로운 여행 일정 요청으로 판단되면 상태 초기화
             print("🔄 새로운 여행 일정 요청 감지 - 기존 상태 초기화")
+            state["travel_plan"] = {}
+            state["user_preferences"] = {}
+            state["conversation_context"] = ""
+            state["formatted_ui_response"] = {}
+            has_travel_plan = False  # 상태 업데이트
+        elif has_travel_plan and intent_result["primary_intent"] == "travel_planning":
+            # 일반적인 여행 관련 질문이지만 새로운 요청이 아닌 경우도 상태 초기화
+            print("🔄 여행 관련 질문 감지 - 기존 상태 초기화 (안전장치)")
             state["travel_plan"] = {}
             state["user_preferences"] = {}
             state["conversation_context"] = ""
@@ -2489,10 +2528,33 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
         if conversation_history and isinstance(conversation_history, list):
             messages = conversation_history + [query]
         
-        # 쿼리 타입 분석
-        is_confirmation = any(keyword in query.lower() for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이"])
-        is_new_travel_request = any(keyword in query.lower() for keyword in ["추천", "여행", "일정", "계획", "박", "일"])
-        is_weather_query = any(keyword in query.lower() for keyword in ["날씨", "기온", "온도"])
+        # 쿼리 타입 분석 (개선된 감지 로직)
+        query_lower = query.lower()
+        
+        # 확정 의도 감지 (더 정확하게)
+        is_confirmation = any(keyword in query_lower for keyword in ["확정", "결정", "좋아", "이걸로", "ok", "오케이", "맞아", "네", "응", "그래"])
+        
+        # 새로운 여행 요청 감지 (더 포괄적으로)
+        travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러", "구경", "관광"]
+        duration_keywords = ["박", "일", "당일", "하루", "이틀", "사흘"]
+        region_keywords = ["서울", "부산", "제주", "강릉", "경주", "전주", "대구", "광주", "인천", "춘천", "여수", "경기", "강원", "전라", "경상", "충청"]
+        
+        has_travel_keywords = any(keyword in query_lower for keyword in travel_keywords)
+        has_duration_keywords = any(keyword in query_lower for keyword in duration_keywords)
+        has_region_keywords = any(keyword in query_lower for keyword in region_keywords)
+        
+        # 새로운 여행 요청으로 판단하는 조건들
+        is_new_travel_request = (
+            has_travel_keywords or  # 여행 관련 키워드
+            has_duration_keywords or  # 기간 관련 키워드
+            has_region_keywords or  # 지역명 포함
+            any(pattern in query_lower for pattern in ["어디", "뭐", "뭘", "어떤", "추천해", "알려줘", "가볼만한"])  # 질문/요청 패턴
+        )
+        
+        # 확정이 아니고 새로운 여행 요청인 경우만 새로운 요청으로 처리
+        is_new_travel_request = is_new_travel_request and not is_confirmation
+        
+        is_weather_query = any(keyword in query_lower for keyword in ["날씨", "기온", "온도"])
 
         global current_travel_state
 
