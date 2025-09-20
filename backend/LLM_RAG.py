@@ -12,11 +12,7 @@ import sys
 import os
 import json
 import re
-import hashlib
-import redis
-import numpy as np
-import faiss
-import pickle
+# 미사용 import 제거됨 (hashlib, numpy, pickle)
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
@@ -35,448 +31,6 @@ except Exception as e:
     boto3_session = None
 
 # # 설정 및 초기화
-# 데이터베이스 연결 설정 (Redis 우선, PGVector 폴백)
-DB_ENABLED = True  # Redis 캐시 우선 + PGVector 폴백
-
-# Redis 캐싱 설정
-print("🔗 Redis 캐싱 시스템 초기화 중...")
-redis_available = False
-try:
-    # 환경변수 직접 사용 + 오류 처리 강화
-    redis_url = os.getenv('REDIS_URL')
-    redis_client = redis.Redis.from_url(
-        redis_url,
-        decode_responses=True,
-        socket_timeout=5,
-        socket_connect_timeout=5,
-        retry_on_timeout=True
-    )
-    # 연결 테스트
-    redis_client.ping()
-    redis_available = True
-    print("✅ Redis 연결 성공!")
-except Exception as e:
-    print(f"⚠️ Redis 연결 실패: {e}")
-    redis_client = None
-    redis_available = False
-
-class LLMCache:
-    """LLM 응답 전용 캐싱 시스템"""
-
-    def __init__(self, redis_client=None):
-        self.redis = redis_client
-        self.enabled = redis_client is not None
-        print(f"🧠 LLM 캐시 {'활성화' if self.enabled else '비활성화'}")
-
-    def _generate_cache_key(self, query: str, cache_type: str = "response") -> str:
-        """쿼리 기반 캐시 키 생성"""
-        # 쿼리 정규화 (공백, 대소문자, 특수문자 처리)
-        normalized_query = re.sub(r'\s+', ' ', query.strip().lower())
-        normalized_query = re.sub(r'[^\w\s가-힣]', '', normalized_query)
-
-        # 해시 생성
-        query_hash = hashlib.md5(normalized_query.encode('utf-8')).hexdigest()[:12]
-        return f"llm:{cache_type}:{query_hash}"
-
-    def get_cached_response(self, query: str) -> Optional[str]:
-        """캐시된 LLM 응답 조회"""
-        if not self.enabled:
-            return None
-
-        try:
-            cache_key = self._generate_cache_key(query)
-            cached_data = self.redis.get(cache_key)
-
-            if cached_data:
-                print(f"🎯 캐시 히트: {cache_key}")
-                return cached_data
-            else:
-                print(f"❌ 캐시 미스: {cache_key}")
-                return None
-
-        except Exception as e:
-            print(f"⚠️ 캐시 조회 오류: {e}")
-            return None
-
-    def cache_response(self, query: str, response: str, expire: int = 3600) -> bool:
-        """LLM 응답 캐싱 (1시간 기본)"""
-        if not self.enabled or not response:
-            return False
-
-        try:
-            cache_key = self._generate_cache_key(query)
-            success = self.redis.set(cache_key, response, ex=expire)
-
-            if success:
-                print(f"💾 응답 캐시 저장: {cache_key}")
-
-            return success
-
-        except Exception as e:
-            print(f"⚠️ 캐시 저장 오류: {e}")
-            return False
-
-    def cache_search_results(self, query: str, docs: List[Document], expire: int = 1800) -> bool:
-        """검색 결과 캐싱 (30분)"""
-        if not self.enabled:
-            return False
-
-        try:
-            cache_key = self._generate_cache_key(query, "search")
-
-            # Document 객체를 직렬화 가능한 형태로 변환
-            serializable_docs = []
-            for doc in docs:
-                serializable_docs.append({
-                    'page_content': doc.page_content,
-                    'metadata': doc.metadata
-                })
-
-            docs_json = json.dumps(serializable_docs, ensure_ascii=False)
-            success = self.redis.set(cache_key, docs_json, ex=expire)
-
-            if success:
-                print(f"🔍 검색 결과 캐시 저장: {cache_key}")
-
-            return success
-
-        except Exception as e:
-            print(f"⚠️ 검색 캐시 저장 오류: {e}")
-            return False
-
-    def get_cached_search_results(self, query: str) -> Optional[List[Document]]:
-        """캐시된 검색 결과 조회"""
-        if not self.enabled:
-            return None
-
-        try:
-            cache_key = self._generate_cache_key(query, "search")
-            cached_data = self.redis.get(cache_key)
-
-            if cached_data:
-                print(f"🔍 검색 캐시 히트: {cache_key}")
-
-                # JSON을 Document 객체로 복원
-                docs_data = json.loads(cached_data)
-                docs = []
-                for doc_data in docs_data:
-                    doc = Document(
-                        page_content=doc_data['page_content'],
-                        metadata=doc_data['metadata']
-                    )
-                    docs.append(doc)
-
-                return docs
-
-            return None
-
-        except Exception as e:
-            print(f"⚠️ 검색 캐시 조회 오류: {e}")
-            return None
-
-    def get_cache_stats(self) -> dict:
-        """캐시 통계 조회"""
-        if not self.enabled:
-            return {"enabled": False}
-
-        try:
-            # Redis INFO 명령으로 통계 조회
-            info = self.redis.info()
-
-            # LLM 관련 키 개수 조회
-            llm_keys = self.redis.keys("llm:*")
-
-            return {
-                "enabled": True,
-                "total_keys": len(llm_keys),
-                "memory_usage": info.get('used_memory_human', 'N/A'),
-                "connected_clients": info.get('connected_clients', 0),
-            }
-
-        except Exception as e:
-            return {"enabled": True, "error": str(e)}
-
-    def preload_region_documents(self, region: str, expire: int = 7200) -> bool:
-        """지역별 문서 사전 로딩 (2시간 캐시)"""
-        if not self.enabled:
-            return False
-
-        try:
-            cache_key = f"llm:region:{region}"
-
-            # 이미 캐시되어 있으면 건너뛰기
-            if self.redis.exists(cache_key):
-                print(f"📦 지역 캐시 존재: {region}")
-                return True
-
-            # DB에서 해당 지역의 모든 문서 조회
-            engine = shared_engine
-            with engine.connect() as conn:
-                query = text("""
-                    SELECT document, cmetadata
-                    FROM langchain_pg_embedding
-                    WHERE cmetadata->>'region' = :region
-                    LIMIT 500
-                """)
-                result = conn.execute(query, {"region": region})
-
-                documents = []
-                for row in result:
-                    documents.append({
-                        'page_content': row.document,
-                        'metadata': json.loads(row.cmetadata) if row.cmetadata else {}
-                    })
-
-                if documents:
-                    docs_json = json.dumps(documents, ensure_ascii=False)
-                    success = self.redis.set(cache_key, docs_json, ex=expire)
-                    print(f"🏗️ 지역 캐시 생성: {region} ({len(documents)}개 문서)")
-                    return success
-
-        except Exception as e:
-            print(f"⚠️ 지역 캐시 오류: {e}")
-            return False
-
-    def get_region_documents(self, region: str) -> List[Document]:
-        """지역별 캐시된 문서 조회"""
-        if not self.enabled:
-            return []
-
-        try:
-            cache_key = f"llm:region:{region}"
-            cached_data = self.redis.get(cache_key)
-
-            if cached_data:
-                print(f"🎯 지역 캐시 히트: {region}")
-                docs_data = json.loads(cached_data)
-                return [Document(page_content=doc['page_content'], metadata=doc['metadata'])
-                       for doc in docs_data]
-
-        except Exception as e:
-            print(f"⚠️ 지역 캐시 조회 오류: {e}")
-
-        return []
-
-    def preload_popular_documents(self, expire: int = 3600) -> bool:
-        """인기 문서 사전 로딩 (1시간 캐시)"""
-        if not self.enabled:
-            return False
-
-        try:
-            cache_key = "llm:hot:popular"
-
-            if self.redis.exists(cache_key):
-                print("📦 인기 문서 캐시 존재")
-                return True
-
-            # 인기 문서 조회 (조회수, 추천수 기반)
-            engine = shared_engine
-            with engine.connect() as conn:
-                query = text("""
-                    SELECT document, cmetadata
-                    FROM langchain_pg_embedding
-                    ORDER BY (cmetadata->>'view_count')::int DESC NULLS LAST
-                    LIMIT 100
-                """)
-                result = conn.execute(query)
-
-                documents = []
-                for row in result:
-                    documents.append({
-                        'page_content': row.document,
-                        'metadata': json.loads(row.cmetadata) if row.cmetadata else {}
-                    })
-
-                if documents:
-                    docs_json = json.dumps(documents, ensure_ascii=False)
-                    success = self.redis.set(cache_key, docs_json, ex=expire)
-                    print(f"🔥 인기 문서 캐시 생성: {len(documents)}개")
-                    return success
-
-        except Exception as e:
-            print(f"⚠️ 인기 문서 캐시 오류: {e}")
-            return False
-
-# 전역 캐시 인스턴스
-llm_cache = LLMCache(redis_client if redis_available else None)
-
-# FAISS 벡터 캐시 클래스
-class FAISSVectorCache:
-    def __init__(self, dimension: int = 384, max_vectors: int = 100000):
-        """FAISS 벡터 캐시 초기화"""
-        self.dimension = dimension
-        self.max_vectors = max_vectors
-        self.index = None
-        self.id_to_metadata = {}  # FAISS ID -> 문서 메타데이터 매핑
-        self.content_hash_to_id = {}  # 문서 해시 -> FAISS ID 매핑
-        self.is_loaded = False
-        self.cache_file = "faiss_vector_cache.pkl"
-
-        try:
-            # FAISS 인덱스 초기화 (L2 거리 기반)
-            self.index = faiss.IndexFlatL2(dimension)
-            print(f"🚀 FAISS 벡터 캐시 초기화 완료 (차원: {dimension})")
-        except Exception as e:
-            print(f"⚠️ FAISS 초기화 실패: {e}")
-            self.index = None
-
-    def load_from_pgvector(self, engine):
-        """PGVector에서 벡터와 메타데이터를 로드하여 FAISS 캐시 구성"""
-        if not self.index:
-            return False
-
-        try:
-            print("📥 PGVector에서 벡터 데이터 로딩 중...")
-
-            with engine.connect() as conn:
-                # 모든 벡터와 메타데이터 조회
-                query = text("""
-                    SELECT document, cmetadata, embedding
-                    FROM langchain_pg_embedding
-                    LIMIT :max_vectors
-                """)
-
-                result = conn.execute(query, {"max_vectors": self.max_vectors})
-
-                vectors = []
-                metadata_list = []
-
-                for row in result:
-                    if row.embedding:
-                        # 벡터 데이터 파싱
-                        vector_str = row.embedding.strip('[]')
-                        vector = np.array([float(x) for x in vector_str.split(',')], dtype=np.float32)
-
-                        if vector.shape[0] == self.dimension:
-                            vectors.append(vector)
-
-                            # 메타데이터 저장
-                            metadata = {
-                                'content': row.document,
-                                'metadata': row.cmetadata or {}
-                            }
-                            metadata_list.append(metadata)
-
-                if vectors:
-                    # FAISS 인덱스에 벡터 추가
-                    vectors_array = np.vstack(vectors)
-                    self.index.add(vectors_array)
-
-                    # ID 매핑 생성
-                    for i, metadata in enumerate(metadata_list):
-                        self.id_to_metadata[i] = metadata
-                        content_hash = hashlib.md5(metadata['content'].encode()).hexdigest()
-                        self.content_hash_to_id[content_hash] = i
-
-                    self.is_loaded = True
-                    print(f"✅ FAISS 캐시 로딩 완료: {len(vectors)}개 벡터")
-
-                    # 캐시 파일 저장
-                    self.save_cache()
-                    return True
-                else:
-                    print("⚠️ 로드할 벡터 데이터가 없습니다")
-                    return False
-
-        except Exception as e:
-            print(f"⚠️ PGVector 로딩 실패: {e}")
-            return False
-
-    def save_cache(self):
-        """FAISS 캐시를 파일로 저장"""
-        try:
-            cache_data = {
-                'id_to_metadata': self.id_to_metadata,
-                'content_hash_to_id': self.content_hash_to_id,
-                'is_loaded': self.is_loaded
-            }
-
-            with open(self.cache_file, 'wb') as f:
-                pickle.dump(cache_data, f)
-
-            # FAISS 인덱스 별도 저장
-            if self.index and self.is_loaded:
-                faiss.write_index(self.index, "faiss_index.bin")
-
-            print("💾 FAISS 캐시 파일 저장 완료")
-
-        except Exception as e:
-            print(f"⚠️ FAISS 캐시 저장 실패: {e}")
-
-    def load_cache(self):
-        """저장된 FAISS 캐시 로드"""
-        try:
-            if os.path.exists(self.cache_file) and os.path.exists("faiss_index.bin"):
-                # 메타데이터 로드
-                with open(self.cache_file, 'rb') as f:
-                    cache_data = pickle.load(f)
-
-                self.id_to_metadata = cache_data.get('id_to_metadata', {})
-                self.content_hash_to_id = cache_data.get('content_hash_to_id', {})
-                self.is_loaded = cache_data.get('is_loaded', False)
-
-                # FAISS 인덱스 로드
-                self.index = faiss.read_index("faiss_index.bin")
-
-                print(f"📂 FAISS 캐시 로드 완료: {len(self.id_to_metadata)}개 벡터")
-                return True
-            else:
-                print("📂 저장된 FAISS 캐시가 없습니다")
-                return False
-
-        except Exception as e:
-            print(f"⚠️ FAISS 캐시 로드 실패: {e}")
-            return False
-
-    def search(self, query_vector: np.ndarray, k: int = 10) -> List[tuple]:
-        """FAISS를 사용한 벡터 유사도 검색"""
-        if not self.index or not self.is_loaded:
-            return []
-
-        try:
-            # 쿼리 벡터 차원 확인
-            if query_vector.shape[0] != self.dimension:
-                print(f"⚠️ 벡터 차원 불일치: {query_vector.shape[0]} != {self.dimension}")
-                return []
-
-            # FAISS 검색 수행
-            query_vector = query_vector.reshape(1, -1).astype(np.float32)
-            distances, indices = self.index.search(query_vector, k)
-
-            results = []
-            for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
-                if idx in self.id_to_metadata:
-                    metadata = self.id_to_metadata[idx]
-                    # 거리를 유사도 점수로 변환 (낮을수록 유사함)
-                    similarity_score = 1.0 / (1.0 + distance)
-                    results.append((metadata, similarity_score))
-
-            return results
-
-        except Exception as e:
-            print(f"⚠️ FAISS 검색 실패: {e}")
-            return []
-
-    def get_stats(self) -> dict:
-        """FAISS 캐시 통계 반환"""
-        return {
-            "enabled": self.index is not None,
-            "loaded": self.is_loaded,
-            "total_vectors": len(self.id_to_metadata),
-            "dimension": self.dimension,
-            "max_vectors": self.max_vectors
-        }
-
-# 전역 FAISS 캐시 인스턴스
-faiss_cache = FAISSVectorCache(dimension=384, max_vectors=100000)
-
-def get_search_performance_stats():
-    """검색 성능 통계 반환"""
-    return {
-        "faiss_cache": faiss_cache.get_stats(),
-        "llm_cache": llm_cache.get_cache_stats(),
-        "vectorstore_available": vectorstore is not None
-    }
 
 # LLM 모델 설정 (Amazon Bedrock - Claude)
 print("🤖 Amazon Bedrock Claude 모델 초기화 중...")
@@ -505,40 +59,16 @@ embeddings = HuggingFaceEmbeddings(
 )
 
 
+# # 벡터스토어 연결 (필수)
 
-# # 벡터스토어 연결 (Redis 캐시 우선 사용으로 비활성화)
-
-print("🎯 Redis 캐시 우선 + PGVector 폴백 모드")
-vectorstore = None
-if DB_ENABLED:
-    try:
-        print("🔗 벡터스토어 연결 중...")
-        vectorstore = PGVector(
-            embeddings=embeddings,
-            collection_name="place_recommendations",
-            connection=os.getenv('DATABASE_URL'),
-            pre_delete_collection=False,
-        )
-        print("✅ 벡터스토어 연결 완료 (Redis 우선, PGVector 폴백)")
-
-        # FAISS 캐시 초기화 시도
-        print("🚀 FAISS 벡터 캐시 초기화 중...")
-        try:
-            # 저장된 캐시가 있으면 로드, 없으면 PGVector에서 새로 구성
-            if not faiss_cache.load_cache():
-                print("📥 PGVector에서 FAISS 캐시 새로 구성...")
-                faiss_cache.load_from_pgvector(shared_engine)
-            else:
-                print("📂 기존 FAISS 캐시 로드 완료")
-
-        except Exception as faiss_e:
-            print(f"⚠️ FAISS 캐시 초기화 실패: {faiss_e}")
-            print("📢 FAISS 캐시 없이 PGVector만 사용")
-
-    except Exception as e:
-        print(f"⚠️ 벡터스토어 연결 실패: {e}")
-        print("📢 Redis 캐시 전용 모드로 동작")
-        vectorstore = None
+print("🔗 벡터스토어 연결 중...")
+vectorstore = PGVector(
+    embeddings=embeddings,
+    collection_name="place_recommendations",
+    connection=os.getenv('DATABASE_URL'),
+    pre_delete_collection=False,
+)
+print("✅ 벡터스토어 연결 성공")
 
 # DB 카탈로그는 초기화 함수에서 로드될 예정
 
@@ -570,7 +100,8 @@ def detect_query_entities(query: str) -> dict:
     "keywords": ["기타 키워드들"],
     "intent": "여행 인텐트",
     "travel_type": "여행 유형",
-    "duration": "여행 기간"
+    "duration": "여행 기간",
+    "travel_dates": "여행 날짜"
 }}
 
 추출 규칙:
@@ -581,11 +112,20 @@ def detect_query_entities(query: str) -> dict:
 5. intent: "travel_planning"(여행 일정), "place_search"(장소 검색), "weather"(날씨), "general"(일반)
 6. travel_type: "family"(가족), "couple"(커플), "friends"(친구), "solo"(혼자), "business"(출장), "general"(일반)
 7. duration: "당일", "1박2일", "2박3일", "3박4일", "장기", "미정" 등
+8. travel_dates: 구체적인 날짜를 YYYY-MM-DD 형식으로 변환, 상대적 날짜, 또는 "미정"
+
+**날짜 변환 규칙**:
+- "10월 4일" → "2025-10-04" (현재 연도 기준)
+- "4일부터" → "2025-09-04" (현재 월 기준)
+- "내일" → 내일 날짜로 계산
+- "이번 주말" → "이번 주말" (그대로 유지)
+- "다음 달" → "다음 달" (그대로 유지)
+- "2025-10-04" → "2025-10-04" (이미 형식화된 경우 그대로)
 
 예시:
-- "부산 2박3일 맛집 중심 일정" → {{"regions": ["부산광역시"], "cities": ["부산"], "categories": ["맛집"], "keywords": ["2박3일"], "intent": "travel_planning", "travel_type": "general", "duration": "2박3일"}}
-- "강릉 카페 추천해줘" → {{"regions": ["강원특별자치도"], "cities": ["강릉"], "categories": ["카페"], "keywords": [], "intent": "place_search", "travel_type": "general", "duration": "미정"}}
-- "가족과 제주도 여행" → {{"regions": ["제주특별자치도"], "cities": ["제주"], "categories": [], "keywords": ["가족"], "intent": "travel_planning", "travel_type": "family", "duration": "미정"}}
+- "부산 2박3일 10월 4일부터" → {{"regions": ["부산광역시"], "cities": ["부산"], "categories": [], "keywords": ["2박3일"], "intent": "travel_planning", "travel_type": "general", "duration": "2박3일", "travel_dates": "2025-10-04"}}
+- "제주도 이번 주말" → {{"regions": ["제주특별자치도"], "cities": ["제주"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "이번 주말"}}
+- "서울 12월 25일부터 27일까지" → {{"regions": ["서울특별시"], "cities": ["서울"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "2025-12-25부터 2025-12-27까지"}}
 """)
 
         entity_chain = entity_extraction_prompt | llm
@@ -609,14 +149,16 @@ def detect_query_entities(query: str) -> dict:
                 "keywords": entities.get("keywords", []),
                 "intent": entities.get("intent", "general"),
                 "travel_type": entities.get("travel_type", "general"),
-                "duration": entities.get("duration", "미정")
+                "duration": entities.get("duration", "미정"),
+                "travel_dates": entities.get("travel_dates", "미정")
             }
 
-            print(f"🧠 LLM 엔티티 추출: {result}")
+            print(f"🧠 LLM 엔티티 추출 성공: {result}")
+            print(f"🧠 추출된 travel_dates: '{result.get('travel_dates', 'N/A')}'")
             return result
         else:
             print(f"⚠️ LLM 응답에서 JSON 파싱 실패: {response.content}")
-            return {"regions": [], "cities": [], "categories": [], "keywords": [], "intent": "general", "travel_type": "general", "duration": "미정"}
+            return {"regions": [], "cities": [], "categories": [], "keywords": [], "intent": "general", "travel_type": "general", "duration": "미정", "travel_dates": "미정"}
 
     except Exception as e:
         print(f"❌ LLM 엔티티 추출 오류: {e}")
@@ -654,7 +196,49 @@ def _fallback_entity_extraction(query: str) -> dict:
         "keywords": [],
         "intent": "general",
         "travel_type": "general",
-        "duration": "미정"
+        "duration": "미정",
+        "travel_dates": "미정"
+    }
+
+def classify_query_intent(query: str, has_travel_plan: bool = False) -> dict:
+    """키워드 기반 쿼리 의도 분류 (LLM 호출 최소화)"""
+    print(f"🔧 키워드 기반 의도 분류 사용 (LLM 호출 없음)")
+    return _fallback_intent_classification(query, has_travel_plan)
+
+def _fallback_intent_classification(query: str, has_travel_plan: bool = False) -> dict:
+    """폴백: 단순 키워드 기반 의도 분류"""
+    query_lower = query.lower()
+
+    # 확정 관련 키워드
+    if has_travel_plan and any(word in query_lower for word in ["확정", "결정", "좋아", "네", "예", "응", "ok"]):
+        return {
+            "primary_intent": "confirmation",
+            "secondary_intent": "none",
+            "confidence_level": "medium",
+            "confirmation_type": "weak",
+            "requires_rag": False,
+            "requires_search": False
+        }
+
+    # 날씨 관련
+    if any(word in query_lower for word in ["날씨", "기온", "비", "눈"]):
+        return {
+            "primary_intent": "weather",
+            "secondary_intent": "none",
+            "confidence_level": "high",
+            "confirmation_type": "none",
+            "requires_rag": True,
+            "requires_search": False
+        }
+
+    # 기본 여행 계획
+    return {
+        "primary_intent": "travel_planning",
+        "secondary_intent": "none",
+        "confidence_level": "low",
+        "confirmation_type": "none",
+        "requires_rag": True,
+        "requires_search": False
     }
 
 def extract_location_and_category(query: str):
@@ -735,11 +319,7 @@ def load_db_catalogs():
             print(f"   - 도시: {len(_db_catalogs['cities'])}개")
             print(f"   - 카테고리: {len(_db_catalogs['categories'])}개")
 
-            # Redis에 캐시 저장 (선택적)
-            if redis_available and redis_client:
-                import json
-                redis_client.set("db_catalogs", json.dumps(_db_catalogs, ensure_ascii=False), ex=3600)
-                print("📦 Redis에 카탈로그 캐시 저장 완료")
+            # Redis 캐시 저장 기능 제거됨
 
         return True
 
@@ -813,8 +393,16 @@ class HybridOptimizedRetriever(BaseRetriever):
             candidate_docs = self._sql_filter_candidates(query, regions, cities, categories)
             
             if not candidate_docs:
-                print("⚠️ SQL 필터링 결과 없음, 순수 벡터 검색으로 폴백")
-                return self._fallback_vector_search(query)
+                print("⚠️ SQL 필터링 결과 없음, 전체 벡터 검색 실행")
+                docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=min(500, self.k))
+                filtered_docs = []
+                for doc, score in docs_with_scores:
+                    if score >= self.score_threshold:
+                        doc.metadata['similarity_score'] = round(score, 3)
+                        doc.metadata['search_method'] = 'pgvector_full'
+                        filtered_docs.append(doc)
+                print(f"✅ 전체 벡터 검색 완료: {len(filtered_docs)}개 문서")
+                return filtered_docs
             
             print(f"📊 SQL 필터링: {len(candidate_docs)}개 후보 문서 선별")
             
@@ -833,10 +421,28 @@ class HybridOptimizedRetriever(BaseRetriever):
         try:
             engine = shared_engine
             
-            # 조건이 없으면 최근 문서나 인기 문서로 제한
+            # 조건이 없으면 전체 검색 실행
             if not regions and not cities and not categories:
-                # 텍스트 검색으로 폴백
-                return self._text_search_fallback(query, engine)
+                print("🔍 지역/카테고리 정보 없음, 전체 텍스트 검색 실행")
+                sql_query = text("""
+                    SELECT document, cmetadata
+                    FROM langchain_pg_embedding
+                    WHERE collection_id = (SELECT uuid FROM langchain_pg_collection WHERE name = 'place_recommendations')
+                    ORDER BY RANDOM()
+                    LIMIT :limit
+                """)
+
+                with engine.connect() as conn:
+                    results = conn.execute(sql_query, {"limit": min(self.max_sql_results, 1000)}).fetchall()
+
+                docs = []
+                for row in results:
+                    metadata = row.cmetadata or {}
+                    metadata['search_method'] = 'sql_random'
+                    docs.append(Document(page_content=row.document, metadata=metadata))
+
+                print(f"📊 전체 텍스트 검색: {len(docs)}개 문서 반환")
+                return docs
             
             # SQL 조건 구성
             conditions = []
@@ -931,108 +537,12 @@ class HybridOptimizedRetriever(BaseRetriever):
             print(f"❌ SQL 필터링 오류: {e}")
             return []
     
-    def _text_search_fallback(self, query: str, engine) -> List[Document]:
-        """텍스트 기반 폴백 검색 (파라미터 바인딩 적용)"""
-        try:
-            # 쿼리에서 키워드 추출하여 텍스트 검색
-            keywords = query.split()
-            text_conditions = []
-            params = {}
-
-            for i, keyword in enumerate(keywords[:3]):  # 최대 3개 키워드만 사용
-                if len(keyword) > 1:
-                    param_name = f"keyword_{i}"
-                    text_conditions.append(f"document ILIKE :{param_name}")
-                    params[param_name] = f'%{keyword}%'
-
-            if not text_conditions:
-                return []
-
-            text_where = " OR ".join(text_conditions)
-            params['limit_results'] = self.max_sql_results // 2
-
-            sql_query = f"""
-                SELECT document, cmetadata, embedding
-                FROM langchain_pg_embedding
-                WHERE {text_where}
-                LIMIT :limit_results
-            """
-
-            with engine.connect() as conn:
-                result = conn.execute(text(sql_query), params)
-                rows = result.fetchall()
-
-                docs = []
-                for row in rows:
-                    doc = Document(
-                        page_content=row.document,
-                        metadata=row.cmetadata or {}
-                    )
-                    if row.embedding:
-                        doc.metadata['_embedding'] = row.embedding
-                    docs.append(doc)
-
-                return docs
-
-        except Exception as e:
-            print(f"❌ 텍스트 검색 폴백 오류: {e}")
-            return []
     
     def _vector_search_on_candidates(self, query: str, candidate_docs: List[Document]) -> List[Document]:
-        """선별된 후보 문서들에 대해 벡터 유사도 계산 (FAISS 캐시 우선)"""
+        """PGVector를 사용한 벡터 유사도 계산"""
         try:
-            # 1. FAISS 캐시 검색 시도
-            if faiss_cache.is_loaded:
-                try:
-                    print("🚀 FAISS 캐시를 사용한 벡터 검색")
-
-                    # 쿼리 벡터 생성
-                    query_vector = embeddings.embed_query(query)
-                    query_vector = np.array(query_vector, dtype=np.float32)
-
-                    # FAISS 검색 수행
-                    faiss_results = faiss_cache.search(query_vector, k=self.k)
-
-                    if faiss_results:
-                        # 후보 문서와 매칭
-                        candidate_contents = {doc.page_content for doc in candidate_docs}
-
-                        filtered_docs = []
-                        for metadata, similarity_score in faiss_results:
-                            content = metadata.get('content', '')
-                            category = metadata.get('metadata', {}).get('category', '')
-
-                            # 숙소 카테고리 필터링
-                            accommodation_keywords = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트', '한옥', '관광호텔', '유스호스텔', '텔', '레지던스']
-                            is_accommodation = any(keyword in category for keyword in accommodation_keywords)
-
-                            if is_accommodation:
-                                print(f"🚫 숙소 필터링: {category} - {content[:30]}...")
-                                continue
-
-                            if content in candidate_contents and similarity_score >= self.score_threshold:
-                                # Document 객체 생성
-                                doc = Document(
-                                    page_content=content,
-                                    metadata={
-                                        **metadata.get('metadata', {}),
-                                        'similarity_score': round(similarity_score, 3),
-                                        'search_method': 'faiss_cache'
-                                    }
-                                )
-                                filtered_docs.append(doc)
-
-                                if len(filtered_docs) >= 50:
-                                    break
-
-                        print(f"✅ FAISS 캐시 검색 완료: {len(filtered_docs)}개 문서")
-                        return filtered_docs
-
-                except Exception as e:
-                    print(f"⚠️ FAISS 캐시 검색 실패, PGVector로 폴백: {e}")
-
-            # 2. PGVector 폴백 검색
-            print("🔄 PGVector 폴백 검색")
+            # PGVector 벡터 검색
+            print("🔄 PGVector 벡터 검색")
             all_docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=self.k)
 
             # 후보 문서의 내용으로 매칭
@@ -1046,13 +556,13 @@ class HybridOptimizedRetriever(BaseRetriever):
                 is_accommodation = any(keyword in category for keyword in accommodation_keywords)
 
                 if is_accommodation:
-                    print(f"🚫 PGVector 폴백 숙소 필터링: {category} - {doc.page_content[:30]}...")
+                    print(f"🚫 PGVector 숙소 필터링: {category} - {doc.page_content[:30]}...")
                     continue
 
                 if doc.page_content in candidate_contents and score >= self.score_threshold:
                     # 유사도 점수를 metadata에 추가
                     doc.metadata['similarity_score'] = round(score, 3)
-                    doc.metadata['search_method'] = 'pgvector_fallback'
+                    doc.metadata['search_method'] = 'pgvector_hybrid'
                     filtered_docs.append(doc)
 
                     # 충분한 결과를 얻으면 중단 (성능 최적화)
@@ -1066,69 +576,6 @@ class HybridOptimizedRetriever(BaseRetriever):
             print(f"❌ 벡터 유사도 계산 오류: {e}")
             return []
     
-    def _fallback_vector_search(self, query: str) -> List[Document]:
-        """SQL 필터링 실패시 순수 벡터 검색 (FAISS 캐시 우선)"""
-        try:
-            # 1. FAISS 캐시 검색 시도
-            if faiss_cache.is_loaded:
-                try:
-                    print("🚀 FAISS 캐시를 사용한 순수 벡터 검색")
-
-                    # 쿼리 벡터 생성
-                    query_vector = embeddings.embed_query(query)
-                    query_vector = np.array(query_vector, dtype=np.float32)
-
-                    # FAISS 검색 수행
-                    faiss_results = faiss_cache.search(query_vector, k=min(500, self.k))
-
-                    if faiss_results:
-                        filtered_docs = []
-                        for metadata, similarity_score in faiss_results:
-                            category = metadata.get('metadata', {}).get('category', '')
-
-                            # 숙소 카테고리 필터링
-                            accommodation_keywords = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트', '한옥', '관광호텔', '유스호스텔', '텔', '레지던스']
-                            is_accommodation = any(keyword in category for keyword in accommodation_keywords)
-
-                            if is_accommodation:
-                                print(f"🚫 폴백 숙소 필터링: {category} - {metadata.get('content', '')[:30]}...")
-                                continue
-
-                            if similarity_score >= self.score_threshold:
-                                # Document 객체 생성
-                                doc = Document(
-                                    page_content=metadata.get('content', ''),
-                                    metadata={
-                                        **metadata.get('metadata', {}),
-                                        'similarity_score': round(similarity_score, 3),
-                                        'search_method': 'faiss_fallback'
-                                    }
-                                )
-                                filtered_docs.append(doc)
-
-                        print(f"✅ FAISS 폴백 검색 완료: {len(filtered_docs)}개 문서")
-                        return filtered_docs
-
-                except Exception as e:
-                    print(f"⚠️ FAISS 폴백 검색 실패, PGVector로 폴백: {e}")
-
-            # 2. PGVector 폴백 검색
-            print("🧠 PGVector 순수 벡터 검색 실행...")
-            docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=min(500, self.k))
-
-            filtered_docs = []
-            for doc, score in docs_with_scores:
-                if score >= self.score_threshold:
-                    doc.metadata['similarity_score'] = round(score, 3)
-                    doc.metadata['search_method'] = 'pgvector_pure'
-                    filtered_docs.append(doc)
-
-            print(f"✅ PGVector 폴백 검색 완료: {len(filtered_docs)}개 문서")
-            return filtered_docs
-
-        except Exception as e:
-            print(f"❌ 폴백 벡터 검색 오류: {e}")
-            return []
 
 # 하이브리드 최적화 Retriever 생성 (sentence-transformers 모델에 최적화된 임계값)
 retriever = HybridOptimizedRetriever(vectorstore, k=50000, score_threshold=0.3, max_sql_results=8000)
@@ -1138,9 +585,13 @@ retriever = HybridOptimizedRetriever(vectorstore, k=50000, score_threshold=0.3, 
 # =============================================================================
 
 def format_docs(docs):
-    """검색된 문서들을 텍스트로 포맷팅 (유사도 점수 포함)"""
+    """검색된 문서들을 텍스트로 포맷팅 (유사도 점수 포함, 상위 30개로 제한)"""
     if not docs:
         return "NO_RELEVANT_DATA"  # 관련 데이터 없음을 나타내는 특별한 마커
+
+    # 상위 30개 문서만 선택
+    docs = docs[:30]
+    print(f"📄 LLM에 전달할 문서 수: {len(docs)}개 (상위 30개로 제한)")
 
     formatted_docs = []
     for i, doc in enumerate(docs, 1):
@@ -1164,19 +615,14 @@ def search_places(query):
     try:
         print(f"🔍 하이브리드 검색: '{query}'")
 
-        # 캐시된 검색 결과 확인
-        cached_docs = llm_cache.get_cached_search_results(query)
-        if cached_docs:
-            print("⚡ 캐시된 검색 결과 반환!")
-            return cached_docs
+        # 캐시 기능 제거됨
 
         print("🔍 새로운 검색 실행...")
 
         # HybridOptimizedRetriever 직접 사용
         docs = retriever._get_relevant_documents(query)
 
-        # 검색 결과 캐싱 (30분)
-        llm_cache.cache_search_results(query, docs, expire=1800)
+        # 캐시 기능 제거됨
 
         return docs
 
@@ -1185,16 +631,189 @@ def search_places(query):
         return []
 
 
-# Weather 모듈 import
+# Weather 모듈에서 필요한 함수만 import (지역 추출용)
 from weather import (
-    get_weather_info,
-    get_smart_weather_info,
-    is_weather_query,
-    is_historical_weather_query,
-    get_historical_weather_info,
-    extract_date_from_query,
     extract_region_from_query
 )
+
+def parse_travel_dates(travel_dates: str, duration: str = "") -> dict:
+    """여행 날짜 문자열을 파싱하여 startDate, endDate, days 반환"""
+    import re
+    from datetime import datetime, timedelta
+
+    print(f"🔧 parse_travel_dates 호출: travel_dates='{travel_dates}', duration='{duration}'")
+
+    result = {
+        "startDate": "",
+        "endDate": "",
+        "days": ""
+    }
+
+    if not travel_dates or travel_dates == "미정":
+        print(f"📅 날짜 정보 없음, duration에서 일수 추출 시도")
+        # duration에서 일수 추출 시도
+        if duration:
+            duration_match = re.search(r'(\d+)박', duration)
+            if duration_match:
+                nights = int(duration_match.group(1))
+                result["days"] = str(nights + 1)  # 박 + 1 = 일
+                print(f"📅 duration에서 추출: {nights}박 → {result['days']}일")
+            else:
+                print(f"📅 duration에서 박수 추출 실패: '{duration}'")
+        else:
+            print(f"📅 duration도 없음")
+        return result
+
+    try:
+        # 1. YYYY-MM-DD 형태의 날짜들 먼저 추출
+        date_pattern = r'(\d{4}-\d{2}-\d{2})'
+        dates = re.findall(date_pattern, travel_dates)
+        print(f"📅 YYYY-MM-DD 형태 추출: {dates}")
+
+        # 2. 자연어 날짜 추출 및 변환
+        if not dates:
+            print(f"📅 자연어 날짜 파싱 시도")
+            current_year = datetime.now().year
+            current_month = datetime.now().month
+
+            # "N월 N일" 패턴 추출
+            month_day_pattern = r'(\d{1,2})월\s*(\d{1,2})일'
+            month_day_matches = re.findall(month_day_pattern, travel_dates)
+            if month_day_matches:
+                for month, day in month_day_matches:
+                    formatted_date = f"{current_year}-{int(month):02d}-{int(day):02d}"
+                    dates.append(formatted_date)
+                    print(f"📅 {month}월 {day}일 → {formatted_date}")
+
+            # "N일부터" 패턴 (현재 월 기준)
+            if not dates:
+                day_pattern = r'(\d{1,2})일부터'
+                day_matches = re.findall(day_pattern, travel_dates)
+                if day_matches:
+                    day = day_matches[0]
+                    formatted_date = f"{current_year}-{current_month:02d}-{int(day):02d}"
+                    dates.append(formatted_date)
+                    print(f"📅 {day}일부터 → {formatted_date}")
+
+            # "내일" 처리
+            if "내일" in travel_dates and not dates:
+                tomorrow = datetime.now() + timedelta(days=1)
+                formatted_date = tomorrow.strftime('%Y-%m-%d')
+                dates.append(formatted_date)
+                print(f"📅 내일 → {formatted_date}")
+
+        print(f"📅 최종 추출된 날짜들: {dates}")
+
+        if len(dates) >= 2:
+            # 시작일과 종료일이 모두 있는 경우
+            print(f"📅 시작일과 종료일 모두 있음: {dates[0]} ~ {dates[1]}")
+            start_date = datetime.strptime(dates[0], '%Y-%m-%d')
+            end_date = datetime.strptime(dates[1], '%Y-%m-%d')
+
+            result["startDate"] = dates[0]
+            result["endDate"] = dates[1]
+            result["days"] = str((end_date - start_date).days + 1)
+            print(f"📅 계산된 일수: {result['days']}일")
+
+        elif len(dates) == 1:
+            # 시작일만 있는 경우 - duration에서 종료일 계산
+            print(f"📅 시작일만 있음: {dates[0]}, duration으로 종료일 계산")
+            start_date = datetime.strptime(dates[0], '%Y-%m-%d')
+            result["startDate"] = dates[0]
+
+            # duration에서 일수 추출
+            if duration:
+                duration_match = re.search(r'(\d+)박', duration)
+                if duration_match:
+                    nights = int(duration_match.group(1))
+                    days = nights + 1
+                    end_date = start_date + timedelta(days=days-1)
+                    result["endDate"] = end_date.strftime('%Y-%m-%d')
+                    result["days"] = str(days)
+                    print(f"📅 계산된 종료일: {result['endDate']}, 일수: {result['days']}")
+                else:
+                    print(f"📅 duration에서 박수 추출 실패: '{duration}'")
+
+        # 상대적 날짜 처리 ("이번 주말", "다음 달" 등)
+        elif "이번 주말" in travel_dates:
+            print(f"📅 이번 주말 처리")
+            today = datetime.now()
+            # 이번 주 토요일 찾기
+            days_until_saturday = (5 - today.weekday()) % 7
+            if days_until_saturday == 0 and today.weekday() == 5:  # 오늘이 토요일
+                saturday = today
+            else:
+                saturday = today + timedelta(days=days_until_saturday)
+            sunday = saturday + timedelta(days=1)
+
+            result["startDate"] = saturday.strftime('%Y-%m-%d')
+            result["endDate"] = sunday.strftime('%Y-%m-%d')
+            result["days"] = "2"
+            print(f"📅 이번 주말: {result['startDate']} ~ {result['endDate']}")
+
+        elif "다음 주말" in travel_dates:
+            print(f"📅 다음 주말 처리")
+            today = datetime.now()
+            # 다음 주 토요일 찾기
+            days_until_next_saturday = ((5 - today.weekday()) % 7) + 7
+            saturday = today + timedelta(days=days_until_next_saturday)
+            sunday = saturday + timedelta(days=1)
+
+            result["startDate"] = saturday.strftime('%Y-%m-%d')
+            result["endDate"] = sunday.strftime('%Y-%m-%d')
+            result["days"] = "2"
+            print(f"📅 다음 주말: {result['startDate']} ~ {result['endDate']}")
+
+        else:
+            print(f"📅 날짜 패턴 매칭 안됨, duration만으로 일수 추출 시도")
+            if duration:
+                duration_match = re.search(r'(\d+)박', duration)
+                if duration_match:
+                    nights = int(duration_match.group(1))
+                    result["days"] = str(nights + 1)
+                    print(f"📅 duration에서만 추출: {nights}박 → {result['days']}일")
+
+        # 과거 날짜 검증 - 불가능한 날짜 안내
+        today = datetime.now().date()
+        if result.get("startDate"):
+            try:
+                start_date = datetime.strptime(result["startDate"], '%Y-%m-%d').date()
+                if start_date < today:
+                    print(f"❌ 과거 날짜 감지: {result['startDate']} - 불가능한 날짜")
+                    # 과거 날짜인 경우 결과를 초기화하고 에러 메시지 추가
+                    result = {
+                        "startDate": "",
+                        "endDate": "",
+                        "days": "",
+                        "error": f"선택하신 날짜 {result['startDate']}는 과거 날짜입니다. 오늘 이후의 날짜를 선택해주세요."
+                    }
+                    print(f"📅 과거 날짜로 인한 파싱 실패")
+                    return result
+            except:
+                pass
+
+        # 날짜 파싱 결과 테스트 출력
+        if any(result.values()):
+            print(f"✅ 날짜 파싱 성공 - startDate: {result.get('startDate', 'N/A')}, endDate: {result.get('endDate', 'N/A')}, days: {result.get('days', 'N/A')}")
+        else:
+            print(f"❌ 날짜 파싱 실패 - 모든 필드 비어있음")
+
+        print(f"📅 최종 날짜 파싱 결과: {result}")
+        return result
+
+    except Exception as e:
+        print(f"⚠️ 날짜 파싱 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        # duration에서라도 일수 추출
+        if duration:
+            duration_match = re.search(r'(\d+)박', duration)
+            if duration_match:
+                nights = int(duration_match.group(1))
+                result["days"] = str(nights + 1)
+                print(f"📅 오류 발생, duration에서만 추출: {nights}박 → {result['days']}일")
+        print(f"📅 오류 후 최종 결과: {result}")
+        return result
 
 def extract_region_from_context(state):
     """현재 대화 컨텍스트에서 지역명 추출"""
@@ -1283,85 +902,51 @@ class TravelState(TypedDict):
     formatted_ui_response: dict  # UI용 구조화된 응답
 
 def classify_query(state: TravelState) -> TravelState:
-    """향상된 쿼리 분류 - 여러 경로 동시 판단 (2단계 플로우 지원)"""
+    """LLM 기반 쿼리 분류 - 하드코딩 제거"""
     if not state.get("messages"):
         return state
 
     user_input = state["messages"][-1] if state["messages"] else ""
-    user_input_lower = user_input.lower()
+    has_travel_plan = bool(state.get("travel_plan"))
 
-    print(f"🔍 쿼리 분류 중: '{user_input}'")
+    print(f"🔍 LLM 기반 쿼리 분류: '{user_input}'")
 
-    # 새로운 여행 요청 감지 (기존 일정이 있을 때)
-    if state.get("travel_plan"):
-        is_new_travel_request = any(keyword in user_input_lower for keyword in [
-            "새로운", "다른", "새로", "다시", "또 다른", "새롭게", "다음",
-            "박", "일", "여행", "추천", "일정", "계획"
-        ]) and not any(confirm_keyword in user_input_lower for confirm_keyword in [
-            "확정", "결정", "좋아", "마음에", "이걸로"
-        ])
+    try:
+        # LLM 기반 의도 분류
+        intent_result = classify_query_intent(user_input, has_travel_plan)
 
-        if is_new_travel_request:
+        # 새로운 여행 요청 감지 (기존 로직 유지)
+        if has_travel_plan and intent_result["primary_intent"] == "travel_planning":
+            # 새로운 여행 일정 요청으로 판단되면 상태 초기화
             print("🔄 새로운 여행 일정 요청 감지 - 기존 상태 초기화")
-            # 기존 여행 계획 초기화
             state["travel_plan"] = {}
             state["user_preferences"] = {}
             state["conversation_context"] = ""
             state["formatted_ui_response"] = {}
-    
-    # 여행 일정 추천 관련 키워드
-    travel_keywords = ["추천", "여행", "일정", "계획", "코스", "가볼만한", "여행지", "관광"]
-    location_keywords = ["서울", "부산", "제주", "경기", "강원", "장소", "위치", "어디"]
-    food_keywords = ["맛집", "음식", "식당", "먹을", "카페", "레스토랑"]
-    
-    # 확정 키워드 (개선된 패턴 매칭)
-    strong_confirmation_keywords = ["확정", "결정", "확인", "이걸로", "좋아", "맞아", "그래", "됐어", "완료", "ok", "오케이"]
-    weak_confirmation_keywords = ["진행", "가자", "이거야", "네", "예", "응", "맞네", "좋네"]
+            has_travel_plan = False  # 상태 업데이트
 
-    # 단일 확정 키워드 (짧은 답변)
-    single_word_confirmations = ["확정", "결정", "좋아", "ok", "오케이", "네", "예", "응", "그래"]
+        # LLM 결과를 기존 변수명으로 매핑
+        need_rag = intent_result["requires_rag"]
+        need_search = intent_result["requires_search"]
+        need_confirmation = (intent_result["primary_intent"] == "confirmation" and
+                            intent_result["confirmation_type"] != "none")
 
-    # 날씨 요청인지 먼저 확인 (현재/미래 + 과거 날씨 모두 포함)
-    is_weather_request = is_weather_query(user_input) or is_historical_weather_query(user_input)
+        # 날씨 요청은 LLM에서 이미 분류됨
 
-    # 복합적 분류 로직
-    need_rag = any(keyword in user_input for keyword in travel_keywords) or is_weather_request
-    need_search = any(keyword in user_input for keyword in location_keywords) and not is_weather_request
+        print(f"🧠 LLM 분류 결과:")
+        print(f"   - 주요 의도: {intent_result['primary_intent']}")
+        print(f"   - 확정 유형: {intent_result['confirmation_type']}")
+        print(f"   - RAG 필요: {need_rag}")
+        print(f"   - 검색 필요: {need_search}")
+        print(f"   - 확정 필요: {need_confirmation}")
 
-    # 음식 관련 질의도 RAG로 처리
-    if any(keyword in user_input for keyword in food_keywords):
+    except Exception as e:
+        print(f"⚠️ LLM 분류 실패, 폴백 사용: {e}")
+        # 폴백: 기본값
         need_rag = True
-
-    # 개선된 확정 판단 로직
-    has_strong_confirmation = any(keyword in user_input_lower for keyword in strong_confirmation_keywords)
-    has_weak_confirmation = any(keyword in user_input_lower for keyword in weak_confirmation_keywords)
-
-    # 짧은 단어 확정 (5글자 이하이면서 확정 키워드만 있는 경우)
-    is_short_confirmation = (len(user_input_lower.strip()) <= 5 and
-                            any(keyword == user_input_lower.strip() for keyword in single_word_confirmations))
-
-    # 현재 상태에 여행 일정이 있는지 확인
-    has_travel_plan = bool(state.get("travel_plan"))
-
-    print(f"   🔍 확정 분석: 강한확정={has_strong_confirmation}, 약한확정={has_weak_confirmation}, 짧은확정={is_short_confirmation}")
-    print(f"   📋 여행계획존재={has_travel_plan}, RAG필요={need_rag}")
-
-    # 확정 판단 우선순위:
-    # 1. 여행 일정이 있고 강한 확정 키워드 → 확정
-    # 2. 여행 일정이 있고 짧은 확정 응답 → 확정
-    # 3. 여행 일정이 있고 약한 확정 키워드 (RAG가 아닐 때) → 확정
-    need_confirmation = False
-    if has_travel_plan:
-        if has_strong_confirmation or is_short_confirmation:
-            need_confirmation = True
-            print(f"   ✅ 확정 판단: 강한 확정 또는 짧은 확정")
-        elif has_weak_confirmation and not need_rag:
-            need_confirmation = True
-            print(f"   ✅ 확정 판단: 약한 확정 (RAG 아님)")
-        else:
-            print(f"   ❌ 확정 불가: 조건 불충족")
-    else:
-        print(f"   ❌ 확정 불가: 여행 일정 없음")
+        need_search = False
+        need_confirmation = False
+        # 폴백에서는 날씨 요청 기본 함수 활용
     
     query_type = "complex" if sum([need_rag, need_search]) > 1 else "simple"
     
@@ -1387,93 +972,25 @@ def rag_processing_node(state: TravelState) -> TravelState:
     user_query = state["messages"][-1]
     print(f"🧠 RAG 처리 시작: '{user_query}'")
 
-    # 날씨 관련 질문인지 확인
-    if is_weather_query(user_query):
-        # 과거 날씨 요청인지 확인
-        if is_historical_weather_query(user_query):
-            print("📅 과거 날씨 요청 감지됨")
+    # 날씨 관련 처리는 제거 - 이제 여행 일정에서 날짜만 추출하여 활용
+    # 여행 날짜 정보 추출 (map 파라미터 전달용)
+    print(f"🔍 사용자 쿼리: '{user_query}'")
+    query_entities = detect_query_entities(user_query)
+    print(f"🔍 전체 엔티티: {query_entities}")
 
-            # 쿼리에서 지역명과 날짜 추출 (컨텍스트 우선)
-            region = extract_region_from_query(user_query)
-            if not region:
-                region = extract_region_from_context(state)
-            date_str = extract_date_from_query(user_query)
+    travel_dates = query_entities.get("travel_dates", "미정")
+    duration = query_entities.get("duration", "미정")
+    print(f"📅 추출된 여행 날짜: '{travel_dates}', 기간: '{duration}'")
 
-            print(f"🔍 디버깅: region='{region}', date_str='{date_str}'")
+    # 날짜 파싱 (startDate, endDate, days 형태로 변환)
+    parsed_dates = parse_travel_dates(travel_dates, duration)
+    print(f"🗓️ 파싱된 날짜 정보: {parsed_dates}")
 
-            if region and date_str:
-                print(f"📍 감지된 지역: {region}, 날짜: {date_str}")
-                weather_info = get_historical_weather_info(region, date_str)
-
-                return {
-                    **state,
-                    "conversation_context": weather_info
-                }
-            elif region and not date_str:
-                return {
-                    **state,
-                    "conversation_context": f"🤔 {region}의 과거 날씨를 조회하려면 구체적인 날짜를 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 2023년 10월 15일 날씨'"
-                }
-            elif not region and date_str:
-                # 컨텍스트에서 지역 찾기 시도
-                context_region = extract_region_from_context(state)
-
-                # 글로벌 상태에서도 찾기 시도
-                if not context_region:
-                    global current_travel_state
-                    if current_travel_state.get("travel_plan", {}).get("region"):
-                        context_region = current_travel_state["travel_plan"]["region"]
-
-                if context_region:
-                    print(f"📍 컨텍스트에서 발견된 지역: {context_region}")
-                    weather_info = get_historical_weather_info(context_region, date_str)
-                    return {
-                        **state,
-                        "conversation_context": f"📍 <strong>{context_region}</strong>의 과거 날씨 정보를 조회합니다.\n\n{weather_info}"
-                    }
-
-                return {
-                    **state,
-                    "conversation_context": f"🤔 과거 날씨를 조회하려면 지역명을 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 지난주 날씨'"
-                }
-            else:
-                return {
-                    **state,
-                    "conversation_context": "🤔 과거 날씨 정보를 제공하려면 지역명과 날짜를 함께 말씀해주세요.\n예: '서울 어제 날씨', '부산 2023년 10월 15일 날씨'"
-                }
-        else:
-            # 현재/미래 날씨 요청
-            print("🌤️ 현재/미래 날씨 요청 감지됨")
-
-            # 쿼리에서 지역명 추출 (컨텍스트 우선)
-            region = extract_region_from_query(user_query)
-            if not region:
-                region = extract_region_from_context(state)
-
-            if region:
-                print(f"📍 감지된 지역: {region}")
-                weather_info = get_weather_info(region)
-
-                return {
-                    **state,
-                    "conversation_context": weather_info
-                }
-            else:
-                # 지역명이 없으면 컨텍스트에서 지역 찾기 시도
-                context_region = extract_region_from_context(state)
-
-                if context_region:
-                    print(f"📍 컨텍스트에서 발견된 지역: {context_region}")
-                    weather_info = get_weather_info(context_region)
-                    return {
-                        **state,
-                        "conversation_context": f"📍 <strong>{context_region}</strong>의 날씨 정보를 조회합니다.\n\n{weather_info}"
-                    }
-
-                return {
-                    **state,
-                    "conversation_context": "🤔 날씨 정보를 제공하려면 지역명을 함께 말씀해주세요. (예: '서울 날씨', '부산 날씨')"
-                }
+    # 파싱 결과 검증
+    if parsed_dates.get("startDate") or parsed_dates.get("endDate") or parsed_dates.get("days"):
+        print(f"✅ 날짜 파싱 성공!")
+    else:
+        print(f"⚠️ 날짜 파싱 실패 - 빈 결과")
 
     try:
         # 하이브리드 검색으로 실제 장소 데이터 가져오기
@@ -1496,13 +1013,24 @@ def rag_processing_node(state: TravelState) -> TravelState:
         
         query_regions = []
         target_keywords = []
-        
+
+        # 지역 매칭 (정확한 지역명 우선 순위로)
+        print(f"🔍 지역 매칭 대상 쿼리: '{user_query.lower()}'")
+
         for region, keywords in region_keywords.items():
             for keyword in keywords:
                 if keyword in user_query.lower():
-                    query_regions.append(region)
-                    target_keywords.extend(keywords)
+                    # 중복 방지
+                    if region not in query_regions:
+                        query_regions.append(region)
+                        target_keywords.extend(keywords)
+                        print(f"🎯 지역 매칭: '{keyword}' → {region}")
                     break
+
+        # 가장 구체적인 지역명만 사용 (중복 제거)
+        if len(query_regions) > 1:
+            print(f"⚠️ 여러 지역 매칭됨: {query_regions}, 첫 번째만 사용")
+            query_regions = query_regions[:1]
         
         # 지역 필터링 개선 (더 포괄적으로)
         if query_regions:
@@ -1523,9 +1051,9 @@ def rag_processing_node(state: TravelState) -> TravelState:
                         is_relevant = True
                         break
                     
-                    # 2. 특정 지역 요청 시 해당 광역시/도 전체 포함
-                    elif '강릉' in region_lower and '강원' in doc_region:
-                        is_relevant = True  # 강릉 요청 시 강원도 전체 포함
+                    # 2. 특정 지역 요청 시 정확한 도시 매칭
+                    elif '강릉' in region_lower and ('강릉' in doc_city or '강릉시' in doc_city):
+                        is_relevant = True  # 강릉 요청 시 강릉시만 포함
                         break
                     elif '부산' in region_lower and ('부산' in doc_region or '부산' in doc_city):
                         is_relevant = True  # 부산 요청 시 부산 전체 포함
@@ -1541,7 +1069,7 @@ def rag_processing_node(state: TravelState) -> TravelState:
                     region_docs.append(doc)
             
             if region_docs:
-                docs = region_docs[:35]  # FAISS 최적화로 품질 높은 문서 선별
+                docs = region_docs[:35]  # 지역 필터링된 문서 선별
                 print(f"📍 지역 필터링 결과: {len(docs)}개 문서 선별")
             else:
                 print(f"⚠️ 지역 필터링 결과 없음, 전체 결과 사용")
@@ -1625,7 +1153,12 @@ def rag_processing_node(state: TravelState) -> TravelState:
         formatted_response = format_travel_response_with_linebreaks(raw_response)
         
         # 상세한 여행 일정 파싱 (실제 장소 데이터 포함)
-        travel_plan = parse_enhanced_travel_plan(formatted_response, user_query, structured_places)
+        print(f"🔧 parse_enhanced_travel_plan 호출 전:")
+        print(f"   - travel_dates: '{travel_dates}'")
+        print(f"   - parsed_dates: {parsed_dates}")
+        travel_plan = parse_enhanced_travel_plan(formatted_response, user_query, structured_places, travel_dates)
+        print(f"🔧 parse_enhanced_travel_plan 호출 후:")
+        print(f"   - travel_plan에 포함된 parsed_dates: {travel_plan.get('parsed_dates')}")
         
         # UI용 구조화된 응답 생성
         formatted_ui_response = create_formatted_ui_response(travel_plan, formatted_response)
@@ -1633,42 +1166,28 @@ def rag_processing_node(state: TravelState) -> TravelState:
         # 여행 일정 생성 완료 - 사용자 확인 대기 상태
         # 자동 확정하지 않고 사용자의 확정 의사를 기다림
 
-        # 🌤️ 여행지 날씨 정보 자동 추가
-        region_for_weather = travel_plan.get('region', '') or extract_region_from_query(user_query)
-        if region_for_weather:
-            print(f"🌤️ {region_for_weather} 날씨 정보 조회 중...")
-            weather_info = get_smart_weather_info(region_for_weather)
+        # 날씨 정보는 map 파라미터로 전달될 예정이므로 제거
 
-            # 여행 일정에 날씨 정보 통합 (여행 팁 앞에 삽입)
-            if weather_info and not weather_info.startswith("❌"):
-                # "💡 여행 팁" 앞에 날씨 정보 삽입
-                if "💡" in formatted_response:
-                    parts = formatted_response.split("💡", 1)
-                    formatted_response_with_weather = f"""{parts[0]}
-
-{weather_info}
-
-💡{parts[1]}"""
-                else:
-                    # 여행 팁이 없으면 마지막에 추가
-                    formatted_response_with_weather = f"""{formatted_response}
-
-{weather_info}"""
-            else:
-                formatted_response_with_weather = formatted_response
-        else:
-            formatted_response_with_weather = formatted_response
-
-        print(f"✅ RAG 처리 완료. 결과 길이: {len(formatted_response_with_weather)}")
+        print(f"✅ RAG 처리 완료. 결과 길이: {len(formatted_response)}")
         print(f"   추출된 장소 수: {len(structured_places)}")
 
-        return {
+        # 최종 state 반환 전 디버깅
+        final_state = {
             **state,
             "rag_results": docs,
             "travel_plan": travel_plan,
-            "conversation_context": formatted_response_with_weather,
+            "travel_dates": travel_dates,  # 원본 날짜 정보
+            "parsed_dates": parsed_dates,  # map 파라미터 전달용 파싱된 날짜 정보
+            "conversation_context": formatted_response,
             "formatted_ui_response": formatted_ui_response
         }
+
+        print(f"🔧 === rag_processing_node 최종 반환 ===")
+        print(f"🔧 final_state의 travel_dates: {final_state.get('travel_dates')}")
+        print(f"🔧 final_state의 parsed_dates: {final_state.get('parsed_dates')}")
+        print(f"🔧 final_state의 travel_plan 내 parsed_dates: {final_state.get('travel_plan', {}).get('parsed_dates')}")
+
+        return final_state
         
     except Exception as e:
         print(f"❌ RAG 처리 오류: {e}")
@@ -1959,16 +1478,39 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         print(f"   일차 배정: {day_numbers_list[:5]}{'...' if len(day_numbers_list) > 5 else ''}")
         print(f"   테이블 목록: {source_tables_list[:5]}{'...' if len(source_tables_list) > 5 else ''}")
 
-    # 날짜 계산 (duration에서 박수 추출)
+    # 날짜 계산 (parseddates 우선 사용)
     from datetime import datetime, timedelta
+    
+    # state에서 parseddates 정보 가져오기
+    parsed_dates = state.get("parsed_dates", {})
+    print(f"🔍 confirmation_processing_node에서 받은 parsed_dates: {parsed_dates}")
+    print(f"🔍 state의 모든 키: {list(state.keys())}")
 
-    duration_str = confirmed_plan.get('duration', '2박 3일')
-    days_match = re.search(r'(\d+)일', duration_str)
-    days = int(days_match.group(1)) if days_match else 2
+    # travel_plan에서도 확인
+    travel_plan_parsed_dates = state.get("travel_plan", {}).get("parsed_dates", {})
+    print(f"🔍 travel_plan 내 parsed_dates: {travel_plan_parsed_dates}")
 
-    # 시작일을 오늘로 설정
-    start_date = datetime.now().strftime('%Y-%m-%d')
-    end_date = (datetime.now() + timedelta(days=days-1)).strftime('%Y-%m-%d')
+    # 둘 중 하나라도 있으면 사용
+    if not parsed_dates and travel_plan_parsed_dates:
+        parsed_dates = travel_plan_parsed_dates
+        print(f"🔄 travel_plan에서 parsed_dates 가져옴: {parsed_dates}")
+    
+    if parsed_dates and parsed_dates.get("startDate") and parsed_dates.get("endDate"):
+        # 사용자가 입력한 날짜 사용
+        start_date = parsed_dates["startDate"]
+        end_date = parsed_dates["endDate"]
+        days = parsed_dates.get("days", 2)
+        print(f"✅ 사용자 지정 날짜 사용: {start_date} ~ {end_date}")
+    else:
+        # fallback: duration에서 계산
+        duration_str = confirmed_plan.get('duration', '2박 3일')
+        days_match = re.search(r'(\d+)일', duration_str)
+        days = int(days_match.group(1)) if days_match else 2
+        
+        # 기존 방식 (오늘 기준)
+        start_date = datetime.now().strftime('%Y-%m-%d')
+        end_date = (datetime.now() + timedelta(days=days-1)).strftime('%Y-%m-%d')
+        print(f"⚠️ 기본 날짜 사용 (오늘 기준): {start_date} ~ {end_date}")
 
     # URL 파라미터 생성
     import urllib.parse
@@ -2323,7 +1865,7 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
     """RAG 검색 결과에서 구조화된 장소 정보 추출 (업데이트된 메타데이터 활용)"""
     structured_places = []
 
-    for doc in docs[:25]:  # 상위 25개 처리 (FAISS 최적화)
+    for doc in docs[:25]:  # 상위 25개 처리
         try:
             # 메타데이터에서 직접 정보 추출 (벡터 업데이트 후)
             metadata = doc.metadata or {}
@@ -2482,22 +2024,12 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
             if actual_place:
                 matched_places.append(actual_place)
             else:
-                # 정말 찾을 수 없는 경우만 가상 장소 생성
-                virtual_place = {
-                    'name': mentioned_place,
-                    'category': '관광',
-                    'region': '강원특별자치도',
-                    'city': '강릉시' if '강릉' in mentioned_place else '미지정',
-                    'table_name': 'nature',
-                    'place_id': "1",  # 찾을 수 없는 경우 기본 ID
-                    'description': f'LLM 추천 장소: {mentioned_place}',
-                    'similarity_score': 0.8
-                }
-                matched_places.append(virtual_place)
+                # 가상 장소 생성하지 않음 - 실제 존재하는 장소만 사용
+                print(f"⚠️ 장소를 찾을 수 없습니다: {mentioned_place}")
     
     return matched_places
 
-def parse_enhanced_travel_plan(response: str, user_query: str, structured_places: List[dict]) -> dict:
+def parse_enhanced_travel_plan(response: str, user_query: str, structured_places: List[dict], travel_dates: str = "미정") -> dict:
     """향상된 여행 일정 파싱 (실제 장소 데이터 포함)"""
 
     # 기본 정보 추출
@@ -2561,11 +2093,18 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
     # 실제 응답에 포함된 장소들만 추출 (LLM 판단 신뢰)
     response_places = extract_places_from_response(response, structured_places)
 
+    # 파싱된 날짜 정보 생성
+    print(f"🔧 enhanced_plan 생성 중 - travel_dates: '{travel_dates}', duration: '{duration}'")
+    plan_parsed_dates = parse_travel_dates(travel_dates, duration)
+    print(f"🔧 enhanced_plan 내부에서 생성된 parsed_dates: {plan_parsed_dates}")
+
     # 상세 여행 계획 구조
     enhanced_plan = {
         "region": regions[0] if regions else "미지정",
         "cities": cities,
         "duration": duration,
+        "travel_dates": travel_dates,  # 추출된 여행 날짜 추가
+        "parsed_dates": plan_parsed_dates,  # 파싱된 날짜 정보 추가
         "categories": list(set(categories + [place["category"] for place in response_places if place.get("category")])),
         "itinerary": itinerary,
         "places": response_places,  # 실제 응답에 포함된 장소들만
@@ -2575,6 +2114,8 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
         "total_places": len(structured_places),
         "confidence_score": calculate_plan_confidence(structured_places, response)
     }
+
+    print(f"🔧 최종 enhanced_plan의 parsed_dates: {enhanced_plan.get('parsed_dates')}")
 
     print(f"✨ 일정 파싱 완료: {len(itinerary)}일차, 총 {sum(len(day.get('schedule', [])) for day in itinerary)}개 일정")
 
@@ -2915,6 +2456,8 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
             "action_required": tool_results.get("action"),
             "redirect_url": tool_results.get("redirect_url"),
             "places": tool_results.get("places"),
+            "travel_dates": final_state.get("travel_dates"),  # 최상위 레벨에 추가
+            "parsed_dates": final_state.get("parsed_dates"),  # 최상위 레벨에 추가
             "raw_state": final_state,
             "success": True
         }
