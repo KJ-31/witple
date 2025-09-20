@@ -1,9 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional
 import json
-import asyncio
 import sys
 import os
 import hashlib
@@ -14,47 +12,28 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 try:
     from LLM_RAG import (
-        get_travel_recommendation,
-        get_travel_recommendation_optimized,
         get_travel_recommendation_langgraph,
-        get_travel_recommendation_stream_async,
-        get_travel_recommendation_langgraph_stream,
         llm_cache,
         current_travel_state,
-        get_current_travel_state_ref,
-        LANGGRAPH_AVAILABLE
+        get_current_travel_state_ref
     )
     print("✅ LLM_RAG module imported successfully")
-    print(f"🔧 LangGraph 사용 가능: {LANGGRAPH_AVAILABLE}")
-    print(f"🔧 get_travel_recommendation 함수: {get_travel_recommendation is not None}")
     print(f"🔧 get_travel_recommendation_langgraph 함수: {get_travel_recommendation_langgraph is not None}")
-    print(f"🔧 get_travel_recommendation_stream_async 함수: {get_travel_recommendation_stream_async is not None}")
-    print(f"🔧 get_travel_recommendation_langgraph_stream 함수: {get_travel_recommendation_langgraph_stream is not None}")
 except ImportError as e:
     print(f"❌ Warning: Could not import LLM_RAG module: {e}")
     print("This is likely due to missing dependencies (langchain_aws, boto3, etc.)")
     import traceback
     traceback.print_exc()
-    get_travel_recommendation = None
-    get_travel_recommendation_optimized = None
     get_travel_recommendation_langgraph = None
-    get_travel_recommendation_stream_async = None
-    get_travel_recommendation_langgraph_stream = None
     llm_cache = None
     current_travel_state = None
-    LANGGRAPH_AVAILABLE = False
 except Exception as e:
     print(f"❌ Error initializing LLM_RAG module: {e}")
     import traceback
     traceback.print_exc()
-    get_travel_recommendation = None
-    get_travel_recommendation_optimized = None
     get_travel_recommendation_langgraph = None
-    get_travel_recommendation_stream_async = None
-    get_travel_recommendation_langgraph_stream = None
     llm_cache = None
     current_travel_state = None
-    LANGGRAPH_AVAILABLE = False
 
 router = APIRouter()
 
@@ -145,11 +124,11 @@ async def chat_with_llm(chat_message: ChatMessage):
     LangGraph가 사용 불가능할 때는 기존 RAG 시스템으로 폴백합니다.
     """
     try:
-        if get_travel_recommendation is None and get_travel_recommendation_langgraph is None:
-            # 모든 RAG 시스템이 사용 불가능할 때 기본 응답
+        if get_travel_recommendation_langgraph is None:
+            # LLM 시스템 사용 불가능
             default_message = f"죄송합니다. 현재 AI 여행 추천 시스템을 준비 중입니다. 📝\n\n'{chat_message.message}'에 대한 답변을 위해 조금만 기다려주세요!"
             default_html, default_lines = process_response_for_frontend(default_message)
-            
+
             return ChatResponse(
                 response=default_message,
                 success=True,
@@ -206,15 +185,15 @@ async def chat_with_llm(chat_message: ChatMessage):
                     response_lines=response_lines
                 )
 
-        # LangGraph 사용 가능한 경우 우선 사용
-        if LANGGRAPH_AVAILABLE and get_travel_recommendation_langgraph:
+        # LangGraph 사용
+        if get_travel_recommendation_langgraph:
             print("🚀 Using LangGraph workflow for enhanced travel recommendation")
             
             # 간단한 세션 ID (실제로는 사용자별 고유 ID 사용)
             # 현재는 데모용으로 고정 세션 ID 사용
             session_id = "demo_session"
             
-            result = get_travel_recommendation_langgraph(chat_message.message, session_id=session_id)
+            result = await get_travel_recommendation_langgraph(chat_message.message, session_id=session_id)
 
             print(f"✅ LangGraph result: {result.get('response', '')[:100]}...")
 
@@ -258,35 +237,11 @@ async def chat_with_llm(chat_message: ChatMessage):
                 places=tool_results.get('places')
             )
         
-        # LangGraph 사용 불가능 시 기존 RAG 시스템 사용 (성능 최적화)
         else:
-            print("⚠️ LangGraph 사용 불가능, 고속 RAG 시스템으로 폴백")
-
-            # 타임아웃과 함께 빠른 RAG 호출
-            import asyncio
-            try:
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(get_travel_recommendation, chat_message.message, False),
-                    timeout=60.0  # 60초 타임아웃 (초기 로딩 고려)
-                )
-                print(f"✅ Got fast RAG response: {response[:100]}..." if len(response) > 100 else f"✅ Got response: {response}")
-
-                # 💾 응답 캐싱 (기존 RAG 결과)
-                if llm_cache and llm_cache.enabled and response:
-                    llm_cache.cache_response(chat_message.message, response, expire=3600)  # 1시간
-                    print("💾 RAG 응답 캐시 저장 완료")
-
-            except asyncio.TimeoutError:
-                response = "⏰ 요청 처리 시간이 초과되었습니다. 더 간단한 질문으로 다시 시도해주세요."
-                print("❌ RAG response timeout")
-
-            response_html, response_lines = process_response_for_frontend(response)
-
             return ChatResponse(
-                response=response,
-                success=True,
-                response_html=response_html,
-                response_lines=response_lines
+                response="죄송합니다. 현재 여행 추천 시스템을 준비 중입니다.",
+                success=False,
+                error="LLM system not available"
             )
         
     except Exception as e:
@@ -323,7 +278,7 @@ async def chat_health():
 
         # LLM 시스템 상태 확인
         llm_status = "healthy"
-        if get_travel_recommendation is None:
+        if get_travel_recommendation_langgraph is None:
             llm_status = "unhealthy"
             return {
                 "status": "unhealthy",
@@ -337,8 +292,7 @@ async def chat_health():
             "message": "LLM RAG 시스템이 정상 작동 중",
             "redis_status": redis_status,
             "redis_info": redis_info,
-            "llm_status": llm_status,
-            "langgraph_available": LANGGRAPH_AVAILABLE
+            "llm_status": llm_status
         }
 
     except Exception as e:
@@ -418,19 +372,7 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
                 detail="여행 지역과 기간은 필수입니다."
             )
         
-        # 확정된 일정 데이터 구성
-        confirmed_data = {
-            "plan_id": plan_id,
-            "region": plan_data.region,
-            "duration": plan_data.duration,
-            "itinerary": [item.dict() for item in plan_data.itinerary],
-            "places": [place.dict() for place in plan_data.places],
-            "categories": plan_data.categories,
-            "status": "confirmed",
-            "confirmed_at": plan_data.created_at,
-            "total_places": plan_data.total_places,
-            "confidence_score": plan_data.confidence_score
-        }
+        # 일정 데이터 검증 완료
         
         # URL 파라미터 구성
         url_params = f"plan_id={plan_id}&region={plan_data.region}&duration={plan_data.duration}"
