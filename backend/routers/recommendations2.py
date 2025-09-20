@@ -519,7 +519,8 @@ async def get_explore_section(
     category: str,
     current_user=Depends(get_current_user_optional),
     limit: int = Query(10, ge=1, le=50, description="조회할 아이템 수"),
-    offset: int = Query(0, ge=0, description="페이징 오프셋")
+    offset: int = Query(0, ge=0, description="페이징 오프셋"),
+    exclude_place_names: Optional[str] = Query(None, description="제외할 장소 이름들 (쉼표로 구분)")
 ):
     """
     특정 지역/카테고리 섹션 데이터 조회 (우선순위 태그 기반 필터링, 지연 로딩, 페이징 지원) - Redis 캐싱 적용
@@ -597,14 +598,21 @@ async def get_explore_section(
                 # 실패 시 원래 카테고리 사용
                 target_category = category
 
-        # 추천 조회 (추가 타임아웃 보호)
+        # 제외할 장소 이름들 파싱
+        excluded_names = set()
+        if exclude_place_names:
+            excluded_names = {name.strip().lower() for name in exclude_place_names.split(',') if name.strip()}
+            logger.info(f"🚫 제외할 장소 {len(excluded_names)}개: {list(excluded_names)[:3]}...")
+
+        # 추천 조회 (추가 타임아웃 보호) - 중복 제거를 위해 더 많이 조회
+        extra_limit = len(excluded_names) * 2 + 5  # 제외될 장소들을 고려해서 더 많이 조회
         try:
             recommendations = await asyncio.wait_for(
                 fetch_recommendations_with_fallback(
                     user_id=user_id,
                     region=region,
                     category=target_category,
-                    limit=limit + offset,  # offset 만큼 더 조회
+                    limit=limit + offset + extra_limit,  # 중복 제거를 위해 더 많이 조회
                     fast_mode=False,  # 상세 섭션은 전체 기능 사용
                     priority_tag=user_priority or "none"
                 ),
@@ -616,6 +624,17 @@ async def get_explore_section(
         except Exception as rec_e:
             logger.error(f"Error getting recommendations for {region}/{target_category}: {rec_e}")
             recommendations = []
+
+        # 중복 제거: 제외할 장소 이름들 필터링
+        if excluded_names and recommendations:
+            original_count = len(recommendations)
+            recommendations = [
+                rec for rec in recommendations 
+                if rec.get('name', '').strip().lower() not in excluded_names
+            ]
+            filtered_count = len(recommendations)
+            if filtered_count < original_count:
+                logger.info(f"✅ 중복 제거: {original_count}개 → {filtered_count}개 (제거: {original_count - filtered_count}개)")
 
         # 오프셋 적용
         paginated_recommendations = recommendations[offset:offset + limit]

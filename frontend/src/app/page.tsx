@@ -272,7 +272,7 @@ export default function Home() {
       setPopularSections(result.data)
       setAvailableRegions(result.availableRegions)
 
-      console.log(`모든 지역 모든 카테고리 섹션 로드 완료: ${result.data.length}개 지역`)
+      // console.log(`모든 지역 모든 카테고리 섹션 로드 완료: ${result.data.length}개 지역`)
     } catch (error) {
       console.warn('모든 지역 모든 카테고리 섹션 로드 오류:', error)
       setPopularSections([])

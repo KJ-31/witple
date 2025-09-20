@@ -730,12 +730,20 @@ const fetchRegionCategorySection = async (
   region: string,
   category: string,
   limit: number = 10,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  excludePlaceNames: string[] = []
 ): Promise<Attraction[]> => {
   try {
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
-    // 🎯 개별 지역 섹션 API 사용 (우선순위 태그 필터링 적용됨)
-    const url = `${API_BASE_URL}/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?limit=${limit}`
+    
+    // 제외할 장소 이름들을 쿼리 파라미터로 추가
+    const params = new URLSearchParams({ limit: limit.toString() })
+    if (excludePlaceNames.length > 0) {
+      params.append('exclude_place_names', excludePlaceNames.join(','))
+    }
+    
+    // 🎯 개별 지역 섹션 API 사용 (우선순위 태그 필터링 + 중복 제거 적용됨)
+    const url = `${API_BASE_URL}/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?${params.toString()}`
 
     // console.log(`개별 섹션 API 호출: ${region}/${category}`)
 
@@ -813,22 +821,29 @@ export const fetchAllRegionsAllCategories = async (
     const sections: CitySection[] = []
     const targetRegions = availableRegions.slice(0, maxRegions)
 
-    // 🔄 각 지역별로 우선순위 태그 기반 추천 가져오기 (병렬 처리)
+    // 🔄 각 지역별로 우선순위 태그 기반 추천 가져오기 (중복 제거 적용)
     const regionPromises = targetRegions.map(async (region) => {
       const allAttractions: Attraction[] = []
+      const usedPlaceNames: string[] = [] // 이미 사용된 장소 이름들 추적
 
-      // 각 카테고리별로 개별 API 호출 (사용자 우선순위 태그 필터링 적용됨)
-      const categoryPromises = availableCategories.map(async (category) => {
-        const attractions = await fetchRegionCategorySection(region, category, maxItemsPerCategory, headers)
-        return { category, attractions }
-      })
-
-      const categoryResults = await Promise.all(categoryPromises)
-
-      // 모든 카테고리의 결과를 합치기
-      categoryResults.forEach(({ attractions }) => {
-        allAttractions.push(...attractions)
-      })
+      // 각 카테고리별로 순차적으로 API 호출 (중복 제거를 위해 순차 처리)
+      for (const category of availableCategories) {
+        const attractions = await fetchRegionCategorySection(
+          region, 
+          category, 
+          maxItemsPerCategory, 
+          headers,
+          usedPlaceNames // 이미 사용된 장소들 제외
+        )
+        
+        // 새로운 장소들을 결과에 추가하고 사용된 장소 목록 업데이트
+        attractions.forEach(attraction => {
+          allAttractions.push(attraction)
+          usedPlaceNames.push(attraction.name)
+        })
+        
+        // console.log(`✅ ${region}/${category}: ${attractions.length}개 장소 추가 (누적: ${allAttractions.length}개, 제외: ${usedPlaceNames.length}개)`)
+      }
 
       if (allAttractions.length > 0) {
         return {
@@ -853,7 +868,7 @@ export const fetchAllRegionsAllCategories = async (
       }
     })
 
-    console.log(`✅ 우선순위 태그 기반 지역 섹션 완료: ${sections.length}개 지역`)
+    // console.log(`✅ 우선순위 태그 기반 지역 섹션 완료: ${sections.length}개 지역`)
     return { data: sections, availableRegions: targetRegions }
 
   } catch (error) {
