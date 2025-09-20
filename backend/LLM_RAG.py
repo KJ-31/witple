@@ -540,28 +540,9 @@ if DB_ENABLED:
         print("📢 Redis 캐시 전용 모드로 동작")
         vectorstore = None
 
-# # 지역 및 키워드 인식 시스템
+# DB 카탈로그는 초기화 함수에서 로드될 예정
 
-# 지역 및 키워드 데이터 (실제 DB 분석 결과 기반)
-REGIONS = [
-    '경기도', '서울특별시', '강원특별자치도', '경상남도', '경상북도', '전라남도', 
-    '부산광역시', '충청남도', '제주특별자치도', '인천광역시', '전북특별자치도', 
-    '충청북도', '대구광역시', '광주광역시', '대전광역시', '울산광역시', '세종특별자치시'
-]
-
-CITIES = [
-    '중구', '평창군', '강남구', '서귀포시', '강릉시', '제주시', '고양시', '용인시', 
-    '서구', '파주시', '안양시', '구로구', '경주시', '기장군', '가평군', '종로구', 
-    '안동시', '영등포구', '수원시', '부산', '강릉', '제주', '서울', '경주', '가평'
-]
-
-CATEGORIES = [
-    '한식', '쇼핑', '레포츠', '자연', '관광호텔', '펜션', '한옥', '게스트하우스', 
-    '일식', '콘도미디엄', '카페', '모텔', '중식', '유스호스텔', '양식', '맛집'
-]
-
-# 음식 관련 키워드 확장
-FOOD_KEYWORDS = ['맛집', '음식', '레스토랑', '식당', '먹거리', '요리', '카페', '디저트']
+# # LLM 기반 엔티티 인식 시스템 (하드코딩된 상수 제거됨)
 
 # 숙소 카테고리 상수화 (보안 개선)
 ACCOMMODATION_CATEGORIES = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트']
@@ -572,47 +553,241 @@ def is_accommodation(category: str) -> bool:
         return False
     return any(keyword in category for keyword in ACCOMMODATION_CATEGORIES)
 
-def extract_location_and_category(query: str):
-    """쿼리에서 지역명과 카테고리를 정확히 추출"""
-    
+def detect_query_entities(query: str) -> dict:
+    """LLM을 사용하여 쿼리에서 구조화된 엔티티 및 여행 인텐트 추출"""
+    try:
+        entity_extraction_prompt = ChatPromptTemplate.from_template("""
+당신은 한국 여행 쿼리를 분석하는 전문가입니다.
+주어진 쿼리에서 지역명, 도시명, 카테고리, 키워드와 여행 인텐트를 추출해주세요.
+
+쿼리: "{query}"
+
+다음 JSON 형태로 정확히 응답해주세요:
+{{
+    "regions": ["지역명들"],
+    "cities": ["도시명들"],
+    "categories": ["카테고리들"],
+    "keywords": ["기타 키워드들"],
+    "intent": "여행 인텐트",
+    "travel_type": "여행 유형",
+    "duration": "여행 기간"
+}}
+
+추출 규칙:
+1. 지역명: 경기도, 서울특별시, 부산광역시 등의 광역 행정구역
+2. 도시명: 강릉, 제주, 부산, 서울 등의 구체적 도시/지역
+3. 카테고리: 맛집, 관광지, 자연, 쇼핑, 레포츠, 카페, 한식, 일식, 중식, 양식 등
+4. 키워드: 2박3일, 가족여행, 데이트, 혼자, 친구 등의 부가 정보
+5. intent: "travel_planning"(여행 일정), "place_search"(장소 검색), "weather"(날씨), "general"(일반)
+6. travel_type: "family"(가족), "couple"(커플), "friends"(친구), "solo"(혼자), "business"(출장), "general"(일반)
+7. duration: "당일", "1박2일", "2박3일", "3박4일", "장기", "미정" 등
+
+예시:
+- "부산 2박3일 맛집 중심 일정" → {{"regions": ["부산광역시"], "cities": ["부산"], "categories": ["맛집"], "keywords": ["2박3일"], "intent": "travel_planning", "travel_type": "general", "duration": "2박3일"}}
+- "강릉 카페 추천해줘" → {{"regions": ["강원특별자치도"], "cities": ["강릉"], "categories": ["카페"], "keywords": [], "intent": "place_search", "travel_type": "general", "duration": "미정"}}
+- "가족과 제주도 여행" → {{"regions": ["제주특별자치도"], "cities": ["제주"], "categories": [], "keywords": ["가족"], "intent": "travel_planning", "travel_type": "family", "duration": "미정"}}
+""")
+
+        entity_chain = entity_extraction_prompt | llm
+
+        response = entity_chain.invoke({"query": query})
+
+        # JSON 파싱 시도
+        import json
+        import re
+
+        # 응답에서 JSON 부분만 추출
+        json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+        if json_match:
+            entities = json.loads(json_match.group())
+
+            # 기본 구조 보장 (새로운 필드 추가)
+            result = {
+                "regions": entities.get("regions", []),
+                "cities": entities.get("cities", []),
+                "categories": entities.get("categories", []),
+                "keywords": entities.get("keywords", []),
+                "intent": entities.get("intent", "general"),
+                "travel_type": entities.get("travel_type", "general"),
+                "duration": entities.get("duration", "미정")
+            }
+
+            print(f"🧠 LLM 엔티티 추출: {result}")
+            return result
+        else:
+            print(f"⚠️ LLM 응답에서 JSON 파싱 실패: {response.content}")
+            return {"regions": [], "cities": [], "categories": [], "keywords": [], "intent": "general", "travel_type": "general", "duration": "미정"}
+
+    except Exception as e:
+        print(f"❌ LLM 엔티티 추출 오류: {e}")
+        # 폴백: 기존 하드코딩 방식 사용
+        return _fallback_entity_extraction(query)
+
+def _fallback_entity_extraction(query: str) -> dict:
+    """폴백: DB 카탈로그 기반 단순 문자열 매칭 (LLM 실패시)"""
     found_regions = []
     found_cities = []
     found_categories = []
-    
-    # 도시-지역 매핑
-    CITY_TO_REGION = {
-        '강릉': '강원특별자치도', '강릉시': '강원특별자치도', 
-        '평창군': '강원특별자치도',
-        '부산': '부산광역시', '기장군': '부산광역시',
-        '서울': '서울특별시', '강남구': '서울특별시', '종로구': '서울특별시', '영등포구': '서울특별시',
-        '제주': '제주특별자치도', '제주시': '제주특별자치도', '서귀포시': '제주특별자치도',
-        '수원시': '경기도', '고양시': '경기도', '용인시': '경기도', '파주시': '경기도', '안양시': '경기도', '가평군': '경기도', '가평': '경기도',
-        '경주': '경상북도', '경주시': '경상북도', '안동시': '경상북도',
-    }
-    
-    # 지역 매칭 (부분 문자열 포함)
-    for region in REGIONS:
+
+    # DB 카탈로그가 로드되지 않은 경우 빈 결과 반환
+    if not _db_catalogs.get("regions"):
+        print("⚠️ DB 카탈로그가 로드되지 않음, 빈 결과 반환")
+        return {"regions": [], "cities": [], "categories": [], "keywords": []}
+
+    # DB 카탈로그 기반 단순 문자열 매칭
+    for region in _db_catalogs.get("regions", []):
         if region in query or region.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '') in query:
             found_regions.append(region)
-    
-    # 도시 매칭
-    for city in CITIES:
+
+    for city in _db_catalogs.get("cities", []):
         if city in query:
             found_cities.append(city)
-            # 도시에 해당하는 지역도 자동 추가
-            if city in CITY_TO_REGION and CITY_TO_REGION[city] not in found_regions:
-                found_regions.append(CITY_TO_REGION[city])
-    
-    # 카테고리 매칭
-    for category in CATEGORIES:
+
+    for category in _db_catalogs.get("categories", []):
         if category in query:
             found_categories.append(category)
-    
-    # 음식 키워드 특별 처리 - 더 포괄적으로
-    if any(word in query for word in FOOD_KEYWORDS):
-        found_categories.extend(['한식', '일식', '중식', '양식'])  # 모든 음식 카테고리 포함
-    
-    return found_regions, found_cities, found_categories
+
+    return {
+        "regions": found_regions,
+        "cities": found_cities,
+        "categories": found_categories,
+        "keywords": [],
+        "intent": "general",
+        "travel_type": "general",
+        "duration": "미정"
+    }
+
+def extract_location_and_category(query: str):
+    """쿼리에서 지역명과 카테고리를 정확히 추출 (LLM 기반 + DB 정규화)"""
+    try:
+        # 1단계: LLM으로 엔티티 추출
+        raw_entities = detect_query_entities(query)
+
+        # 2단계: DB 카탈로그 기반 정규화
+        normalized_entities = normalize_entities(raw_entities)
+
+        # 기존 반환 형식 유지 (하위 호환성)
+        return (
+            normalized_entities["regions"],
+            normalized_entities["cities"],
+            normalized_entities["categories"]
+        )
+
+    except Exception as e:
+        print(f"⚠️ 엔티티 추출 중 오류, 폴백 사용: {e}")
+        # 최종 폴백: 기존 하드코딩 방식
+        fallback_entities = _fallback_entity_extraction(query)
+        return (
+            fallback_entities["regions"],
+            fallback_entities["cities"],
+            fallback_entities["categories"]
+        )
+
+# DB 카탈로그 캐시 (앱 시작시 프리로드)
+_db_catalogs = {
+    "regions": [],
+    "cities": [],
+    "categories": []
+}
+
+def load_db_catalogs():
+    """앱 시작시 DB에서 실제 지역/도시/카테고리 목록을 Redis에 캐시"""
+    try:
+        print("📖 DB 카탈로그 프리로드 중...")
+
+        with shared_engine.connect() as conn:
+            # 실제 DB에서 distinct 값들 조회
+            regions_query = text("""
+                SELECT DISTINCT cmetadata->>'region' as region
+                FROM langchain_pg_embedding
+                WHERE cmetadata->>'region' IS NOT NULL
+                AND cmetadata->>'region' != ''
+                ORDER BY region
+            """)
+
+            cities_query = text("""
+                SELECT DISTINCT cmetadata->>'city' as city
+                FROM langchain_pg_embedding
+                WHERE cmetadata->>'city' IS NOT NULL
+                AND cmetadata->>'city' != ''
+                ORDER BY city
+            """)
+
+            categories_query = text("""
+                SELECT DISTINCT cmetadata->>'category' as category
+                FROM langchain_pg_embedding
+                WHERE cmetadata->>'category' IS NOT NULL
+                AND cmetadata->>'category' != ''
+                ORDER BY category
+            """)
+
+            # 결과 저장
+            regions_result = conn.execute(regions_query).fetchall()
+            cities_result = conn.execute(cities_query).fetchall()
+            categories_result = conn.execute(categories_query).fetchall()
+
+            _db_catalogs["regions"] = [row.region for row in regions_result if row.region]
+            _db_catalogs["cities"] = [row.city for row in cities_result if row.city]
+            _db_catalogs["categories"] = [row.category for row in categories_result if row.category]
+
+            print(f"✅ DB 카탈로그 로드 완료:")
+            print(f"   - 지역: {len(_db_catalogs['regions'])}개")
+            print(f"   - 도시: {len(_db_catalogs['cities'])}개")
+            print(f"   - 카테고리: {len(_db_catalogs['categories'])}개")
+
+            # Redis에 캐시 저장 (선택적)
+            if redis_available and redis_client:
+                import json
+                redis_client.set("db_catalogs", json.dumps(_db_catalogs, ensure_ascii=False), ex=3600)
+                print("📦 Redis에 카탈로그 캐시 저장 완료")
+
+        return True
+
+    except Exception as e:
+        print(f"⚠️ DB 카탈로그 로드 실패: {e}")
+        # 폴백: 최소한의 빈 배열로 초기화
+        _db_catalogs["regions"] = []
+        _db_catalogs["cities"] = []
+        _db_catalogs["categories"] = []
+        return False
+
+def normalize_entities(entities: dict, use_fuzzy: bool = True) -> dict:
+    """추출된 엔티티를 DB 카탈로그 기반으로 정규화"""
+    try:
+        normalized = {
+            "regions": [],
+            "cities": [],
+            "categories": [],
+            "keywords": entities.get("keywords", [])
+        }
+
+        # 간단한 문자열 매칭으로 정규화
+        for entity_region in entities.get("regions", []):
+            for db_region in _db_catalogs["regions"]:
+                # 부분 매칭 또는 정확 매칭
+                if (entity_region in db_region or db_region in entity_region or
+                    entity_region.replace('특별시','').replace('광역시','').replace('도','') in db_region):
+                    if db_region not in normalized["regions"]:
+                        normalized["regions"].append(db_region)
+
+        for entity_city in entities.get("cities", []):
+            for db_city in _db_catalogs["cities"]:
+                if entity_city in db_city or db_city in entity_city:
+                    if db_city not in normalized["cities"]:
+                        normalized["cities"].append(db_city)
+
+        for entity_category in entities.get("categories", []):
+            for db_category in _db_catalogs["categories"]:
+                if entity_category in db_category or db_category in entity_category:
+                    if db_category not in normalized["categories"]:
+                        normalized["categories"].append(db_category)
+
+        print(f"🔄 엔티티 정규화: {entities} → {normalized}")
+        return normalized
+
+    except Exception as e:
+        print(f"⚠️ 엔티티 정규화 오류: {e}")
+        return entities
 
 class HybridOptimizedRetriever(BaseRetriever):
     """SQL 필터링 + 벡터 유사도를 결합한 하이브리드 검색기"""
@@ -2755,3 +2930,10 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
             "success": False,
             "error": str(e)
         }
+
+# 시스템 초기화: DB 카탈로그 로드
+try:
+    print("🚀 시스템 초기화: DB 카탈로그 로드 중...")
+    load_db_catalogs()
+except Exception as e:
+    print(f"⚠️ DB 카탈로그 초기화 실패: {e}")
