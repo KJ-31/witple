@@ -563,6 +563,15 @@ CATEGORIES = [
 # 음식 관련 키워드 확장
 FOOD_KEYWORDS = ['맛집', '음식', '레스토랑', '식당', '먹거리', '요리', '카페', '디저트']
 
+# 숙소 카테고리 상수화 (보안 개선)
+ACCOMMODATION_CATEGORIES = ['숙소', '호텔', '펜션', '모텔', '게스트하우스', '리조트']
+
+def is_accommodation(category: str) -> bool:
+    """카테고리가 숙소 관련인지 판단"""
+    if not category:
+        return False
+    return any(keyword in category for keyword in ACCOMMODATION_CATEGORIES)
+
 def extract_location_and_category(query: str):
     """쿼리에서 지역명과 카테고리를 정확히 추출"""
     
@@ -657,12 +666,19 @@ class HybridOptimizedRetriever(BaseRetriever):
             # SQL 조건 구성
             conditions = []
             
+            # SQL 조건과 파라미터 구성
+            params = {}
+            param_counter = 0
+
             if regions:
                 region_conditions = []
                 for region in regions:
                     # 서울특별시 -> 서울로 변환하여 검색
                     region_simple = region.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
-                    region_conditions.append(f"cmetadata->>'region' ILIKE '%{region_simple}%'")
+                    param_name = f"region_{param_counter}"
+                    region_conditions.append(f"cmetadata->>'region' ILIKE :{param_name}")
+                    params[param_name] = f'%{region_simple}%'
+                    param_counter += 1
                 conditions.append(f"({' OR '.join(region_conditions)})")
             
             if cities:
@@ -670,33 +686,57 @@ class HybridOptimizedRetriever(BaseRetriever):
                 for city in cities:
                     # city 필드와 region 필드 모두에서 검색 (서울의 경우)
                     city_simple = city.replace('특별시', '').replace('광역시', '').replace('특별자치도', '').replace('도', '')
-                    city_conditions.append(f"cmetadata->>'city' ILIKE '%{city_simple}%'")
-                    city_conditions.append(f"cmetadata->>'region' ILIKE '%{city_simple}%'")
+
+                    # city 필드 검색
+                    city_param = f"city_{param_counter}"
+                    city_conditions.append(f"cmetadata->>'city' ILIKE :{city_param}")
+                    params[city_param] = f'%{city_simple}%'
+                    param_counter += 1
+
+                    # region 필드 검색
+                    region_param = f"city_region_{param_counter}"
+                    city_conditions.append(f"cmetadata->>'region' ILIKE :{region_param}")
+                    params[region_param] = f'%{city_simple}%'
+                    param_counter += 1
+
                 conditions.append(f"({' OR '.join(city_conditions)})")
             
             if categories:
-                category_conditions = " OR ".join([f"cmetadata->>'category' ILIKE '%{category}%'" for category in categories])
-                conditions.append(f"({category_conditions})")
+                category_conditions = []
+                for category in categories:
+                    param_name = f"category_{param_counter}"
+                    category_conditions.append(f"cmetadata->>'category' ILIKE :{param_name}")
+                    params[param_name] = f'%{category}%'
+                    param_counter += 1
+                conditions.append(f"({' OR '.join(category_conditions)})")
             
             where_clause = " OR ".join(conditions)
             
+            # 숙소 필터링을 위한 파라미터 추가
+            for i, accommodation in enumerate(ACCOMMODATION_CATEGORIES):
+                param_name = f"exclude_accommodation_{i}"
+                params[param_name] = f'%{accommodation}%'
+
+            # 숙소 제외 조건 구성
+            accommodation_excludes = " AND ".join([
+                f"cmetadata->>'category' NOT ILIKE :exclude_accommodation_{i}"
+                for i in range(len(ACCOMMODATION_CATEGORIES))
+            ])
+
+            params['max_results'] = self.max_sql_results
+
             sql_query = f"""
                 SELECT document, cmetadata, embedding
                 FROM langchain_pg_embedding
                 WHERE ({where_clause})
-                AND cmetadata->>'category' NOT ILIKE '%숙소%'
-                AND cmetadata->>'category' NOT ILIKE '%호텔%'
-                AND cmetadata->>'category' NOT ILIKE '%펜션%'
-                AND cmetadata->>'category' NOT ILIKE '%모텔%'
-                AND cmetadata->>'category' NOT ILIKE '%게스트하우스%'
-                AND cmetadata->>'category' NOT ILIKE '%리조트%'
-                LIMIT {self.max_sql_results}
+                AND {accommodation_excludes}
+                LIMIT :max_results
             """
             
-            print(f"🗄️ SQL 필터링 실행...")
-            
+            print(f"🗄️ SQL 필터링 실행 (파라미터 바인딩)...")
+
             with engine.connect() as conn:
-                result = conn.execute(text(sql_query))
+                result = conn.execute(text(sql_query), params)
                 rows = result.fetchall()
                 
                 docs = []
@@ -717,32 +757,36 @@ class HybridOptimizedRetriever(BaseRetriever):
             return []
     
     def _text_search_fallback(self, query: str, engine) -> List[Document]:
-        """텍스트 기반 폴백 검색"""
+        """텍스트 기반 폴백 검색 (파라미터 바인딩 적용)"""
         try:
             # 쿼리에서 키워드 추출하여 텍스트 검색
             keywords = query.split()
             text_conditions = []
-            
-            for keyword in keywords[:3]:  # 최대 3개 키워드만 사용
+            params = {}
+
+            for i, keyword in enumerate(keywords[:3]):  # 최대 3개 키워드만 사용
                 if len(keyword) > 1:
-                    text_conditions.append(f"document ILIKE '%{keyword}%'")
-            
+                    param_name = f"keyword_{i}"
+                    text_conditions.append(f"document ILIKE :{param_name}")
+                    params[param_name] = f'%{keyword}%'
+
             if not text_conditions:
                 return []
-            
+
             text_where = " OR ".join(text_conditions)
-            
+            params['limit_results'] = self.max_sql_results // 2
+
             sql_query = f"""
                 SELECT document, cmetadata, embedding
-                FROM langchain_pg_embedding 
+                FROM langchain_pg_embedding
                 WHERE {text_where}
-                LIMIT {self.max_sql_results // 2}
+                LIMIT :limit_results
             """
-            
+
             with engine.connect() as conn:
-                result = conn.execute(text(sql_query))
+                result = conn.execute(text(sql_query), params)
                 rows = result.fetchall()
-                
+
                 docs = []
                 for row in rows:
                     doc = Document(
@@ -752,9 +796,9 @@ class HybridOptimizedRetriever(BaseRetriever):
                     if row.embedding:
                         doc.metadata['_embedding'] = row.embedding
                     docs.append(doc)
-                
+
                 return docs
-                
+
         except Exception as e:
             print(f"❌ 텍스트 검색 폴백 오류: {e}")
             return []
@@ -964,10 +1008,6 @@ def search_places(query):
     except Exception as e:
         print(f"❌ 검색 오류: {e}")
         return []
-
-
-
-
 
 
 # Weather 모듈 import
