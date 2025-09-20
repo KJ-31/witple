@@ -139,7 +139,11 @@ async def save_user_preferences(
     cache_patterns = [
         f"personalized:{user_id}:*",
         f"recommendations:{user_id}",
-        f"user:{user_id}"
+        f"user:{user_id}",
+        f"rec_main:user_{user_id}:*",      # 메인 페이지 개인화 추천
+        f"main_personalized:user_{user_id}:*",  # 메인 페이지 전체 응답
+        f"main_explore:user_{user_id}:*",       # 메인 페이지 탐색 섹션
+        f"explore_feed_v3:{user_id}:*"          # 탐색 피드 v3
     ]
     
     # Redis SCAN을 사용하여 패턴 매칭 키들 삭제
