@@ -42,7 +42,10 @@ export function ChatbotModal() {
     chatMessage,
     setChatMessage,
     chatMessages,
-    handleChatSubmit
+    handleChatSubmit,
+    clearChatHistory,
+    toast,
+    showToast
   } = useChatbot()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -96,17 +99,35 @@ export function ChatbotModal() {
               <p className="text-blue-100 text-sm">여행 마스터</p>
             </div>
           </div>
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              console.log('Close button clicked') // 디버깅용
-              setShowChatbot(false)
-            }}
-            className="text-white hover:text-blue-200 text-2xl font-bold w-12 h-12 flex items-center justify-center rounded-full hover:bg-white/10 transition-all"
-          >
-            ×
-          </button>
+          <div className="flex items-center space-x-2">
+            {/* 채팅 기록 초기화 버튼 */}
+            <button
+              onClick={async (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                await clearChatHistory()
+              }}
+              className="text-white hover:text-blue-200 w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-all"
+              title="채팅 기록 초기화"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+            {/* 닫기 버튼 */}
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('Close button clicked') // 디버깅용
+                setShowChatbot(false)
+              }}
+              className="text-white hover:text-blue-200 text-2xl font-bold w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-all"
+              title="채팅창 닫기"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         {/* Chat Messages */}
@@ -172,6 +193,27 @@ export function ChatbotModal() {
             </button>
           </form>
         </div>
+
+        {/* Toast Message */}
+        {toast.show && (
+          <div className={`absolute bottom-4 left-4 right-4 p-3 rounded-lg shadow-lg transition-all duration-300 ${
+            toast.type === 'success' 
+              ? 'bg-green-500 text-white' 
+              : toast.type === 'error' 
+              ? 'bg-red-500 text-white' 
+              : 'bg-blue-500 text-white'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{toast.message}</span>
+              <button
+                onClick={() => showToast('', 'info')}
+                className="ml-2 text-white hover:text-gray-200"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

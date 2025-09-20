@@ -24,6 +24,13 @@ interface ChatbotContextType {
   setIsAppLoading: (loading: boolean) => void
   hasUnreadResponse: boolean
   clearNotification: () => void
+  clearChatHistory: () => void  // 새로운 함수 추가
+  toast: {
+    show: boolean
+    message: string
+    type: 'success' | 'error' | 'info'
+  }
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void
 }
 
 const ChatbotContext = createContext<ChatbotContextType | undefined>(undefined)
@@ -49,6 +56,17 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
 
   const [pendingResponseId, setPendingResponseId] = useState<number | null>(null)
   const modalClosedDuringResponseRef = useRef(false)
+  
+  // 토스트 메시지 상태
+  const [toast, setToast] = useState<{
+    show: boolean
+    message: string
+    type: 'success' | 'error' | 'info'
+  }>({
+    show: false,
+    message: '',
+    type: 'info'
+  })
 
   // 초기 메시지 및 저장된 메시지 로드
   useEffect(() => {
@@ -121,8 +139,94 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     modalClosedDuringResponseRef.current = false
   }
 
+  // 토스트 메시지 함수
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ show: true, message, type })
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'info' })
+    }, 3000) // 3초 후 자동 사라짐
+  }
+
+  const clearChatHistory = async () => {
+    try {
+      // 1. 백엔드 여행 상태 초기화
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      await fetch(`${API_BASE_URL}/api/v1/chat/clear-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+      
+      // 2. 프론트엔드 채팅 메시지 초기화
+      const initialMessage = {
+        id: Date.now(),
+        type: 'bot' as const,
+        message: '쉽게 여행 계획을 작성해볼래?',
+        timestamp: new Date()
+      }
+      setChatMessages([initialMessage])
+      
+      // 3. sessionStorage 초기화
+      sessionStorage.removeItem('chatMessages')
+      
+      // 4. 알림 상태 초기화
+      clearNotification()
+      
+      // 5. 성공 토스트 메시지 표시
+      showToast('채팅 기록이 초기화되었습니다!', 'success')
+      
+      console.log('✅ 채팅 기록 및 여행 상태 초기화 완료')
+      
+    } catch (error) {
+      console.error('❌ 채팅 기록 초기화 실패:', error)
+      
+      // 에러가 발생해도 프론트엔드 상태는 초기화
+      const initialMessage = {
+        id: Date.now(),
+        type: 'bot' as const,
+        message: '쉽게 여행 계획을 작성해볼래?',
+        timestamp: new Date()
+      }
+      setChatMessages([initialMessage])
+      sessionStorage.removeItem('chatMessages')
+      clearNotification()
+      
+      // 에러 토스트 메시지 표시
+      showToast('채팅 기록 초기화 중 오류가 발생했습니다.', 'error')
+    }
+  }
+
   const handleChatSubmit = async (messageText: string) => {
     if (!messageText.trim()) return
+
+    // 새로운 여행 요청인지 감지 (간단한 키워드 기반)
+    const messageTextLower = messageText.toLowerCase()
+    const travelKeywords = ['추천', '여행', '일정', '계획', '가고싶어', '놀러', '구경', '관광']
+    const regionKeywords = ['서울', '부산', '제주', '강릉', '경주', '전주', '대구', '광주', '인천']
+    const questionPatterns = ['어디', '뭐', '뭘', '어떤', '추천해', '알려줘', '가볼만한']
+    
+    const isNewTravelRequest = (
+      travelKeywords.some(keyword => messageTextLower.includes(keyword)) ||
+      regionKeywords.some(keyword => messageTextLower.includes(keyword)) ||
+      questionPatterns.some(pattern => messageTextLower.includes(pattern))
+    )
+
+    // 새로운 여행 요청이면 백엔드 상태 클리어
+    if (isNewTravelRequest) {
+      try {
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+        await fetch(`${API_BASE_URL}/api/v1/chat/clear-state`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        })
+        console.log('🔄 백엔드 여행 상태 초기화됨')
+      } catch (error) {
+        console.warn('백엔드 상태 초기화 실패:', error)
+      }
+    }
 
     // 사용자 메시지 추가
     const userMessage: ChatMessage = {
@@ -249,7 +353,10 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     isAppLoading,
     setIsAppLoading,
     hasUnreadResponse,
-    clearNotification
+    clearNotification,
+    clearChatHistory,
+    toast,
+    showToast
   }
 
   return (
