@@ -527,7 +527,7 @@ if DB_ENABLED:
             # 저장된 캐시가 있으면 로드, 없으면 PGVector에서 새로 구성
             if not faiss_cache.load_cache():
                 print("📥 PGVector에서 FAISS 캐시 새로 구성...")
-                faiss_cache.load_from_pgvector(embeddings, shared_engine)
+                faiss_cache.load_from_pgvector(shared_engine)
             else:
                 print("📂 기존 FAISS 캐시 로드 완료")
 
@@ -2096,12 +2096,11 @@ def find_place_in_recommendations(place_name: str) -> dict:
         return None
 
 def find_real_place_id(place_name: str, table_name: str, region: str = "") -> str:
-    """장소명으로 실제 DB에서 place_id 조회"""
+    """장소명으로 실제 DB에서 place_id 조회 (공통 엔진 사용)"""
     try:
-        from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         from models_attractions import Nature, Restaurant, Shopping, Humanities, LeisureSports
-        
+
         # 테이블 매핑 (숙소 제외)
         table_models = {
             "nature": Nature,
@@ -2110,37 +2109,34 @@ def find_real_place_id(place_name: str, table_name: str, region: str = "") -> st
             "humanities": Humanities,
             "leisure_sports": LeisureSports
         }
-        
+
         if table_name not in table_models:
             print(f"❌ 지원하지 않는 table_name: {table_name}")
             return None  # 기본값 "1" 대신 None 반환
-            
-        # DB 연결
-        import os
-        DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:1234@localhost:5432/witple')
-        engine = create_engine(DATABASE_URL)
-        Session = sessionmaker(bind=engine)
+
+        # 공통 엔진 사용 (중복 생성 방지)
+        Session = sessionmaker(bind=shared_engine)
         session = Session()
-        
+
         try:
             table_model = table_models[table_name]
-            
+
             # 장소명으로 검색 (정확한 매칭 우선)
             query = session.query(table_model).filter(table_model.name.ilike(f"%{place_name}%"))
-            
+
             # 지역 정보가 있으면 추가 필터링
             if region:
                 query = query.filter(table_model.region.ilike(f"%{region}%"))
-            
+
             place = query.first()
-            
+
             if place:
                 return str(place.id)
             else:
                 # 매칭되지 않으면 None 반환 (무등산 주상절리대 fallback 방지)
                 print(f"❌ 장소명 '{place_name}'이 {table_name} 테이블에서 찾을 수 없음")
                 return None
-                
+
         finally:
             session.close()
             
