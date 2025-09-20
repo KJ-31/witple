@@ -1164,25 +1164,132 @@ def search_places(query):
     try:
         print(f"🔍 하이브리드 검색: '{query}'")
 
-        # 캐시된 검색 결과 확인
-        cached_docs = llm_cache.get_cached_search_results(query)
-        if cached_docs:
-            print("⚡ 캐시된 검색 결과 반환!")
-            return cached_docs
+        # 캐시된 검색 결과 확인 - 임시 주석 처리
+        # cached_docs = llm_cache.get_cached_search_results(query)
+        # if cached_docs:
+        #     print("⚡ 캐시된 검색 결과 반환!")
+        #     return cached_docs
 
         print("🔍 새로운 검색 실행...")
 
         # HybridOptimizedRetriever 직접 사용
         docs = retriever._get_relevant_documents(query)
 
-        # 검색 결과 캐싱 (30분)
-        llm_cache.cache_search_results(query, docs, expire=1800)
+        # 검색 결과 캐싱 (30분) - 임시 주석 처리
+        # llm_cache.cache_search_results(query, docs, expire=1800)
 
         return docs
 
     except Exception as e:
         print(f"❌ 검색 오류: {e}")
         return []
+
+def get_travel_recommendation_optimized(query, stream=True):
+    """최적화된 Redis 캐싱 + 스트림"""
+    def _generate_stream():
+        try:
+            # 검색 단계는 항상 캐싱 활용 - 임시 주석 처리
+            # cached_docs = llm_cache.get_cached_search_results(query)
+            # if cached_docs:
+            #     docs = cached_docs
+            # else:
+            docs = retriever._get_relevant_documents(query)
+            # llm_cache.cache_search_results(query, docs, expire=1800)
+
+            context = format_docs(docs)
+            prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+            # 스트림 모드: yield로 실시간 응답
+            full_response = ""
+            buffer = ""
+            for chunk in llm.stream(prompt_value):
+                if hasattr(chunk, 'content'):
+                    content = chunk.content
+                    if content:
+                        buffer += content
+                        full_response += content
+
+                        # 적절한 청크로 yield
+                        if len(buffer) > 15 or any(c in buffer for c in ['\n', '.']):
+                            yield buffer
+                            buffer = ""
+
+            if buffer:
+                yield buffer
+
+            # 🎯 스트림 완료 후 전체 응답 캐싱 - 임시 주석 처리
+            # if len(full_response) > 50:
+            #     llm_cache.cache_response(query, full_response, expire=3600)
+
+        except Exception as e:
+            yield f"❌ 추천 생성 오류: {e}"
+
+    try:
+        if stream:
+            return _generate_stream()
+        else:
+            # 비스트림: 캐시 확인 후 일반 처리 - 임시 주석 처리
+            # cached_response = llm_cache.get_cached_response(query)
+            # if cached_response:
+            #     return cached_response
+
+            # 검색 단계는 항상 캐싱 활용 - 임시 주석 처리
+            # cached_docs = llm_cache.get_cached_search_results(query)
+            # if cached_docs:
+            #     docs = cached_docs
+            # else:
+            docs = retriever._get_relevant_documents(query)
+            # llm_cache.cache_search_results(query, docs, expire=1800)
+
+            context = format_docs(docs)
+            prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+            response = llm.invoke(prompt_value)
+            if hasattr(response, 'content'):
+                response_text = response.content
+            else:
+                response_text = str(response)
+            # llm_cache.cache_response(query, response_text, expire=3600)
+            return response_text
+
+    except Exception as e:
+        return f"❌ 추천 생성 오류: {e}"
+
+def get_travel_recommendation(query, stream=True):
+    """여행 추천 생성 함수 (스트림 지원 + Redis 캐싱)"""
+    if stream:
+        return get_travel_recommendation_optimized(query, stream=True)
+    else:
+        return get_travel_recommendation_optimized(query, stream=False)
+
+def get_travel_recommendation_stream(query):
+    """진짜 스트림 방식 여행 추천 생성 (터미널/웹 용)"""
+    try:
+        docs = retriever._get_relevant_documents(query)
+        context = format_docs(docs)
+
+        prompt_value = rag_prompt.invoke({"context": context, "question": query})
+
+        # ▶️ 진짜 yield로 스트리밍
+        buffer = ""
+        full_response = ""
+        for chunk in llm.stream(prompt_value):
+            if hasattr(chunk, 'content'):
+                content = chunk.content
+            else:
+                content = str(chunk)
+            if content:
+                buffer += content
+                full_response += content
+                # 자연스러운 스트리밍: 문장/줄/청크 단위로
+                if len(buffer) > 15 or '\n' in buffer or '.' in buffer:
+                    to_send, buffer = buffer, ""
+                    yield to_send
+        if buffer:
+            yield buffer
+    except Exception as e:
+        yield f"❌ 스트림 추천 생성 오류: {e}"
+
 
 
 # Weather 모듈 import

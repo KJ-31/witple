@@ -211,9 +211,7 @@ export const fetchRecommendations = async (
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
 
     // 인증 토큰 가져오기
-    console.log('🔍 토큰 가져오기 시작')
     const token = await getAuthToken()
-    console.log('🔍 토큰 가져오기 결과:', !!token)
 
     // 헤더 설정
     const headers: Record<string, string> = {
@@ -224,11 +222,6 @@ export const fetchRecommendations = async (
     // 토큰이 있으면 Authorization 헤더 추가
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
-      console.log('🔐 JWT 토큰 포함하여 API 호출:', token.substring(0, 20) + '...')
-      console.log('🔍 실제 토큰 길이:', token.length)
-      console.log('🔍 토큰 전체:', token) // 디버깅용 - 나중에 제거
-    } else {
-      console.warn('⚠️ JWT 토큰이 없어 비로그인 상태로 API 호출')
     }
 
     // v2 추천 시스템 API 사용
@@ -238,7 +231,6 @@ export const fetchRecommendations = async (
     }
 
     const url = `${API_BASE_URL}/api/v2/recommendations/main-feed/personalized?${params.toString()}`
-    console.log('v2 추천 API 호출:', url)
 
     // 3초 타임아웃으로 빠른 실패 처리
     const timeoutPromise = new Promise((_, reject) =>
@@ -745,7 +737,7 @@ const fetchRegionCategorySection = async (
     // 🎯 개별 지역 섹션 API 사용 (우선순위 태그 필터링 적용됨)
     const url = `${API_BASE_URL}/api/v2/recommendations/explore/${encodeURIComponent(region)}/${category}?limit=${limit}`
 
-    console.log(`🔧 개별 섹션 API 호출: ${region}/${category}`)
+    // console.log(`개별 섹션 API 호출: ${region}/${category}`)
 
     const response = await fetch(url, { headers })
 
@@ -816,7 +808,7 @@ export const fetchAllRegionsAllCategories = async (
       availableCategories = ["restaurants", "accommodation", "nature", "shopping", "culture", "activity"]
     }
 
-    console.log(`🚀 개별 섹션 API 방식으로 데이터 로드: ${Math.min(maxRegions, availableRegions.length)}개 지역, ${availableCategories.length}개 카테고리`)
+    // console.log(`개별 섹션 API 방식으로 데이터 로드: ${Math.min(maxRegions, availableRegions.length)}개 지역, ${availableCategories.length}개 카테고리`)
 
     const sections: CitySection[] = []
     const targetRegions = availableRegions.slice(0, maxRegions)
