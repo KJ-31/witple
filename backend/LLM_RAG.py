@@ -10,9 +10,7 @@ from sqlalchemy import text
 from database import engine as shared_engine
 import sys
 import os
-import json
 import re
-# 미사용 import 제거됨 (hashlib, numpy, pickle)
 
 # AWS 설정 (환경변수 또는 AWS CLI 설정 사용)
 AWS_REGION = os.getenv('AWS_REGION')  # Bedrock이 지원되는 리전 (서울)
