@@ -1246,12 +1246,31 @@ def rag_processing_node(state: TravelState) -> TravelState:
         # 구조화된 장소 데이터 추출
         structured_places = extract_structured_places(docs)
         
+        # 디버깅: 사용 가능한 장소 목록 출력
+        print(f"🔍 사용 가능한 실제 장소 목록 ({len(structured_places)}개):")
+        for i, place in enumerate(structured_places[:10], 1):
+            place_name = place.get("name", "").strip()
+            place_category = place.get("category", "").strip()
+            print(f"   {i}. {place_name} ({place_category})")
+        
         # 개선된 여행 일정 생성 프롬프트
         # 지역 정보를 프롬프트에 포함
         region_context = f" 반드시 {', '.join(query_regions)} 지역 내의 장소만 추천하세요." if query_regions else ""
         
+        # 사용 가능한 실제 장소 목록 생성
+        available_places = []
+        for place in structured_places[:10]:  # 상위 10개만 표시
+            place_name = place.get("name", "").strip()
+            if place_name:
+                available_places.append(f"- {place_name}")
+        
+        places_list = "\n".join(available_places) if available_places else "사용 가능한 장소가 없습니다."
+        
         enhanced_prompt = ChatPromptTemplate.from_template(f"""
 당신은 여행 전문 어시스턴트입니다. 주어진 여행지 정보를 바탕으로 깔끔하고 구조화된 여행 일정을 작성해주세요.{region_context}
+
+**사용 가능한 실제 장소 목록 (이 목록에 있는 장소만 사용하세요):**
+{places_list}
 
 여행지 정보:
 {{context}}
@@ -1259,11 +1278,17 @@ def rag_processing_node(state: TravelState) -> TravelState:
 사용자 질문: {{question}}
 
 중요한 제약사항:
-- 주어진 여행지 정보에 포함된 장소들만 사용하세요
+- 위에 나열된 "사용 가능한 실제 장소 목록"에 있는 장소만 사용하세요
+- 목록에 없는 장소는 절대로 생성하거나 언급하지 마세요
 - 각 일차별로 시간대에 맞는 적절한 장소를 배치하세요
 - 같은 지역 내에서만 일정을 구성하세요
 - 정보가 없는 장소는 절대 추가하지 마세요  
 - 확실하지 않은 정보는 추측하지 마세요
+- 가상의 장소나 존재하지 않는 장소는 절대 생성하지 마세요
+- 반드시 위 목록에 명시된 실제 장소만 사용하세요
+- 식사 장소도 목록에 있는 실제 장소만 사용하세요
+- 같은 장소를 여러 번 반복 사용하지 마세요 (최대 1회만 사용)
+- 장소가 부족하면 일정을 줄이거나 시간을 조정하세요
 
 시간 배치 규칙:
 - 관광지 방문: 2-4시간 (장소 특성에 따라 조절)
@@ -1303,9 +1328,14 @@ def rag_processing_node(state: TravelState) -> TravelState:
 이 일정으로 확정하시겠어요?
 
 답변 과정:
-1. 먼저 주어진 여행지 정보에서 사용 가능한 장소들을 확인하세요
-2. 각 일차별로 시간대에 맞는 장소를 배치하세요  
-3. 정보가 없는 부분은 명시적으로 표시하세요
+1. 먼저 위의 "사용 가능한 실제 장소 목록"을 확인하세요
+2. 이 목록에 있는 장소들만으로 일정을 구성하세요
+3. 각 일차별로 시간대에 맞는 실제 장소만 배치하세요  
+4. 목록에 없는 장소는 절대로 사용하지 마세요
+5. 식사 장소도 목록에 있는 실제 장소만 사용하세요
+6. 같은 장소를 여러 번 반복 사용하지 마세요
+7. 장소가 부족하면 일정을 줄이거나 시간을 조정하세요
+8. 정보가 없는 부분은 명시적으로 표시하세요
 
 답변:
         """)
@@ -2052,40 +2082,42 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
                         "similarity_score": metadata.get('similarity_score', 0)
                     }
                 else:
-                    # DB 조회 실패 시 메타데이터 사용 (fallback)
-                    place_info = {
-                        "name": metadata.get("name", "장소명 미상"),
-                        "category": metadata.get("category", ""),
-                        "region": metadata.get("region", ""),
-                        "city": metadata.get("city", ""),
-                        "table_name": table_name,
-                        "place_id": place_id,
-                        "description": doc.page_content[:200],
-                        "similarity_score": metadata.get('similarity_score', 0)
-                    }
+                    # DB 조회 실패 시 해당 장소 제외 (가상 장소 방지)
+                    print(f"⚠️ DB에 없는 장소 제외: {metadata.get('name', 'Unknown')} (place_id: {place_id}, table_name: {table_name})")
+                    continue  # 이 장소는 건너뛰기
             else:
-                # 메타데이터가 불완전한 경우 기존 방식 사용
-                place_info = {
-                    "name": metadata.get("name", ""),
-                    "category": metadata.get("category", ""),
-                    "region": metadata.get("region", ""),
-                    "city": metadata.get("city", ""),
-                    "table_name": metadata.get("table_name", "nature"),
-                    "place_id": place_id or "unknown",  # "1" 대신 "unknown" 사용
-                    "description": doc.page_content[:200],
-                    "similarity_score": metadata.get('similarity_score', 0)
-                }
+                # 메타데이터가 불완전한 경우 DB에서 검증 후 사용
+                place_name = metadata.get("name", "").strip()
+                if place_name:
+                    # 실제 DB에서 해당 장소 검색
+                    actual_place = find_place_in_recommendations(place_name)
+                    if actual_place:
+                        place_info = {
+                            **actual_place,
+                            "description": doc.page_content[:200],
+                            "similarity_score": metadata.get('similarity_score', 0)
+                        }
+                    else:
+                        # DB에 없는 장소는 제외
+                        print(f"⚠️ DB에 없는 장소 제외 (메타데이터 불완전): {place_name}")
+                        continue
+                else:
+                    # 장소명이 없으면 제외
+                    print(f"⚠️ 장소명이 없는 문서 제외")
+                    continue
 
-            # 메타데이터에 name이 없으면 문서 내용에서 추출 (호환성 보장)
+            # 메타데이터에 name이 없으면 문서 내용에서 추출 후 DB 검증
             if not place_info["name"]:
                 content = doc.page_content
                 first_line = content.split('\n')[0] if content else ""
+                extracted_name = ""
+                
                 if first_line and len(first_line) < 50:
                     # "이름: " 접두어 제거
                     name = first_line.strip()
                     if name.startswith("이름: "):
                         name = name[3:].strip()
-                    place_info["name"] = name
+                    extracted_name = name
                 else:
                     # 패턴으로 장소명 추출
                     import re
@@ -2097,12 +2129,20 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
                     for pattern in name_patterns:
                         match = re.search(pattern, content)
                         if match:
-                            place_info["name"] = match.group(1)
+                            extracted_name = match.group(1)
                             break
 
-                    if not place_info["name"]:
-                        words = content.split()[:3]
-                        place_info["name"] = " ".join(words) if words else "장소명 미상"
+                # 추출된 장소명을 DB에서 검증
+                if extracted_name:
+                    actual_place = find_place_in_recommendations(extracted_name)
+                    if actual_place:
+                        place_info["name"] = extracted_name
+                    else:
+                        print(f"⚠️ DB에 없는 장소 제외 (문서에서 추출): {extracted_name}")
+                        continue
+                else:
+                    print(f"⚠️ 장소명 추출 실패, 문서 제외")
+                    continue
 
             # table_name이 없으면 카테고리로 매핑 (호환성 보장)
             if not place_info["table_name"] or place_info["table_name"] == "nature":
@@ -2186,14 +2226,10 @@ def extract_places_from_response(response: str, structured_places: List[dict]) -
         if best_match and best_score >= 0.2:
             if best_match not in matched_places:
                 matched_places.append(best_match)
-        elif not best_match and len(mentioned_place) >= 3:
-            # 실제 place_recommendations 테이블에서 해당 장소 검색
-            actual_place = find_place_in_recommendations(mentioned_place)
-            if actual_place:
-                matched_places.append(actual_place)
-            else:
-                # 가상 장소 생성하지 않음 - 실제 존재하는 장소만 사용
-                print(f"⚠️ 장소를 찾을 수 없습니다: {mentioned_place}")
+                print(f"✅ DB 장소 매칭: {mentioned_place} → {best_match.get('name', 'N/A')}")
+        else:
+            # structured_places에 없는 장소는 DB에서도 찾지 않음 (가상 장소 방지)
+            print(f"⚠️ DB에 없는 장소 제외: {mentioned_place}")
     
     return matched_places
 
@@ -2344,14 +2380,19 @@ def parse_day_schedule(day_content: str, structured_places: List[dict]) -> List[
                             best_score = score
                             matched_place = place
 
-            schedule_item = {
-                "time": time_range.strip() if time_range else "",
-                "place_name": place_name.strip(),
-                "description": description.strip(),
-                "category": matched_place.get("category", "") if matched_place else "",
-                "place_info": matched_place
-            }
-            schedule.append(schedule_item)
+            # 실제 DB에 있는 장소만 일정에 포함
+            if matched_place:
+                schedule_item = {
+                    "time": time_range.strip() if time_range else "",
+                    "place_name": place_name.strip(),
+                    "description": description.strip(),
+                    "category": matched_place.get("category", ""),
+                    "place_info": matched_place
+                }
+                schedule.append(schedule_item)
+                print(f"✅ 일정에 포함: {place_name.strip()} (DB 확인됨)")
+            else:
+                print(f"⚠️ 일정에서 제외: {place_name.strip()} (DB에 없음)")
 
     # 중복 제거 (같은 장소명과 시간)
     seen = set()
