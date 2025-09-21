@@ -447,14 +447,18 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         travel_plan["status"] = "confirmed"
         travel_plan["confirmed_at"] = datetime.now().isoformat()
 
-        # 확정 완료 메시지 생성
+        # 확정 완료 메시지 생성 (일수 정보 수정)
+        parsed_dates = travel_plan.get("parsed_dates", {})
+        actual_days = parsed_dates.get("days", travel_plan.get('duration', '미정'))
+        total_itinerary_days = len(travel_plan.get('days', travel_plan.get('itinerary', [])))
+
         response = f"""
 ✅ <strong>여행 일정이 확정되었습니다!</strong>
 
 📋 <strong>확정된 일정 요약</strong>
 - 🗓️ 여행 날짜: {travel_plan.get('travel_dates', '미정')}
-- ⏰ 여행 기간: {travel_plan.get('duration', '미정')}
-- 📍 총 {len(travel_plan.get('days', []))}일 일정
+- ⏰ 여행 기간: {actual_days}
+- 📍 총 {total_itinerary_days}일 일정
 - 🏛️ 방문 장소: {len(travel_plan.get('places', []))}곳
 
 🎉 즐거운 여행 되세요!
@@ -473,10 +477,137 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         day_numbers_list = []
         source_tables_list = []
 
+        # 백업 파일의 정확한 일차 배분 로직 적용
         if travel_plan.get("places"):
-            itinerary = travel_plan.get("itinerary", [])
+            print(f"🗓️ 장소 기반 일차 배분 시작: {len(travel_plan['places'])}개 장소")
+
+            # 일정 정보 (days 우선, 그 다음 itinerary)
+            itinerary = travel_plan.get("days", travel_plan.get("itinerary", []))
             total_days = len(itinerary) if itinerary else 1
 
+            print(f"🔍 일정 구조 확인:")
+            print(f"   - travel_plan.get('days'): {travel_plan.get('days')}")
+            print(f"   - travel_plan.get('itinerary'): {travel_plan.get('itinerary')}")
+            print(f"   - 사용할 itinerary: {itinerary}")
+            print(f"   - total_days: {total_days}")
+
+            # 추가: itinerary가 비어있다면 더 자세히 확인
+            if not itinerary:
+                print(f"❌ itinerary가 비어있습니다!")
+                print(f"   - travel_plan 전체 키: {list(travel_plan.keys())}")
+                for key, value in travel_plan.items():
+                    if key in ['days', 'itinerary', 'schedule']:
+                        print(f"   - {key}: {value}")
+
+                # 혹시 다른 이름으로 저장되어 있는지 확인
+                possible_keys = ['schedule', 'daily_schedule', 'day_schedule', 'plan']
+                for key in possible_keys:
+                    if travel_plan.get(key):
+                        print(f"   - 발견된 대안 키 '{key}': {travel_plan[key]}")
+                        itinerary = travel_plan[key]
+                        total_days = len(itinerary) if itinerary else 1
+                        break
+
+            if total_days == 0:
+                total_days = 1
+
+            # 정규화 함수 (백업 파일에서 가져옴)
+            def normalize_place_name(place_name: str) -> str:
+                if not place_name:
+                    return ""
+                import re
+                cleaned = re.sub(r'[^\w\s가-힣]', '', place_name)
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                suffixes = ['카페', '레스토랑', '식당', '박물관', '미술관', '공원', '해변', '시장']
+                for suffix in suffixes:
+                    if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+                        base_name = cleaned[:-len(suffix)].strip()
+                        if base_name:
+                            return base_name
+                return cleaned
+
+            # 일정에서 장소가 속한 일차 찾기 (백업 파일에서 가져옴)
+            def find_place_in_itinerary(place_name: str, itinerary: list) -> int:
+                normalized_place = normalize_place_name(place_name)
+                print(f"   🔍 '{place_name}' 매칭 시도 (정규화: '{normalized_place}')")
+
+                for day_info in itinerary:
+                    day_num = day_info.get("day", 1)
+                    print(f"      📅 {day_num}일차 스케줄 확인: {day_info.get('schedule', [])}")
+
+                    for schedule in day_info.get("schedule", []):
+                        # 여러 필드에서 장소명 찾기
+                        possible_place_names = [
+                            schedule.get("place_name", ""),
+                            schedule.get("place", ""),  # 다른 가능한 필드명
+                            schedule.get("name", ""),   # 또 다른 가능한 필드명
+                        ]
+
+                        # place_info 내부도 확인
+                        if schedule.get("place_info"):
+                            place_info = schedule["place_info"]
+                            possible_place_names.extend([
+                                place_info.get("name", ""),
+                                place_info.get("place_name", ""),
+                            ])
+
+                        for schedule_place_raw in possible_place_names:
+                            if not schedule_place_raw:
+                                continue
+
+                            schedule_place = normalize_place_name(schedule_place_raw)
+                            print(f"         🏛️ 비교: '{schedule_place_raw}' (정규화: '{schedule_place}')")
+
+                            # 정확한 매칭
+                            if normalized_place == schedule_place:
+                                print(f"         ✅ 정확 매칭! -> {day_num}일차")
+                                return day_num
+
+                            # 포함 관계 매칭
+                            if len(normalized_place) >= 2 and len(schedule_place) >= 2:
+                                if (normalized_place in schedule_place and len(normalized_place) >= len(schedule_place) * 0.5) or \
+                                   (schedule_place in normalized_place and len(schedule_place) >= len(normalized_place) * 0.5):
+                                    print(f"         ✅ 포함 매칭! -> {day_num}일차")
+                                    return day_num
+
+                print(f"   ❌ 매칭 실패: '{place_name}'")
+                return 0
+
+            # 일차별 장소 목록 추출
+            def extract_places_by_day(itinerary: list) -> dict:
+                places_by_day = {}
+                for day_info in itinerary:
+                    day_num = day_info.get("day", 1)
+                    places_by_day[day_num] = []
+                    for schedule in day_info.get("schedule", []):
+                        # 여러 필드에서 장소명 찾기
+                        possible_place_names = [
+                            schedule.get("place_name", ""),
+                            schedule.get("place", ""),
+                            schedule.get("name", ""),
+                        ]
+
+                        # place_info 내부도 확인
+                        if schedule.get("place_info"):
+                            place_info = schedule["place_info"]
+                            possible_place_names.extend([
+                                place_info.get("name", ""),
+                                place_info.get("place_name", ""),
+                            ])
+
+                        for place_name_raw in possible_place_names:
+                            if place_name_raw:
+                                place_name = normalize_place_name(place_name_raw)
+                                if place_name and place_name not in places_by_day[day_num]:
+                                    places_by_day[day_num].append(place_name)
+                                    break  # 첫 번째 유효한 장소명만 사용
+
+                return places_by_day
+
+            places_by_day = extract_places_by_day(itinerary)
+            print(f"🗓️ 일차별 장소 분석: {places_by_day}")
+
+            # 장소를 일차별로 정확하게 배치
             for idx, place in enumerate(travel_plan["places"]):
                 place_id = place.get("place_id")
                 table_name = place.get("table_name", "general_attraction")
@@ -486,17 +617,51 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
                     print(f"⚠️ place_id 없음 - 장소 '{place.get('name', 'Unknown')}' 스킵")
                     continue
 
-                # 장소 ID 생성 (table_name_place_id 형태)
                 place_identifier = f"{table_name}_{place_id}"
                 places_list.append(place_identifier)
                 source_tables_list.append(table_name)
 
-                # 일차 배정 (간단한 순서 기반)
-                day_num = (idx % max(total_days, 1)) + 1
+                # 개선된 일차 매칭
+                place_name = place.get("name", "")
+                day_num = find_place_in_itinerary(place_name, itinerary)
+
+                # 매칭되지 않은 경우 처리
+                if day_num == 0:
+                    print(f"⚠️ '{place_name}' 매칭 실패, 대안 방법 시도")
+                    category = place.get("category", "")
+
+                    # 식사 장소는 기존 식사 시간대가 있는 일차에 배치
+                    if "식당" in category or "맛집" in category or "음식" in category:
+                        for day_info in itinerary:
+                            for schedule in day_info.get("schedule", []):
+                                if any(keyword in schedule.get("description", "") for keyword in ["점심", "저녁", "식사"]):
+                                    day_num = day_info.get("day", 1)
+                                    break
+                            if day_num > 0:
+                                break
+
+                    # 여전히 매칭되지 않으면 최소 장소가 있는 일차에 배치
+                    if day_num == 0:
+                        if places_by_day:
+                            min_places_day = min(places_by_day.keys(), key=lambda x: len(places_by_day[x]))
+                            day_num = min_places_day
+                        else:
+                            # 매칭 실패 - 이 경우는 파싱이 제대로 안 된 것
+                            print(f"   ❌ 파싱된 일정이 없어서 매칭 불가!")
+                            day_num = 1
+
+                    print(f"📍 '{place_name}' -> {day_num}일차 배치")
+
                 day_numbers_list.append(str(day_num))
+                print(f"✅ 장소 처리: {place_name} -> {place_identifier} (day {day_num})")
 
-                print(f"✅ 장소 처리: {place.get('name')} -> {place_identifier} (day {day_num})")
 
+        else:
+            print(f"❌ 처리할 장소 정보가 없습니다:")
+            print(f"   - travel_plan.get('places'): {travel_plan.get('places')}")
+            print(f"   - travel_plan keys: {list(travel_plan.keys()) if travel_plan else 'None'}")
+
+        if places_list:
             print(f"🗺️ 지도 표시용 장소 구성 완료:")
             print(f"   장소 목록: {places_list[:5]}{'...' if len(places_list) > 5 else ''}")
             print(f"   일차 배정: {day_numbers_list[:5]}{'...' if len(day_numbers_list) > 5 else ''}")
@@ -530,8 +695,10 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
             days = int(days_match.group(1)) if days_match else 2
 
             start_date = datetime.now().strftime('%Y-%m-%d')
+            # 수정: days-1이 아니라 days로 정확한 종료일 계산
             end_date = (datetime.now() + timedelta(days=days-1)).strftime('%Y-%m-%d')
             print(f"⚠️ 기본 날짜 사용 (오늘 기준): {start_date} ~ {end_date} ({days}일)")
+            print(f"🔍 날짜 계산 확인: {days}일간 = {start_date} ~ {end_date}")
 
         # URL 파라미터 생성
         if places_list:

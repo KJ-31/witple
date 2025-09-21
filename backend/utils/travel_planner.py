@@ -94,29 +94,68 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
             "places": []
         }
 
-        # 일별 계획 파싱
-        day_pattern = r'\*\*(\d+일차|Day\s*\d+)\*\*|(\d+일차:|Day\s*\d+:)'
-        day_matches = list(re.finditer(day_pattern, response, re.IGNORECASE))
+        # 일차별 구조 파싱 (더 유연한 패턴 - LLM_RAG_backup.py에서 가져옴)
+        day_patterns = [
+            r'<strong>\[(\d+)일차\]</strong>',  # <strong>[1일차]</strong>
+            r'\[(\d+)일차\]',                    # [1일차]
+            r'(\d+)일차',                        # 1일차
+            r'<strong>(\d+)일차</strong>',       # <strong>1일차</strong>
+            r'\*\*(\d+일차|Day\s*\d+)\*\*',     # 기존 패턴도 포함
+            r'(\d+일차:|Day\s*\d+:)'            # 기존 패턴도 포함
+        ]
 
-        if day_matches:
-            for i, match in enumerate(day_matches):
-                day_start = match.end()
-                day_end = day_matches[i + 1].start() if i + 1 < len(day_matches) else len(response)
-                day_content = response[day_start:day_end].strip()
+        # 가장 많이 매칭되는 패턴 사용
+        best_pattern = None
+        best_matches = []
+        for pattern in day_patterns:
+            matches = re.findall(pattern, response)
+            if len(matches) > len(best_matches):
+                best_matches = matches
+                best_pattern = pattern
 
-                day_num = i + 1
-                day_schedule = parse_day_schedule(day_content, structured_places)
+        print(f"🔍 일차 패턴 매칭 결과:")
+        for i, pattern in enumerate(day_patterns):
+            matches = re.findall(pattern, response)
+            print(f"   패턴 {i+1}: {pattern} -> {len(matches)}개 매칭")
 
-                if day_schedule:
-                    plan["days"].append({
-                        "day": day_num,
-                        "schedule": day_schedule
-                    })
-
-                    # 개별 장소도 places 배열에 추가
-                    for item in day_schedule:
-                        if item.get("place_info"):
-                            plan["places"].append(item["place_info"])
+        if best_pattern and best_matches:
+            print(f"🗓️ 일차 패턴 인식: {len(best_matches)}개 일차 발견 (패턴: {best_pattern})")
+            # 응답을 일차별로 분할
+            day_sections = re.split(best_pattern, response)
+            for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 일차 번호, 짝수가 내용
+                if i + 1 < len(day_sections):
+                    day_num_str = day_sections[i]
+                    day_content = day_sections[i + 1]
+                    try:
+                        day_num = int(day_num_str)
+                    except ValueError:
+                        continue
+                    print(f"📅 {day_num}일차 파싱 중...")
+                    # 해당 일차의 일정 파싱
+                    day_schedule = parse_day_schedule(day_content, structured_places)
+                    if day_schedule:  # 일정이 있을 때만 추가
+                        plan["days"].append({
+                            "day": day_num,
+                            "schedule": day_schedule
+                        })
+                        print(f"   ✅ {day_num}일차: {len(day_schedule)}개 일정 파싱됨")
+                        # 개별 장소도 places 배열에 추가
+                        for item in day_schedule:
+                            if item.get("place_info"):
+                                plan["places"].append(item["place_info"])
+        else:
+            print(f"⚠️ 일차 패턴 인식 실패, 단일 일정으로 처리")
+            # 일차 구분 없이 전체를 하나의 일정으로 처리
+            single_day_schedule = parse_day_schedule(response, structured_places)
+            if single_day_schedule:
+                plan["days"].append({
+                    "day": 1,
+                    "schedule": single_day_schedule
+                })
+                # 개별 장소도 places 배열에 추가
+                for item in single_day_schedule:
+                    if item.get("place_info"):
+                        plan["places"].append(item["place_info"])
 
         # 장소가 없으면 전체 응답에서 추출
         if not plan["places"] and structured_places:
