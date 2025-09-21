@@ -242,13 +242,13 @@ def rag_processing_node(state: TravelState) -> TravelState:
 
 다음 형식으로 답변해주세요:
 
-<strong>[지역명] [기간] 여행 일정</strong>
+<strong>[지역명] [기간] 여행 일정</strong><br>
 
 <strong>[1일차]</strong>
 • 09:00-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
 • 12:00-13:00 <strong>식당명</strong> - 음식 종류 점심 <br>
 • XX:XX-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
-• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁 <br>
+• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁 <br><br>
 
 <strong>[2일차]</strong> (기간에 따라 추가)
 ...
@@ -298,6 +298,17 @@ def rag_processing_node(state: TravelState) -> TravelState:
         print(f"✅ RAG 처리 완료. 결과 길이: {len(formatted_response)}")
         print(f"   추출된 장소 수: {len(structured_places)}")
 
+        # 디버깅: travel_plan 상태 확인
+        print(f"🔍 RAG 처리 완료 - travel_plan 상태:")
+        print(f"   - travel_plan 타입: {type(travel_plan)}")
+        print(f"   - travel_plan 길이: {len(travel_plan) if isinstance(travel_plan, dict) else 'N/A'}")
+        if isinstance(travel_plan, dict):
+            print(f"   - travel_plan keys: {list(travel_plan.keys())}")
+            print(f"   - days 존재: {'days' in travel_plan}")
+            print(f"   - days 길이: {len(travel_plan.get('days', []))}")
+            print(f"   - places 존재: {'places' in travel_plan}")
+            print(f"   - places 길이: {len(travel_plan.get('places', []))}")
+
         # 최종 state 반환
         final_state = {
             **state,
@@ -309,6 +320,7 @@ def rag_processing_node(state: TravelState) -> TravelState:
             "formatted_ui_response": formatted_ui_response
         }
 
+        print(f"✅ RAG 처리 최종 state 생성 - travel_plan이 포함됨: {'travel_plan' in final_state}")
         return final_state
 
     except Exception as e:
@@ -435,8 +447,22 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
     """확정 처리 노드"""
     print(f"🎯 여행 일정 확정 처리 시작")
 
+    # 디버깅: state 내용 확인
+    print(f"🔍 확정 처리 state 디버깅:")
+    print(f"   - state keys: {list(state.keys())}")
+    print(f"   - travel_plan 존재: {'travel_plan' in state}")
+
+    if 'travel_plan' in state:
+        travel_plan = state['travel_plan']
+        print(f"   - travel_plan 타입: {type(travel_plan)}")
+        print(f"   - travel_plan 길이: {len(travel_plan) if isinstance(travel_plan, dict) else 'N/A'}")
+        print(f"   - travel_plan keys: {list(travel_plan.keys()) if isinstance(travel_plan, dict) else 'N/A'}")
+    else:
+        print(f"   - travel_plan이 state에 없음!")
+
     travel_plan = state.get("travel_plan", {})
     if not travel_plan:
+        print(f"❌ travel_plan이 비어있습니다!")
         return {
             **state,
             "conversation_context": "확정할 여행 일정이 없습니다. 먼저 여행 일정을 요청해주세요."
@@ -461,8 +487,8 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 - 📍 총 {total_itinerary_days}일 일정
 - 🏛️ 방문 장소: {len(travel_plan.get('places', []))}곳
 
-🎉 즐거운 여행 되세요!
-
+🎉 즐거운 여행 되세요!<br>
+잠시후 지도 페이지로 이동합니다.<br>
 더 궁금한 점이 있으시면 언제든 말씀해주세요.
 """
 

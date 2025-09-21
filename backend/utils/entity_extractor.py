@@ -44,12 +44,15 @@ def detect_query_entities(query: str, llm, _db_catalogs: dict) -> dict:
 - "이번 주말" → "이번 주말" (그대로 유지)
 - "다음 달" → "다음 달" (그대로 유지)
 - "2025-10-04" → "2025-10-04" (이미 형식화된 경우 그대로)
+- "25.10.04" -> "2025-10-04" (.은 -로 대치하여 날짜 표기)
 
 예시:
-- "부산 2박3일 10월 4일부터" → {{"regions": ["부산광역시"], "cities": ["부산"], "categories": [], "keywords": ["2박3일"], "intent": "travel_planning", "travel_type": "general", "duration": "2박3일", "travel_dates": "2025-10-04"}}
+- "부산 2박3일 10월 4일부터" → {{"regions": ["부산광역시"], "cities": ["부산"], "categories": [], "keywords": ["2박3일"], "intent": "travel_planning", "travel_type": "general", "duration": "2박3일", "travel_dates": "2025-10-04 - 2025-10-06"}}
 - "제주도 이번 주말" → {{"regions": ["제주특별자치도"], "cities": ["제주"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "이번 주말"}}
 - "강릉 3일간 여행" → {{"regions": ["강원도"], "cities": ["강릉"], "categories": [], "keywords": ["3일간"], "intent": "travel_planning", "travel_type": "general", "duration": "3일", "travel_dates": "미정"}}
-- "서울 12월 25일부터 27일까지" → {{"regions": ["서울특별시"], "cities": ["서울"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "2025-12-25부터 2025-12-27까지"}}
+- "서울 12월 25일부터 27일까지" → {{"regions": ["서울특별시"], "cities": ["서울"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "2025-12-25 - 2025-12-27"}}
+- "전주 12월 25일 ~ 12월 27일" → {{"regions": ["전라북도"], "cities": ["전주"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "2025-12-25 - 2025-12-27"}}
+- "대전 12월 25일 - 12월 27일" → {{"regions": ["대전"], "cities": ["대전광역시"], "categories": [], "keywords": [], "intent": "travel_planning", "travel_type": "general", "duration": "미정", "travel_dates": "2025-12-25 - 2025-12-27"}}
 """)
 
         entity_chain = entity_extraction_prompt | llm
