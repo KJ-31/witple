@@ -10,27 +10,43 @@ import re
 # LLM_RAG.py를 임포트하기 위해 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+# 필수 유틸리티 함수들은 항상 import (에러 발생 시에도 사용 가능)
 try:
-    from LLM_RAG import (
-        get_travel_recommendation_langgraph,
-        current_travel_state,
-        get_current_travel_state_ref
-    )
+    from utils.date_parser import parse_travel_dates
+    from utils.response_formatter import process_response_for_frontend
+    print("✅ Utils modules imported successfully")
+except ImportError as e:
+    print(f"❌ Critical error: Could not import utils: {e}")
+    # 기본 함수 정의
+    def parse_travel_dates(text):
+        return {"startDate": None, "endDate": None, "days": None}
+
+    def process_response_for_frontend(response):
+        return response.replace('\n', '<br>'), response.split('\n')
+
+try:
+    from LLM_RAG import get_travel_recommendation_langgraph
+    from core.workflow_manager import get_workflow_manager
     print("✅ LLM_RAG module imported successfully")
     print(f"🔧 get_travel_recommendation_langgraph 함수: {get_travel_recommendation_langgraph is not None}")
+
+    # 워크플로우 매니저에서 상태 관리 함수들 가져오기
+    workflow_manager = get_workflow_manager()
+    get_current_travel_state_ref = workflow_manager.get_current_travel_state_ref
+
 except ImportError as e:
     print(f"❌ Warning: Could not import LLM_RAG module: {e}")
     print("This is likely due to missing dependencies (langchain_aws, boto3, etc.)")
     import traceback
     traceback.print_exc()
     get_travel_recommendation_langgraph = None
-    current_travel_state = None
+    get_current_travel_state_ref = None
 except Exception as e:
     print(f"❌ Error initializing LLM_RAG module: {e}")
     import traceback
     traceback.print_exc()
     get_travel_recommendation_langgraph = None
-    current_travel_state = None
+    get_current_travel_state_ref = None
 
 router = APIRouter()
 
@@ -87,19 +103,7 @@ def get_cached_full_response(cache_instance, query: str) -> Optional[dict]:
         print(f"⚠️ 전체 캐시 조회 오류: {e}")
         return None
 
-def process_response_for_frontend(response: str) -> tuple[str, List[str]]:
-    """프론트엔드에서 쉽게 처리할 수 있도록 응답을 여러 형태로 변환"""
-    
-    # HTML 형태 변환 (\n -> <br>)
-    response_html = response.replace('\n', '<br>')
-    
-    # 줄별 배열 형태 변환
-    response_lines = []
-    for line in response.split('\n'):
-        # 빈 줄은 유지하되 공백 문자열로 변환
-        response_lines.append(line.strip() if line.strip() else "")
-    
-    return response_html, response_lines
+# process_response_for_frontend moved to utils/response_formatter.py
 
 class ChatMessage(BaseModel):
     message: str
@@ -157,59 +161,44 @@ async def chat_with_llm(chat_message: ChatMessage):
         # LangGraph 사용
         if get_travel_recommendation_langgraph:
             print("🚀 Using LangGraph workflow for enhanced travel recommendation")
-            
-            # 간단한 세션 ID (실제로는 사용자별 고유 ID 사용)
-            # 현재는 데모용으로 고정 세션 ID 사용
-            session_id = "demo_session"
-            
-            result = await get_travel_recommendation_langgraph(chat_message.message, session_id=session_id)
 
-            print(f"✅ LangGraph result: {result.get('response', '')[:100]}...")
+            result = await get_travel_recommendation_langgraph(chat_message.message)
 
-            response_text = result.get('response', '응답을 생성할 수 없습니다.')
+            print(f"✅ LangGraph result: {result.get('content', '')[:100]}...")
+
+            response_text = result.get('content', '응답을 생성할 수 없습니다.')
             response_html, response_lines = process_response_for_frontend(response_text)
 
-            # tool_results에서 redirect_url과 places 정보 추출
-            tool_results = result.get('raw_state', {}).get('tool_results', {})
-
-            # 디버깅: parsed_dates 전달 확인
-            raw_state = result.get('raw_state', {})
+            # 새로운 구조에서 데이터 추출
             travel_plan = result.get('travel_plan', {})
+            formatted_ui_response = result.get('formatted_ui_response', {})
 
             print(f"🔍 === API 응답 디버깅 ===")
-            print(f"🔍 raw_state에서 travel_dates: {raw_state.get('travel_dates')}")
-            print(f"🔍 raw_state에서 parsed_dates: {raw_state.get('parsed_dates')}")
-            print(f"🔍 travel_plan에서 travel_dates: {travel_plan.get('travel_dates')}")
-            print(f"🔍 travel_plan에서 parsed_dates: {travel_plan.get('parsed_dates')}")
-            print(f"🔍 result.get('travel_plan'): {result.get('travel_plan', {})}")
+            print(f"🔍 result content: {result.get('content', '')[:100]}...")
+            print(f"🔍 result type: {result.get('type')}")
+            print(f"🔍 travel_plan: {travel_plan}")
 
-            # Redis 캐싱 제거됨 - 실시간 응답만 제공
-
-            # parsed_dates를 최상위 레벨에서 우선 가져오고, 없으면 다른 곳에서 가져오기
-            parsed_dates_from_result = result.get('parsed_dates')
-            parsed_dates_from_plan = travel_plan.get('parsed_dates')
-            parsed_dates_from_state = raw_state.get('parsed_dates')
-            final_parsed_dates = parsed_dates_from_result or parsed_dates_from_plan or parsed_dates_from_state
+            # 날짜 정보 추출
+            travel_dates = travel_plan.get('travel_dates', '')
+            parsed_dates = travel_plan.get('parsed_dates', {})
 
             print(f"🔍 ChatResponse 생성:")
-            print(f"   - parsed_dates_from_result: {parsed_dates_from_result}")
-            print(f"   - parsed_dates_from_plan: {parsed_dates_from_plan}")
-            print(f"   - parsed_dates_from_state: {parsed_dates_from_state}")
-            print(f"   - final_parsed_dates: {final_parsed_dates}")
+            print(f"   - travel_dates: {travel_dates}")
+            print(f"   - parsed_dates: {parsed_dates}")
 
             return ChatResponse(
                 response=response_text,
-                success=result.get('success', True),
-                travel_plan=result.get('travel_plan', {}),
-                action_required=result.get('action_required'),
-                error=result.get('error'),
-                formatted_response=result.get('raw_state', {}).get('formatted_ui_response'),
+                success=result.get('type') != 'error',
+                travel_plan=travel_plan,
+                action_required=None,  # 새로운 구조에서는 미사용
+                error=result.get('content') if result.get('type') == 'error' else None,
+                formatted_response=formatted_ui_response,
                 response_html=response_html,
                 response_lines=response_lines,
-                redirect_url=tool_results.get('redirect_url'),
-                places=tool_results.get('places'),
-                travel_dates=result.get('travel_dates') or travel_plan.get('travel_dates') or raw_state.get('travel_dates'),
-                parsed_dates=final_parsed_dates
+                redirect_url=None,  # 새로운 구조에서는 미사용
+                places=travel_plan.get('places', []),
+                travel_dates=travel_dates,
+                parsed_dates=parsed_dates
             )
         
         else:
@@ -321,7 +310,6 @@ class TravelPlanData(BaseModel):
     plan_id: Optional[str] = None
     created_at: Optional[str] = None
     total_places: Optional[int] = None
-    confidence_score: Optional[float] = None
 
 class TravelPlanResponse(BaseModel):
     """여행 일정 응답 모델"""
@@ -384,9 +372,8 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
             print(f"📅 parsed_dates가 비어있음, travel_dates 확인 중...")
             if plan_data.travel_dates and plan_data.travel_dates != "미정":
                 print(f"📅 travel_dates에서 재파싱 시도: '{plan_data.travel_dates}'")
-                # LLM_RAG의 parse_travel_dates 함수 import 필요
+                # parse_travel_dates는 이미 위에서 import됨
                 try:
-                    from LLM_RAG import parse_travel_dates
 
                     parsed_dates = parse_travel_dates(plan_data.travel_dates, plan_data.duration)
                     print(f"📅 재파싱 결과: {parsed_dates}")
@@ -429,6 +416,11 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
         # 상세 확정 메시지 생성
         places_summary = ""
         if plan_data.places:
+            print(f"🔍 === 확정시 장소 데이터 분석 ===")
+            print(f"📍 전달받은 장소 수: {len(plan_data.places)}개")
+            for i, place in enumerate(plan_data.places[:5]):
+                print(f"  {i+1}. {place.name} (카테고리: {getattr(place, 'category', 'N/A')})")
+
             place_names = [place.name for place in plan_data.places[:3]]
             places_summary = f"주요 방문지: {', '.join(place_names)}"
             if len(plan_data.places) > 3:
@@ -440,7 +432,6 @@ async def confirm_travel_plan(plan_data: TravelPlanData):
 📋 **확정 정보:**
 • 일정 수: {len(plan_data.itinerary)}일
 • {places_summary}
-• 신뢰도: {f"{plan_data.confidence_score:.2f}" if plan_data.confidence_score else "N/A"}
 
 ✈️ 여행 계획 페이지로 이동하여 세부 조정을 진행하세요!
         """.strip()
@@ -540,21 +531,26 @@ async def clear_current_travel_state():
     현재 여행 상태 초기화
     """
     try:
-        if current_travel_state is None:
+        if get_current_travel_state_ref is None:
             return {
                 "success": False,
                 "message": "여행 상태 시스템이 초기화되지 않았습니다."
             }
 
-        # 상태 초기화
-        current_travel_state.clear()
-        current_travel_state.update({
-            "last_query": "",
-            "travel_plan": {},
-            "places": [],
-            "context": "",
-            "timestamp": None
-        })
+        # 워크플로우 매니저를 통해 상태 초기화
+        if 'workflow_manager' in globals():
+            workflow_manager.reset_travel_state()
+        else:
+            # 직접 상태 초기화
+            current_travel_state = get_current_travel_state_ref()
+            current_travel_state.clear()
+            current_travel_state.update({
+                "last_query": "",
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": None
+            })
 
         return {
             "success": True,
