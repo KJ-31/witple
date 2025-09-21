@@ -219,18 +219,33 @@ def _fallback_intent_classification(query: str, has_travel_plan: bool = False) -
     ]
     strong_confirmation = ["확정", "결정", "이걸로", "ok", "오케이", "확인", "yes"]
     
-    if has_travel_plan and any(word in query_lower for word in confirmation_keywords):
+    # 확정 키워드 감지 (기존 여행 계획이 없어도 감지)
+    if any(word in query_lower for word in confirmation_keywords):
         confirmation_type = "strong" if any(word in query_lower for word in strong_confirmation) else "weak"
         matched_keywords = [word for word in confirmation_keywords if word in query_lower]
         print(f"🎯 확정 키워드 감지: {matched_keywords} (타입: {confirmation_type})")
-        return {
-            "primary_intent": "confirmation",
-            "secondary_intent": "none",
-            "confidence_level": "high" if confirmation_type == "strong" else "medium",
-            "confirmation_type": confirmation_type,
-            "requires_rag": False,
-            "requires_search": False
-        }
+        
+        # 기존 여행 계획이 있으면 확정 처리, 없으면 안내 메시지
+        if has_travel_plan:
+            print(f"✅ 기존 여행 계획 있음 - 확정 처리 진행")
+            return {
+                "primary_intent": "confirmation",
+                "secondary_intent": "none",
+                "confidence_level": "high" if confirmation_type == "strong" else "medium",
+                "confirmation_type": confirmation_type,
+                "requires_rag": False,
+                "requires_search": False
+            }
+        else:
+            print(f"⚠️ 확정 의도 감지되었지만 기존 여행 계획 없음 - 안내 메시지")
+            return {
+                "primary_intent": "confirmation",
+                "secondary_intent": "no_plan",
+                "confidence_level": "high" if confirmation_type == "strong" else "medium",
+                "confirmation_type": confirmation_type,
+                "requires_rag": False,
+                "requires_search": False
+            }
 
     # 새로운 여행 요청 감지 (개선된 로직)
     travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러", "구경", "관광"]
@@ -1549,7 +1564,23 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 
     # 여전히 여행 일정이 없으면 안내 메시지
     if not current_travel_plan:
-        response = """
+        # 확정 의도가 감지되었지만 여행 계획이 없는 경우
+        if state.get("secondary_intent") == "no_plan":
+            response = """
+🤔 <strong>확정하고 싶으신 여행 일정이 없는 것 같아요!</strong>
+
+📝 <strong>확정 절차</strong>:
+1. 먼저 여행 일정을 요청해주세요
+   예: "제주도 1박 2일 여행 추천해줘"
+2. 생성된 일정을 확인하신 후
+3. "확정", "좋아", "이걸로 해줘" 등으로 확정 의사를 표현해주세요
+
+✈️ 그러면 바로 지도에서 여행지를 확인하실 수 있어요!
+
+💡 지금 바로 어떤 여행 일정을 원하시는지 말씀해주세요!
+            """.strip()
+        else:
+            response = """
 🤔 <strong>확정하고 싶으신 여행 일정이 없는 것 같아요!</strong>
 
 📝 <strong>확정 절차</strong>:
@@ -1561,7 +1592,7 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 ✈️ 그러면 바로 지도에서 여행지를 확인하실 수 있어요!
 
 💡 지금 바로 어떤 여행 일정을 원하시는지 말씀해주세요!
-        """.strip()
+            """.strip()
         
         return {
             **state,
@@ -2633,8 +2664,16 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
             })
         else:
             print("💾 기존 상태 유지")
-            current_travel_state["last_query"] = query
-            current_travel_state["timestamp"] = "auto"
+            # 기존 상태를 유지하면서 last_query만 업데이트
+            if "last_query" in current_travel_state:
+                current_travel_state["last_query"] = query
+            if "timestamp" in current_travel_state:
+                current_travel_state["timestamp"] = "auto"
+            
+            # 확정 요청일 때는 기존 여행 계획이 있는지 확인하고 복원
+            if is_confirmation and not current_travel_state.get("travel_plan"):
+                print("⚠️ 확정 요청이지만 기존 여행 계획이 없음 - 상태 복원 시도")
+                # 최근 생성된 여행 계획이 있다면 복원 (실제로는 세션 기반으로 관리해야 함)
 
         # 전역 상태에서 기존 여행 계획 가져오기
         existing_travel_plan = current_travel_state.get("travel_plan", {})
@@ -2660,8 +2699,8 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
         # 워크플로우 실행 (비동기)
         final_state = await travel_workflow.ainvoke(initial_state)
 
-        # 전역 상태 업데이트 (새 추천으로 덮어쓰기)
-        if final_state.get("travel_plan"):
+        # 전역 상태 업데이트 (새 추천으로 덮어쓰기 또는 확정 처리)
+        if final_state.get("travel_plan") or final_state.get("need_confirmation"):
             # places는 tool_results가 아닌 travel_plan에서 직접 가져오기
             places = []
             if final_state.get("tool_results", {}).get("places"):
@@ -2671,14 +2710,17 @@ async def get_travel_recommendation_langgraph(query: str, conversation_history: 
                 # 일반 여행 추천 시 travel_plan에서 places 가져오기
                 places = final_state.get("travel_plan", {}).get("places", [])
 
+            # 확정 처리 시에는 기존 travel_plan 유지
+            travel_plan_to_save = final_state.get("travel_plan", {}) or existing_travel_plan
+
             current_travel_state.update({
-                "travel_plan": final_state.get("travel_plan", {}),
+                "travel_plan": travel_plan_to_save,
                 "places": places,
                 "context": final_state.get("conversation_context", ""),
                 "last_query": query,
                 "timestamp": "auto"
             })
-            print(f"💾 새로운 여행 상태 저장 완료: {len(places)}개 장소")
+            print(f"💾 여행 상태 저장 완료: {len(places)}개 장소 (확정: {final_state.get('need_confirmation', False)})")
         
         # 구조화된 응답 반환
         tool_results = final_state.get("tool_results", {})
