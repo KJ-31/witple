@@ -34,7 +34,9 @@ def extract_structured_places(docs: List[Document]) -> List[dict]:
                 "tags": [],
                 "coordinates": metadata.get("coordinates", ""),
                 "similarity_score": metadata.get("similarity_score", 0),
-                "search_method": metadata.get("search_method", "")
+                "search_method": metadata.get("search_method", ""),
+                "place_id": metadata.get("place_id", ""),
+                "table_name": metadata.get("table_name", "")
             }
 
             # 장소명 추출 (첫 번째 줄 또는 "이름:" 필드)

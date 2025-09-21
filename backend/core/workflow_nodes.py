@@ -32,6 +32,7 @@ class TravelState(TypedDict):
     rag_results: List[Document]
     travel_dates: str
     parsed_dates: dict
+    tool_results: dict
 
 
 def classify_query(state: TravelState) -> TravelState:
@@ -241,21 +242,23 @@ def rag_processing_node(state: TravelState) -> TravelState:
 
 다음 형식으로 답변해주세요:
 
-<strong>🗓️ [지역명] [기간] 여행 일정</strong>
+<strong>[지역명] [기간] 여행 일정</strong>
 
-<strong>1일차</strong>
-- 09:00 - <strong>[장소명]</strong>  장소 설명
-- 12:00 - <strong>[점심 장소]</strong>  음식 설명
-- 14:00 - <strong>[오후 활동]</strong>  활동 설명
-- 18:00 - <strong>[저녁 장소]</strong>  저녁 설명
+<strong>[1일차]</strong>
+• 09:00-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
+• 12:00-13:00 <strong>식당명</strong> - 음식 종류 점심 <br>
+• XX:XX-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
+• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁 <br>
 
-<strong>2일차</strong> (기간에 따라)
+<strong>[2일차]</strong> (기간에 따라 추가)
 ...
 
-<strong>💡 여행 팁</strong>
-- [실용적인 팁 1]
-- [실용적인 팁 2]
-- [실용적인 팁 3]
+시간 표시 규칙:
+- 시작시간은 명시하되, 종료시간은 활동 특성에 따라 유동적으로 설정
+- 각 활동 옆에 예상 소요시간을 괄호로 표시
+- 다음 활동 시작 전 충분한 여유시간 확보
+
+💡 <strong>여행 팁</strong>: 지역 특색이나 주의사항
 
 이 일정으로 확정하시겠어요?
 
@@ -460,52 +463,88 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 """
 
         # 도구 실행 결과 추가 (리다이렉트용)
-        # 지도 페이지로 리다이렉트할 URL 생성
-        redirect_url = "/map"
+        # 지도 페이지로 리다이렉트할 URL 생성 (실제 지도 페이지 형식에 맞춰)
+        import urllib.parse
+        from datetime import timedelta
+        import re
 
-        # URL 파라미터 구성
-        url_params = []
+        # 지도 표시를 위한 장소 파라미터 구성
+        places_list = []
+        day_numbers_list = []
+        source_tables_list = []
 
-        # places 배열에서 region과 city 정보 추출
-        region = None
-        city = None
         if travel_plan.get("places"):
-            # 첫 번째 장소에서 지역 정보 추출
-            first_place = travel_plan["places"][0] if travel_plan["places"] else {}
-            region = first_place.get("region")
-            city = first_place.get("city")
+            itinerary = travel_plan.get("itinerary", [])
+            total_days = len(itinerary) if itinerary else 1
 
-        # 기본 파라미터
-        if region:
-            url_params.append(f"region={region}")
-        if city:
-            url_params.append(f"city={city}")
-        if travel_plan.get("duration"):
-            url_params.append(f"duration={travel_plan['duration']}")
+            for idx, place in enumerate(travel_plan["places"]):
+                place_id = place.get("place_id")
+                table_name = place.get("table_name", "general_attraction")
 
-        # 날짜 파라미터 (parsed_dates 형식 사용)
-        if travel_plan.get("parsed_dates"):
+                # place_id가 없거나 "1"이면 스킵
+                if not place_id or place_id == "1":
+                    print(f"⚠️ place_id 없음 - 장소 '{place.get('name', 'Unknown')}' 스킵")
+                    continue
+
+                # 장소 ID 생성 (table_name_place_id 형태)
+                place_identifier = f"{table_name}_{place_id}"
+                places_list.append(place_identifier)
+                source_tables_list.append(table_name)
+
+                # 일차 배정 (간단한 순서 기반)
+                day_num = (idx % max(total_days, 1)) + 1
+                day_numbers_list.append(str(day_num))
+
+                print(f"✅ 장소 처리: {place.get('name')} -> {place_identifier} (day {day_num})")
+
+            print(f"🗺️ 지도 표시용 장소 구성 완료:")
+            print(f"   장소 목록: {places_list[:5]}{'...' if len(places_list) > 5 else ''}")
+            print(f"   일차 배정: {day_numbers_list[:5]}{'...' if len(day_numbers_list) > 5 else ''}")
+            print(f"   테이블 목록: {source_tables_list[:5]}{'...' if len(source_tables_list) > 5 else ''}")
+
+        # 날짜 계산
+        start_date = ""
+        end_date = ""
+        days = 2  # 기본값
+
+        if travel_plan.get("parsed_dates") and travel_plan["parsed_dates"].get("startDate"):
             parsed_dates = travel_plan["parsed_dates"]
-            if parsed_dates.get("startDate"):
-                url_params.append(f"startDate={parsed_dates['startDate']}")
-            if parsed_dates.get("endDate"):
-                url_params.append(f"endDate={parsed_dates['endDate']}")
-            if parsed_dates.get("days"):
-                url_params.append(f"days={parsed_dates['days']}")
-        elif travel_plan.get("travel_dates", "미정") != "미정":
-            url_params.append(f"dates={travel_plan['travel_dates']}")
+            start_date = parsed_dates.get("startDate", "")
+            end_date = parsed_dates.get("endDate", "")
 
-        # 장소 정보
-        if travel_plan.get("places"):
-            place_names = [place.get("name", "") for place in travel_plan["places"] if place.get("name")]
-            if place_names:
-                url_params.append(f"places={','.join(place_names[:5])}")  # 최대 5개만
+            # days 필드 안전 처리 (빈 문자열이나 None인 경우 기본값 사용)
+            days_value = parsed_dates.get("days", 2)
+            if isinstance(days_value, str) and days_value.strip() == "":
+                days = 2  # 기본값
+            else:
+                try:
+                    days = int(days_value)
+                except (ValueError, TypeError):
+                    days = 2  # 변환 실패시 기본값
 
-        if url_params:
-            redirect_url += "?" + "&".join(url_params)
+            print(f"✅ parsed_dates 사용: {start_date} ~ {end_date} ({days}일)")
+        else:
+            # 기본 방식: 오늘 기준으로 생성
+            duration_str = travel_plan.get("duration", "2박3일")
+            days_match = re.search(r'(\d+)일', duration_str)
+            days = int(days_match.group(1)) if days_match else 2
 
-        print(f"🔗 생성된 redirect_url: {redirect_url}")
-        print(f"🔍 URL 파라미터 디버깅 - region: {region}, city: {city}, duration: {travel_plan.get('duration')}")
+            start_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = (datetime.now() + timedelta(days=days-1)).strftime('%Y-%m-%d')
+            print(f"⚠️ 기본 날짜 사용 (오늘 기준): {start_date} ~ {end_date} ({days}일)")
+
+        # URL 파라미터 생성
+        if places_list:
+            places_param = ','.join(places_list)
+            day_numbers_param = ','.join(day_numbers_list)
+            source_tables_param = ','.join(source_tables_list)
+            redirect_url = f"/map?places={urllib.parse.quote(places_param)}&dayNumbers={urllib.parse.quote(day_numbers_param)}&sourceTables={urllib.parse.quote(source_tables_param)}&startDate={start_date}&endDate={end_date}&days={days}&baseAttraction=general"
+        else:
+            # 장소가 없으면 기본 지도 페이지로
+            redirect_url = f"/map?startDate={start_date}&endDate={end_date}&days={days}&baseAttraction=general"
+
+        print(f"🔗 생성된 redirect_url: {redirect_url[:100]}{'...' if len(redirect_url) > 100 else ''}")
+        print(f"🔍 URL 파라미터 디버깅 - places: {len(places_list)}개, days: {days}")
 
         tool_results = {
             "action": "redirect_to_planning_page",
@@ -546,9 +585,12 @@ def integrate_response_node(state: TravelState) -> TravelState:
     # tool_results가 있으면 redirect_url 정보 추가
     tool_results = state.get("tool_results")
     redirect_url = None
+    print(f"🔍 integrate_response - tool_results: {tool_results}")
     if tool_results and tool_results.get("redirect_url"):
         redirect_url = tool_results["redirect_url"]
         print(f"🔗 리다이렉트 URL 포함됨: {redirect_url}")
+    else:
+        print(f"⚠️ tool_results 없음 또는 redirect_url 없음")
 
     print(f"✅ 응답 통합 완료")
 
@@ -560,5 +602,9 @@ def integrate_response_node(state: TravelState) -> TravelState:
     # redirect_url이 있으면 state에 포함
     if redirect_url:
         response_state["redirect_url"] = redirect_url
+
+    # tool_results를 최종 state에 포함 (chat router에서 사용)
+    if tool_results:
+        response_state["tool_results"] = tool_results
 
     return response_state

@@ -444,8 +444,8 @@ def initialize_retriever(vectorstore):
     """Retriever 초기화 및 컨텍스트에 설정"""
     retriever = HybridOptimizedRetriever(
         vectorstore=vectorstore,
-        k=10000,
-        score_threshold=0.5,
+        k=30000,
+        score_threshold=0.4,
         max_sql_results=5000
     )
 

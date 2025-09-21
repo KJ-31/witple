@@ -262,18 +262,23 @@ class TravelWorkflowManager:
                         "timestamp": "auto"
                     })
 
+                # tool_results에서 redirect_url 추출
+                tool_results = result.get("tool_results", {})
+                redirect_url = tool_results.get("redirect_url") if tool_results else None
+
                 response_data = {
                     "content": result.get("final_response", result.get("conversation_context", "응답을 생성할 수 없습니다.")),
                     "type": "text",
                     "travel_plan": result.get("travel_plan", {}),
                     "formatted_ui_response": result.get("formatted_ui_response", {}),
-                    "rag_results": result.get("rag_results", [])
+                    "rag_results": result.get("rag_results", []),
+                    "tool_results": tool_results
                 }
 
                 # redirect_url이 있으면 응답에 포함
-                if result.get("redirect_url"):
-                    response_data["redirect_url"] = result["redirect_url"]
-                    print(f"🗺️ 리다이렉트 URL 포함: {result['redirect_url']}")
+                if redirect_url:
+                    response_data["redirect_url"] = redirect_url
+                    print(f"🗺️ 리다이렉트 URL 포함: {redirect_url}")
 
                 return response_data
 

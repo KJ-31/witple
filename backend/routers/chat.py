@@ -173,10 +173,16 @@ async def chat_with_llm(chat_message: ChatMessage):
             travel_plan = result.get('travel_plan', {})
             formatted_ui_response = result.get('formatted_ui_response', {})
 
+            # redirect_url 추출 (tool_results에서)
+            tool_results = result.get('tool_results', {})
+            redirect_url = tool_results.get('redirect_url')
+
             print(f"🔍 === API 응답 디버깅 ===")
             print(f"🔍 result content: {result.get('content', '')[:100]}...")
             print(f"🔍 result type: {result.get('type')}")
             print(f"🔍 travel_plan: {travel_plan}")
+            print(f"🔍 tool_results: {tool_results}")
+            print(f"🔍 redirect_url: {redirect_url}")
 
             # 날짜 정보 추출
             travel_dates = travel_plan.get('travel_dates', '')
@@ -195,7 +201,7 @@ async def chat_with_llm(chat_message: ChatMessage):
                 formatted_response=formatted_ui_response,
                 response_html=response_html,
                 response_lines=response_lines,
-                redirect_url=None,  # 새로운 구조에서는 미사용
+                redirect_url=redirect_url,  # tool_results에서 추출된 redirect_url 사용
                 places=travel_plan.get('places', []),
                 travel_dates=travel_dates,
                 parsed_dates=parsed_dates
