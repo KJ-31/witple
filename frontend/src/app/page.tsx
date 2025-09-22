@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, FormEvent } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchPersonalizedRegionCategories, fetchAllRegionsAllCategories, type CitySection } from '../lib/dummyData'
 import { BottomNavigation } from '../components'
@@ -600,6 +600,7 @@ export default function Home() {
                 citySections={popularSections}
                 userName={userInfo?.name || (session.user?.name) || '사용자'}
                 userInfo={userInfo}
+                searchQuery={searchQuery}
                 onAttractionClick={(attractionId) => {
                   // 🎯 추천 카드 클릭 추적
                   const attraction = popularSections.flatMap(section =>
@@ -988,22 +989,26 @@ function UnifiedRecommendationSection({
   userName,
   onAttractionClick,
   userInfo,
+  searchQuery,
 }: {
   citySections: CitySection[]
   userName: string
   onAttractionClick: (attractionId: string) => void
   userInfo?: { name: string, preferences: any } | null
+  searchQuery?: string
 }) {
-  // 모든 섹션의 attractions를 하나로 통합
-  const allAttractions = citySections.flatMap(section => {
-    if (section.categorySections && section.categorySections.length > 0) {
-      return section.categorySections.flatMap(cs => cs.attractions || [])
-    }
-    return section.attractions || []
-  })
+  // 모든 섹션의 attractions를 하나로 통합 (useMemo로 최적화)
+  const allAttractions = useMemo(() => {
+    return citySections.flatMap(section => {
+      if (section.categorySections && section.categorySections.length > 0) {
+        return section.categorySections.flatMap(cs => cs.attractions || [])
+      }
+      return section.attractions || []
+    })
+  }, [citySections])
 
-  // 우선순위 태그에 따른 필터링
-  const getFilteredByPriority = (attractions: any[]) => {
+  // 우선순위 태그에 따른 필터링 (useCallback으로 최적화)
+  const getFilteredByPriority = useCallback((attractions: any[]) => {
     if (!userInfo?.preferences?.priority) {
       return attractions
     }
@@ -1028,29 +1033,40 @@ function UnifiedRecommendationSection({
     }
 
     return attractions
-  }
+  }, [userInfo?.preferences?.priority])
 
   // MainCard에서 사용된 첫 번째 attraction 찾기 (popularSections 기준과 동일)
   const mainCardAttraction = citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
                             citySections[0]?.attractions?.[0]
 
-  // MainCard와 중복되지 않는 attractions 필터링
-  const availableAttractions = mainCardAttraction
-    ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
-    : allAttractions
+  // MainCard와 중복되지 않는 attractions 필터링 (useMemo로 최적화)
+  const availableAttractions = useMemo(() => {
+    return mainCardAttraction
+      ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
+      : allAttractions
+  }, [allAttractions, mainCardAttraction])
 
-  // 우선순위 태그에 따른 필터링 적용
-  const priorityFilteredAttractions = getFilteredByPriority(availableAttractions)
+  // 우선순위 태그에 따른 필터링 적용 (useMemo로 최적화)
+  const priorityFilteredAttractions = useMemo(() => {
+    return getFilteredByPriority(availableAttractions)
+  }, [availableAttractions, userInfo?.preferences?.priority])
 
-  // 지역별 추천 데이터에서 랜덤하게 12개 선택
-  const getRandomAttractions = (attractions: any[], count: number = 12) => {
-    if (attractions.length <= count) return attractions
-
-    const shuffled = [...attractions].sort(() => 0.5 - Math.random())
-    return shuffled.slice(0, count)
-  }
-
-  const filteredAttractions = getRandomAttractions(priorityFilteredAttractions, 12)
+  // 지역별 추천 데이터에서 12개 선택 (검색 중일 때만 고정)
+  const filteredAttractions = useMemo(() => {
+    if (priorityFilteredAttractions.length <= 12) {
+      return priorityFilteredAttractions
+    }
+    
+    // 검색 중일 때는 고정된 순서, 평상시에는 랜덤
+    if (searchQuery && searchQuery.trim()) {
+      // 검색 중일 때는 고정된 순서로 첫 12개 선택
+      return priorityFilteredAttractions.slice(0, 12)
+    } else {
+      // 평상시에는 랜덤하게 12개 선택
+      const shuffled = [...priorityFilteredAttractions].sort(() => 0.5 - Math.random())
+      return shuffled.slice(0, 12)
+    }
+  }, [priorityFilteredAttractions]) // searchQuery 의존성 제거
 
   return (
     <section aria-label={`${userName}님을 위한 추천`} className="w-full">
