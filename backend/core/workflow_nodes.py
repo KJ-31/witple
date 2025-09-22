@@ -16,6 +16,9 @@ from utils.travel_planner import (
 from utils.simple_search import information_search_node as simple_information_search_node
 from core.database import search_places_by_type
 from utils.response_parser import extract_structured_places
+from utils.travel_plan_storage import save_travel_plan, get_latest_travel_plan, confirm_travel_plan
+from utils.db_context import SafeDBOperation
+from database import get_db
 
 
 class TravelState(TypedDict):
@@ -33,6 +36,8 @@ class TravelState(TypedDict):
     travel_dates: str
     parsed_dates: dict
     tool_results: dict
+    user_id: str  # 사용자 ID
+    session_id: str  # 세션 ID
 
 
 def classify_query(state: TravelState) -> TravelState:
@@ -259,7 +264,7 @@ def rag_processing_node(state: TravelState) -> TravelState:
 - 다음 활동 시작 전 충분한 여유시간 확보
 
 💡 <strong>여행 팁</strong>: 지역 특색이나 주의사항
-
+<br>
 이 일정으로 확정하시겠어요?
 
 주의사항:
@@ -335,6 +340,36 @@ def rag_processing_node(state: TravelState) -> TravelState:
             print(f"   - days 길이: {len(travel_plan.get('days', []))}")
             print(f"   - places 존재: {'places' in travel_plan}")
             print(f"   - places 길이: {len(travel_plan.get('places', []))}")
+
+        # 여행 계획 DB 저장 (안전한 방식 사용)
+        user_id = state.get("user_id", "guest_user")
+        session_id = state.get("session_id", "default_session")
+
+        def safe_save_travel_plan(db, **kwargs):
+            """안전한 여행 계획 저장 (ID 미리 추출)"""
+            result = save_travel_plan(db, **kwargs)
+            if result:
+                # 세션이 닫히기 전에 ID 추출
+                return {"id": result.id, "title": result.title}
+            return None
+
+        saved_plan_info = SafeDBOperation.execute_with_retry(
+            safe_save_travel_plan,
+            user_id=user_id,
+            travel_plan=travel_plan,
+            query=user_query,
+            raw_response=raw_response,
+            formatted_response=formatted_response,
+            ui_response=formatted_ui_response,
+            session_id=session_id
+        )
+
+        if saved_plan_info:
+            print(f"💾 여행 계획 DB 저장 성공: ID {saved_plan_info['id']}")
+            # travel_plan에 DB ID 추가
+            travel_plan["db_id"] = saved_plan_info["id"]
+        else:
+            print(f"⚠️ 여행 계획 DB 저장 실패 - 재시도 모두 실패")
 
         # 최종 state 반환
         final_state = {
@@ -479,24 +514,68 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
     print(f"   - state keys: {list(state.keys())}")
     print(f"   - travel_plan 존재: {'travel_plan' in state}")
 
-    if 'travel_plan' in state:
-        travel_plan = state['travel_plan']
-        print(f"   - travel_plan 타입: {type(travel_plan)}")
-        print(f"   - travel_plan 길이: {len(travel_plan) if isinstance(travel_plan, dict) else 'N/A'}")
-        print(f"   - travel_plan keys: {list(travel_plan.keys()) if isinstance(travel_plan, dict) else 'N/A'}")
-    else:
-        print(f"   - travel_plan이 state에 없음!")
-
     travel_plan = state.get("travel_plan", {})
+
+    # travel_plan이 없거나 비어있으면 DB에서 최신 계획 조회
     if not travel_plan:
-        print(f"❌ travel_plan이 비어있습니다!")
+        print(f"🔍 state에 travel_plan이 없어서 DB에서 최신 계획 조회")
+        user_id = state.get("user_id", "guest_user")
+        session_id = state.get("session_id", "default_session")
+
+        def safe_get_latest_plan(db, **kwargs):
+            """안전한 최신 계획 조회 (ID 미리 추출)"""
+            result = get_latest_travel_plan(db, **kwargs)
+            if result:
+                from utils.travel_plan_storage import travel_plan_to_dict
+                plan_dict = travel_plan_to_dict(result)
+                return {"plan": plan_dict, "id": result.id, "title": result.title}
+            return None
+
+        session_id = state.get("session_id", "default_session")
+
+        latest_plan_info = SafeDBOperation.execute_with_retry(
+            safe_get_latest_plan,
+            user_id=user_id,
+            session_id=session_id
+        )
+
+        if latest_plan_info:
+            travel_plan = latest_plan_info["plan"]
+            print(f"✅ DB에서 최신 여행 계획 불러오기 성공: ID {latest_plan_info['id']}")
+        else:
+            print(f"❌ DB에서 여행 계획을 찾을 수 없습니다")
+            return {
+                **state,
+                "conversation_context": "확정할 여행 일정이 없습니다. 먼저 여행 일정을 요청해주세요."
+            }
+
+    if 'travel_plan' in state:
+        travel_plan_debug = state['travel_plan']
+        print(f"   - travel_plan 타입: {type(travel_plan_debug)}")
+        print(f"   - travel_plan 길이: {len(travel_plan_debug) if isinstance(travel_plan_debug, dict) else 'N/A'}")
+        print(f"   - travel_plan keys: {list(travel_plan_debug.keys()) if isinstance(travel_plan_debug, dict) else 'N/A'}")
+
+    if not travel_plan:
+        print(f"❌ travel_plan이 여전히 비어있습니다!")
         return {
             **state,
             "conversation_context": "확정할 여행 일정이 없습니다. 먼저 여행 일정을 요청해주세요."
         }
 
     try:
-        # 여행 일정 확정 처리
+        # DB에서 여행 계획 확정 처리 (안전한 방식 사용)
+        plan_id = travel_plan.get("db_id") or travel_plan.get("id")
+        if plan_id:
+            confirm_success = SafeDBOperation.execute_with_retry(
+                confirm_travel_plan,
+                plan_id=plan_id
+            )
+            if confirm_success:
+                print(f"✅ DB에서 여행 계획 확정 완료: ID {plan_id}")
+            else:
+                print(f"⚠️ DB에서 여행 계획 확정 실패: ID {plan_id}")
+
+        # 메모리상 여행 일정 확정 처리
         travel_plan["status"] = "confirmed"
         travel_plan["confirmed_at"] = datetime.now().isoformat()
 

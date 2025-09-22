@@ -27,7 +27,8 @@ class User(Base):
     preference_tags = relationship("UserPreferenceTag", back_populates="user")
     saved_locations = relationship("SavedLocation", back_populates="user")
     trips = relationship("Trip", back_populates="user")
-    
+    travel_plans = relationship("TravelPlan", back_populates="user")
+
     # 새로운 데이터 수집 관련 관계들
     actions = relationship("UserAction", back_populates="user")
     behavior_vector = relationship("UserBehaviorVector", back_populates="user", uselist=False)
@@ -240,7 +241,58 @@ class PlaceVector(Base):
     vector_updated_at = Column(DateTime(timezone=True), server_default=func.now())
     stats_updated_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
+    __table_args__ = (
+        {'extend_existing': True}
+    )
+
+
+class TravelPlan(Base):
+    """생성된 여행 계획 저장"""
+    __tablename__ = "travel_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False, index=True)
+
+    # 여행 기본 정보
+    title = Column(String, nullable=True)  # 여행 제목
+    query = Column(Text, nullable=False)  # 원본 사용자 요청
+    travel_dates = Column(String, nullable=True)  # "2024-12-25~2024-12-27" 형태
+    duration = Column(String, nullable=True)  # "3일" 형태
+
+    # 날짜 정보 (구조화된 데이터)
+    start_date = Column(DateTime(timezone=False), nullable=True)
+    end_date = Column(DateTime(timezone=False), nullable=True)
+    days_count = Column(Integer, nullable=True)  # 실제 일수
+
+    # 여행 계획 데이터 (JSON 형태)
+    itinerary = Column(JSON, nullable=False)  # 일차별 스케줄
+    places = Column(JSON, nullable=True)  # 장소 정보 목록
+    parsed_dates = Column(JSON, nullable=True)  # 파싱된 날짜 정보
+
+    # 응답 데이터
+    raw_response = Column(Text, nullable=True)  # LLM 원본 응답
+    formatted_response = Column(Text, nullable=True)  # 포맷된 응답
+    ui_response = Column(JSON, nullable=True)  # UI용 구조화된 응답
+
+    # 상태 정보
+    status = Column(String, default='draft')  # draft, confirmed, modified
+    is_confirmed = Column(Boolean, default=False)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 메타데이터
+    session_id = Column(String, nullable=True, index=True)  # 채팅 세션 ID
+    version = Column(Integer, default=1)  # 수정 버전
+    parent_plan_id = Column(Integer, ForeignKey("travel_plans.id"), nullable=True)  # 수정 전 원본 계획
+
+    # 타임스탬프
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="travel_plans")
+    modifications = relationship("TravelPlan", remote_side=[id])  # 수정된 버전들
+
     __table_args__ = (
         {'extend_existing': True}
     )

@@ -37,7 +37,8 @@ def initialize_travel_system():
 async def get_travel_recommendation_langgraph(
     query: str,
     conversation_history: List[str] = None,
-    session_id: str = "default"
+    session_id: str = "default",
+    user_id: str = None
 ) -> Dict[str, Any]:
     """
     여행 추천 메인 API 함수
@@ -69,7 +70,7 @@ async def get_travel_recommendation_langgraph(
 
         # 워크플로우 매니저로 쿼리 처리
         workflow_manager = get_workflow_manager()
-        result = await workflow_manager.process_query(query, conversation_history)
+        result = await workflow_manager.process_query(query, conversation_history, user_id=user_id, session_id=session_id)
 
         print(f"✅ 여행 추천 완료: {result.get('type', 'unknown')}")
         return result

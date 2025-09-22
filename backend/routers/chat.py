@@ -1,11 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
+from sqlalchemy.orm import Session
+from database import get_db
+from auth_utils import get_current_user
+from models import User
 import json
 import sys
 import os
 import hashlib
 import re
+import uuid
 
 # LLM_RAG.py를 임포트하기 위해 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -107,6 +112,7 @@ def get_cached_full_response(cache_instance, query: str) -> Optional[dict]:
 
 class ChatMessage(BaseModel):
     message: str
+    session_id: Optional[str] = None  # 클라이언트에서 전달받는 세션 ID
 
 class ChatResponse(BaseModel):
     response: str
@@ -121,22 +127,32 @@ class ChatResponse(BaseModel):
     places: Optional[List[dict]] = None  # 지도 표시용 장소 정보
     travel_dates: Optional[str] = None  # 추출된 여행 날짜 (원본)
     parsed_dates: Optional[dict] = None  # 파싱된 날짜 정보 (startDate, endDate, days)
+    session_id: Optional[str] = None  # 세션 ID (클라이언트가 다음 요청에서 사용)
     
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_llm(chat_message: ChatMessage):
+async def chat_with_llm(
+    chat_message: ChatMessage,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     사용자의 메시지를 받아 LangGraph 기반 여행 추천 시스템으로 응답을 생성합니다.
     LangGraph가 사용 불가능할 때는 기존 RAG 시스템으로 폴백합니다.
     """
-    # 중복 요청 방지
-    request_key = f"{chat_message.message[:50]}_{hash(chat_message.message)}"
+    # 세션 ID 처리: 클라이언트에서 보내지 않으면 새로 생성
+    session_id = chat_message.session_id or str(uuid.uuid4())
+    print(f"🔑 Session ID: {session_id}")
+
+    # 중복 요청 방지 (세션 ID 포함)
+    request_key = f"{session_id}_{chat_message.message[:50]}_{hash(chat_message.message)}"
     if request_key in processing_requests:
         print(f"⚠️ 중복 요청 감지, 무시: {request_key}")
         return ChatResponse(
             response="이미 처리 중인 요청입니다. 잠시만 기다려주세요.",
             success=False,
-            error="Duplicate request"
+            error="Duplicate request",
+            session_id=session_id
         )
     
     processing_requests.add(request_key)
@@ -151,7 +167,8 @@ async def chat_with_llm(chat_message: ChatMessage):
                 response=default_message,
                 success=True,
                 response_html=default_html,
-                response_lines=default_lines
+                response_lines=default_lines,
+                session_id=session_id
             )
         
         print(f"🔍 Processing travel query: {chat_message.message}")
@@ -162,7 +179,11 @@ async def chat_with_llm(chat_message: ChatMessage):
         if get_travel_recommendation_langgraph:
             print("🚀 Using LangGraph workflow for enhanced travel recommendation")
 
-            result = await get_travel_recommendation_langgraph(chat_message.message)
+            result = await get_travel_recommendation_langgraph(
+                chat_message.message,
+                session_id=session_id,
+                user_id=current_user.user_id
+            )
 
             print(f"✅ LangGraph result: {result.get('content', '')[:100]}...")
 
@@ -204,14 +225,16 @@ async def chat_with_llm(chat_message: ChatMessage):
                 redirect_url=redirect_url,  # tool_results에서 추출된 redirect_url 사용
                 places=travel_plan.get('places', []),
                 travel_dates=travel_dates,
-                parsed_dates=parsed_dates
+                parsed_dates=parsed_dates,
+                session_id=session_id
             )
         
         else:
             return ChatResponse(
                 response="죄송합니다. 현재 여행 추천 시스템을 준비 중입니다.",
                 success=False,
-                error="LLM system not available"
+                error="LLM system not available",
+                session_id=session_id
             )
         
     except Exception as e:
@@ -226,7 +249,8 @@ async def chat_with_llm(chat_message: ChatMessage):
             success=False,
             error=str(e),
             response_html=error_html,
-            response_lines=error_lines
+            response_lines=error_lines,
+            session_id=session_id
         )
     
     finally:

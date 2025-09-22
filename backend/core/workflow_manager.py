@@ -2,6 +2,9 @@
 워크플로우 관리 및 라우팅
 """
 from typing import Literal, Dict, Any, List
+from datetime import datetime, timedelta
+import threading
+import time
 from core.travel_context import get_travel_context
 from core.workflow_nodes import (
     TravelState, classify_query, rag_processing_node, information_search_node,
@@ -105,10 +108,20 @@ def create_travel_workflow():
 
 
 class TravelWorkflowManager:
-    """여행 워크플로우 관리자"""
+    """여행 워크플로우 관리자 (세션별 상태 관리)"""
 
     def __init__(self):
         self.workflow = create_travel_workflow() if LANGGRAPH_AVAILABLE else None
+        # 세션별 상태 관리
+        self.session_states = {}  # session_id: state_dict
+        self.session_timestamps = {}  # session_id: last_access_time
+        self.session_timeout = timedelta(hours=2)  # 2시간 타임아웃
+
+        # 세션 정리를 위한 백그라운드 스레드
+        self._cleanup_thread = threading.Thread(target=self._cleanup_expired_sessions, daemon=True)
+        self._cleanup_thread.start()
+
+        # 호환성을 위한 기본 상태 (기존 코드와의 호환성)
         self.current_travel_state = {
             "last_query": "",
             "travel_plan": {},
@@ -118,23 +131,83 @@ class TravelWorkflowManager:
         }
 
     def get_current_travel_state_ref(self) -> Dict[str, Any]:
-        """현재 여행 상태 참조 반환"""
+        """현재 여행 상태 참조 반환 (호환성)"""
         return self.current_travel_state
 
-    def reset_travel_state(self):
-        """여행 상태 초기화"""
-        self.current_travel_state.clear()
-        self.current_travel_state.update({
-            "last_query": "",
-            "travel_plan": {},
-            "places": [],
-            "context": "",
-            "timestamp": None
-        })
+    def get_session_state(self, session_id: str) -> Dict[str, Any]:
+        """세션별 여행 상태 조회"""
+        if session_id not in self.session_states:
+            self.session_states[session_id] = {
+                "last_query": "",
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": None
+            }
 
-    def update_travel_state(self, new_state: Dict[str, Any]):
+        # 세션 접근 시간 업데이트
+        self.session_timestamps[session_id] = datetime.now()
+        return self.session_states[session_id]
+
+    def reset_travel_state(self, session_id: str = None):
+        """여행 상태 초기화"""
+        if session_id:
+            # 특정 세션 초기화
+            self.session_states[session_id] = {
+                "last_query": "",
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": None
+            }
+            self.session_timestamps[session_id] = datetime.now()
+        else:
+            # 기본 상태 초기화 (호환성)
+            self.current_travel_state.clear()
+            self.current_travel_state.update({
+                "last_query": "",
+                "travel_plan": {},
+                "places": [],
+                "context": "",
+                "timestamp": None
+            })
+
+    def update_travel_state(self, new_state: Dict[str, Any], session_id: str = None):
         """여행 상태 업데이트"""
-        self.current_travel_state.update(new_state)
+        if session_id:
+            if session_id not in self.session_states:
+                self.get_session_state(session_id)  # 상태 초기화
+            self.session_states[session_id].update(new_state)
+            self.session_timestamps[session_id] = datetime.now()
+        else:
+            # 기본 상태 업데이트 (호환성)
+            self.current_travel_state.update(new_state)
+
+    def _cleanup_expired_sessions(self):
+        """만료된 세션 정리 (백그라운드 스레드)"""
+        while True:
+            try:
+                current_time = datetime.now()
+                expired_sessions = []
+
+                for session_id, last_access in self.session_timestamps.items():
+                    if current_time - last_access > self.session_timeout:
+                        expired_sessions.append(session_id)
+
+                for session_id in expired_sessions:
+                    print(f"🧹 만료된 세션 정리: {session_id}")
+                    self.session_states.pop(session_id, None)
+                    self.session_timestamps.pop(session_id, None)
+
+                # 10분마다 정리
+                time.sleep(600)
+            except Exception as e:
+                print(f"❌ 세션 정리 중 오류: {e}")
+                time.sleep(600)  # 오류 발생 시에도 계속 실행
+
+    def get_session_count(self) -> int:
+        """현재 활성 세션 수 조회"""
+        return len(self.session_states)
 
     def process_simple_fallback(self, query: str, conversation_history: List[str] = None) -> Dict[str, Any]:
         """LangGraph 없이 단순 처리"""
@@ -212,23 +285,38 @@ class TravelWorkflowManager:
                 "type": "error"
             }
 
-    async def process_query(self, query: str, conversation_history: List[str] = None) -> Dict[str, Any]:
+    async def process_query(self, query: str, conversation_history: List[str] = None, user_id: str = None, session_id: str = None) -> Dict[str, Any]:
         """쿼리 처리 (LangGraph 또는 단순 처리)"""
-        print(f"🔍 쿼리 처리 시작: '{query}'")
+        print(f"🔍 쿼리 처리 시작: '{query}' (session: {session_id})")
 
-        # 기존 상태 확인
-        existing_travel_plan = self.current_travel_state.get("travel_plan", {})
-        print(f"🔍 기존 상태: {bool(existing_travel_plan)}")
+        # 세션별 상태 관리
+        if session_id:
+            session_state = self.get_session_state(session_id)
+            existing_travel_plan = session_state.get("travel_plan", {})
+            print(f"🔍 세션 {session_id} 기존 상태: {bool(existing_travel_plan)}")
 
-        # 새로운 여행 요청인지 확인하여 상태 초기화
-        travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러"]
-        if any(keyword in query for keyword in travel_keywords):
-            print("🔄 새로운 여행 요청 감지 - 상태 초기화")
-            self.reset_travel_state()
+            # 새로운 여행 요청인지 확인하여 상태 초기화
+            travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러"]
+            if any(keyword in query for keyword in travel_keywords):
+                print(f"🔄 새로운 여행 요청 감지 - 세션 {session_id} 상태 초기화")
+                self.reset_travel_state(session_id)
+                existing_travel_plan = {}
+            else:
+                # 기존 상태 유지
+                session_state["last_query"] = query
+                session_state["timestamp"] = "auto"
         else:
-            # 기존 상태 유지
-            self.current_travel_state["last_query"] = query
-            self.current_travel_state["timestamp"] = "auto"
+            # 기본 상태 사용 (호환성)
+            existing_travel_plan = self.current_travel_state.get("travel_plan", {})
+            print(f"🔍 기본 상태: {bool(existing_travel_plan)}")
+
+            travel_keywords = ["추천", "여행", "일정", "계획", "가고싶어", "놀러"]
+            if any(keyword in query for keyword in travel_keywords):
+                print("🔄 새로운 여행 요청 감지 - 기본 상태 초기화")
+                self.reset_travel_state()
+            else:
+                self.current_travel_state["last_query"] = query
+                self.current_travel_state["timestamp"] = "auto"
 
         # LangGraph 사용 가능하면 워크플로우 실행, 아니면 단순 처리
         if self.workflow:
@@ -246,7 +334,10 @@ class TravelWorkflowManager:
                     "formatted_ui_response": {},
                     "rag_results": [],
                     "travel_dates": "",
-                    "parsed_dates": {}
+                    "parsed_dates": {},
+                    "tool_results": {},
+                    "user_id": user_id or "guest_user",
+                    "session_id": session_id or "default_session"
                 }
 
                 # 워크플로우 실행
