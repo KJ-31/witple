@@ -120,19 +120,33 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
 
         if best_pattern and best_matches:
             print(f"🗓️ 일차 패턴 인식: {len(best_matches)}개 일차 발견 (패턴: {best_pattern})")
+
             # 응답을 일차별로 분할
             day_sections = re.split(best_pattern, response)
+            print(f"📊 day_sections 분할 결과: {len(day_sections)}개 섹션")
+
+            for i, section in enumerate(day_sections):
+                print(f"   섹션 {i}: '{section[:100]}{'...' if len(section) > 100 else ''}'")
+
             for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 일차 번호, 짝수가 내용
                 if i + 1 < len(day_sections):
                     day_num_str = day_sections[i]
                     day_content = day_sections[i + 1]
+
+                    print(f"🔍 처리 중: 섹션 {i} (일차번호) = '{day_num_str}', 섹션 {i+1} (내용) = '{day_content[:200]}{'...' if len(day_content) > 200 else ''}'")
+
                     try:
                         day_num = int(day_num_str)
                     except ValueError:
+                        print(f"   ❌ 일차 번호 변환 실패: '{day_num_str}'")
                         continue
+
                     print(f"📅 {day_num}일차 파싱 중...")
+
                     # 해당 일차의 일정 파싱
                     day_schedule = parse_day_schedule(day_content, structured_places)
+                    print(f"   🔧 parse_day_schedule 결과: {len(day_schedule) if day_schedule else 0}개 일정")
+
                     if day_schedule:  # 일정이 있을 때만 추가
                         plan["days"].append({
                             "day": day_num,
@@ -143,6 +157,12 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
                         for item in day_schedule:
                             if item.get("place_info"):
                                 plan["places"].append(item["place_info"])
+                    else:
+                        print(f"   ⚠️ {day_num}일차: 파싱된 일정이 없어서 추가하지 않음")
+                else:
+                    print(f"   ⚠️ 섹션 {i}: 다음 섹션이 없어서 스킵")
+
+            print(f"🏁 최종 파싱 결과: {len(plan['days'])}개 일차 생성됨")
         else:
             print(f"⚠️ 일차 패턴 인식 실패, 단일 일정으로 처리")
             # 일차 구분 없이 전체를 하나의 일정으로 처리
@@ -181,6 +201,11 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
 
 def parse_day_schedule(day_content: str, structured_places: list) -> list:
     """일별 스케줄 파싱"""
+    print(f"🔧 parse_day_schedule 시작")
+    print(f"   📝 day_content 길이: {len(day_content)}")
+    print(f"   📝 day_content 내용: '{day_content[:300]}{'...' if len(day_content) > 300 else ''}'")
+    print(f"   🏛️ structured_places 수: {len(structured_places)}")
+
     schedule = []
 
     # 시간-장소-설명 패턴 매칭 개선
@@ -191,9 +216,13 @@ def parse_day_schedule(day_content: str, structured_places: list) -> list:
         r'[•\-\*]\s*([^(\n]+?)(?:\(([^)]+)\))?(?:\n|$)'
     ]
 
-    for pattern in patterns:
+    print(f"🔍 패턴 매칭 시작:")
+    for j, pattern in enumerate(patterns):
         matches = re.findall(pattern, day_content, re.MULTILINE)
+        print(f"   패턴 {j+1}: {pattern[:50]}{'...' if len(pattern) > 50 else ''} -> {len(matches)}개 매칭")
+
         if matches:
+            print(f"     매칭 결과: {matches}")
             for match in matches:
                 if len(match) >= 3:
                     time_start = match[0] if match[0] else ""
@@ -214,6 +243,7 @@ def parse_day_schedule(day_content: str, structured_places: list) -> list:
 
                     # 장소명 정리
                     place_name_clean = normalize_place_name(place_name)
+                    print(f"     🏛️ 장소 '{place_name}' -> 정규화: '{place_name_clean}'")
 
                     # 구조화된 장소에서 매칭되는 정보 찾기
                     matched_place = None
@@ -225,7 +255,11 @@ def parse_day_schedule(day_content: str, structured_places: list) -> list:
                              (place_name_clean in place_name_normalized or
                               place_name_normalized in place_name_clean))):
                             matched_place = place
+                            print(f"       ✅ 매칭 성공: '{place_name_clean}' <-> '{place_name_normalized}'")
                             break
+
+                    if not matched_place:
+                        print(f"       ❌ 매칭 실패: '{place_name_clean}' (structured_places에서 찾을 수 없음)")
 
                     schedule_item = {
                         "time": time_range.strip() if time_range else "",
@@ -235,15 +269,23 @@ def parse_day_schedule(day_content: str, structured_places: list) -> list:
                         "place_info": matched_place
                     }
                     schedule.append(schedule_item)
+                    print(f"     ➕ schedule_item 추가: {schedule_item['place_name']} ({schedule_item['time']})")
 
     # 중복 제거
     seen = set()
     unique_schedule = []
+    print(f"🧹 중복 제거 전: {len(schedule)}개 일정")
     for item in schedule:
         key = (item["place_name"], item["time"])
         if key not in seen:
             seen.add(key)
             unique_schedule.append(item)
+        else:
+            print(f"   🔄 중복 제거: {item['place_name']} ({item['time']})")
+
+    print(f"✅ parse_day_schedule 완료: {len(unique_schedule)}개 일정 반환")
+    for i, item in enumerate(unique_schedule):
+        print(f"   {i+1}. {item['place_name']} ({item['time']}) - place_info: {'있음' if item['place_info'] else '없음'}")
 
     return unique_schedule
 

@@ -2,7 +2,7 @@
 워크플로우 노드 처리 함수들
 """
 from typing import TypedDict, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 
@@ -292,6 +292,33 @@ def rag_processing_node(state: TravelState) -> TravelState:
         print(f"🔧 parse_enhanced_travel_plan 호출 후:")
         print(f"   - travel_plan에 포함된 parsed_dates: {travel_plan.get('parsed_dates')}")
 
+        # 파싱된 일차 수를 기반으로 days 정보 업데이트
+        parsed_days_count = len(travel_plan.get("days", []))
+        if parsed_days_count > 0:
+            print(f"🔢 파싱된 일차 수: {parsed_days_count}개")
+
+            # travel_plan의 parsed_dates 업데이트
+            if "parsed_dates" in travel_plan:
+                travel_plan["parsed_dates"]["days"] = f"{parsed_days_count}일"
+                print(f"   ✅ parsed_dates.days 업데이트: {travel_plan['parsed_dates']['days']}")
+
+                # endDate가 없고 startDate가 있으면 계산
+                start_date = travel_plan["parsed_dates"].get("startDate", "")
+                end_date = travel_plan["parsed_dates"].get("endDate", "")
+
+                if start_date and not end_date:
+                    try:
+                        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                        end_dt = start_dt + timedelta(days=parsed_days_count-1)
+                        travel_plan["parsed_dates"]["endDate"] = end_dt.strftime('%Y-%m-%d')
+                        print(f"   ✅ endDate 계산: {start_date} + {parsed_days_count-1}일 = {travel_plan['parsed_dates']['endDate']}")
+                    except Exception as e:
+                        print(f"   ❌ endDate 계산 오류: {e}")
+
+            # duration 정보도 업데이트
+            travel_plan["duration"] = f"{parsed_days_count}일"
+            print(f"   ✅ duration 업데이트: {travel_plan['duration']}")
+
         # UI용 구조화된 응답 생성
         formatted_ui_response = create_formatted_ui_response(travel_plan, formatted_response)
 
@@ -495,7 +522,6 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         # 도구 실행 결과 추가 (리다이렉트용)
         # 지도 페이지로 리다이렉트할 URL 생성 (실제 지도 페이지 형식에 맞춰)
         import urllib.parse
-        from datetime import timedelta
         import re
 
         # 지도 표시를 위한 장소 파라미터 구성
@@ -509,13 +535,33 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
 
             # 일정 정보 (days 우선, 그 다음 itinerary)
             itinerary = travel_plan.get("days", travel_plan.get("itinerary", []))
-            total_days = len(itinerary) if itinerary else 1
+            parsed_total_days = len(itinerary) if itinerary else 1
+
+            # 실제 여행 일수 확인 (parsed_dates나 원본 쿼리에서)
+            actual_days = 1
+            parsed_dates = travel_plan.get("parsed_dates", {})
+            if parsed_dates.get("days"):
+                days_match = re.search(r'(\d+)', str(parsed_dates["days"]))
+                if days_match:
+                    actual_days = int(days_match.group(1))
+
+            if actual_days == 1:
+                # 원본 쿼리에서 일수 확인
+                original_query = travel_plan.get("query", "")
+                query_match = re.search(r'(\d+)일', original_query)
+                if query_match:
+                    actual_days = int(query_match.group(1))
+
+            # 파싱된 일차 수와 실제 일수 중 큰 값 사용
+            total_days = max(parsed_total_days, actual_days)
 
             print(f"🔍 일정 구조 확인:")
             print(f"   - travel_plan.get('days'): {travel_plan.get('days')}")
             print(f"   - travel_plan.get('itinerary'): {travel_plan.get('itinerary')}")
             print(f"   - 사용할 itinerary: {itinerary}")
-            print(f"   - total_days: {total_days}")
+            print(f"   - 파싱된 일차 수: {parsed_total_days}")
+            print(f"   - 실제 여행 일수: {actual_days}")
+            print(f"   - 최종 total_days: {total_days}")
 
             # 추가: itinerary가 비어있다면 더 자세히 확인
             if not itinerary:
@@ -671,12 +717,13 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
                         if places_by_day:
                             min_places_day = min(places_by_day.keys(), key=lambda x: len(places_by_day[x]))
                             day_num = min_places_day
+                            print(f"   🔄 최소 장소 일차에 배치: {day_num}일차")
                         else:
-                            # 매칭 실패 - 이 경우는 파싱이 제대로 안 된 것
-                            print(f"   ❌ 파싱된 일정이 없어서 매칭 불가!")
+                            # 파싱된 일정이 없으면 1일차로 (이는 파싱 문제를 의미)
+                            print(f"   ❌ 파싱된 일정이 없어서 1일차로 배치 (파싱 문제 확인 필요)")
                             day_num = 1
 
-                    print(f"📍 '{place_name}' -> {day_num}일차 배치")
+                    print(f"📍 '{place_name}' -> {day_num}일차 배치 (idx: {idx})")
 
                 day_numbers_list.append(str(day_num))
                 print(f"✅ 장소 처리: {place_name} -> {place_identifier} (day {day_num})")
@@ -698,22 +745,67 @@ def confirmation_processing_node(state: TravelState) -> TravelState:
         end_date = ""
         days = 2  # 기본값
 
+        # 파싱된 일차 수 우선 확인
+        parsed_days_count = len(travel_plan.get("days", []))
+        print(f"🔢 확정 처리 - 파싱된 일차 수: {parsed_days_count}개")
+
         if travel_plan.get("parsed_dates") and travel_plan["parsed_dates"].get("startDate"):
             parsed_dates = travel_plan["parsed_dates"]
+            print(f"🔍 parsed_dates 디버깅: {parsed_dates}")
+
             start_date = parsed_dates.get("startDate", "")
             end_date = parsed_dates.get("endDate", "")
 
-            # days 필드 안전 처리 (빈 문자열이나 None인 경우 기본값 사용)
-            days_value = parsed_dates.get("days", 2)
-            if isinstance(days_value, str) and days_value.strip() == "":
-                days = 2  # 기본값
-            else:
-                try:
-                    days = int(days_value)
-                except (ValueError, TypeError):
-                    days = 2  # 변환 실패시 기본값
+            print(f"   📅 startDate: '{start_date}'")
+            print(f"   📅 endDate: '{end_date}'")
 
-            print(f"✅ parsed_dates 사용: {start_date} ~ {end_date} ({days}일)")
+            # 파싱된 일차 수를 우선적으로 사용
+            if parsed_days_count > 0:
+                target_days = parsed_days_count
+                print(f"   🎯 파싱된 일차 수 사용: {target_days}일")
+            else:
+                # 파싱된 일차가 없으면 다른 방법으로 일수 확인
+                days_info = parsed_dates.get("days", "")
+                duration_info = travel_plan.get("duration", "")
+
+                print(f"   🔢 days 정보: '{days_info}'")
+                print(f"   🔢 duration 정보: '{duration_info}'")
+
+                target_days = None
+                if days_info and isinstance(days_info, str):
+                    days_match = re.search(r'(\d+)', days_info)
+                    if days_match:
+                        target_days = int(days_match.group(1))
+
+                if not target_days and duration_info:
+                    duration_match = re.search(r'(\d+)일', duration_info)
+                    if duration_match:
+                        target_days = int(duration_match.group(1))
+
+                if not target_days:
+                    # 원본 쿼리에서 일수 추출 시도
+                    original_query = travel_plan.get("query", "")
+                    query_match = re.search(r'(\d+)일', original_query)
+                    if query_match:
+                        target_days = int(query_match.group(1))
+                    else:
+                        target_days = 3  # 기본값
+
+                print(f"   ✅ 추출된 일수: {target_days}일")
+
+            # endDate 계산 (없는 경우만)
+            if not end_date and start_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                    end_date = (start_dt + timedelta(days=target_days-1)).strftime('%Y-%m-%d')
+                    print(f"   📅 계산된 endDate: {start_date} + {target_days-1}일 = {end_date}")
+                except Exception as e:
+                    print(f"   ❌ 날짜 계산 오류: {e}")
+                    end_date = start_date
+                    target_days = 1
+
+            days = target_days
+            print(f"✅ 최종 날짜 결과: {start_date} ~ {end_date} ({days}일)")
         else:
             # 기본 방식: 오늘 기준으로 생성
             duration_str = travel_plan.get("duration", "2박3일")
