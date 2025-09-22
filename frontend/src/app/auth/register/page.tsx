@@ -70,6 +70,10 @@ export default function RegisterPage() {
       if (preferences.travelStyle && preferences.investment && preferences.accommodation && preferences.destination) {
         await saveUserPreferences(preferences, token)
         console.log('선호도 저장 완료')
+
+        // 회원가입시 취향설정 완료 플래그 설정
+        localStorage.setItem('preferences_completed', 'true')
+        console.log('회원가입 취향설정 완료 - localStorage 플래그 설정됨')
       }
 
       // 4. 토큰 저장

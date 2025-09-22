@@ -110,8 +110,8 @@ export default function Home() {
 
           setUserInfo(newUserInfo)
 
-          // 사용자 정보 설정 후 바로 선호도 체크 (추가 렌더링 방지)
-          setTimeout(() => checkUserPreferences(preferences), 0)
+          // 사용자 정보 설정 후 바로 선호도 체크 (동기적 호출로 변경)
+          await checkUserPreferences(preferences)
 
           return newUserInfo  // 새로 로드된 사용자 정보 반환
         } catch (jsonError) {
@@ -298,7 +298,7 @@ export default function Home() {
     }
   }, [userInfo])
 
-  // 사용자 선호도 체크 (profile API 데이터 기반)
+  // 사용자 선호도 체크 (profile API 데이터 기반 + localStorage 플래그 확인)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
     if (!session || !(session as any).backendToken) {
       return
@@ -310,24 +310,31 @@ export default function Home() {
         localStorage.removeItem('preferences_completed')
       }
 
-      // profile API에서 받은 preferences 데이터로 확인
-      const hasPreferences = userPreferences && (
+      // 1. localStorage에서 취향설정 완료 플래그 확인 (우선순위 높음)
+      const isPreferencesCompleted = typeof window !== 'undefined' &&
+        localStorage.getItem('preferences_completed') === 'true'
+
+      // 2. profile API에서 받은 preferences 데이터로 확인
+      const hasApiPreferences = userPreferences && (
         userPreferences.persona ||
         userPreferences.priority ||
         userPreferences.accommodation ||
         userPreferences.exploration
       )
 
-      if (!hasPreferences) {
-        // 선호도가 없으면 설정 페이지로 이동
-        console.log('사용자 선호도 설정 필요, 설정 페이지로 이동')
-        router.push('/preferences')
+      // 3. localStorage 플래그가 있거나 API에서 preferences가 확인되면 설정 완료로 간주
+      if (isPreferencesCompleted || hasApiPreferences) {
+        // 선호도 설정 완료 상태 - localStorage 플래그 동기화
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('preferences_completed', 'true')
+        }
+        console.log('사용자 선호도 설정 완료 확인 (localStorage:', isPreferencesCompleted, ', API:', !!hasApiPreferences, ')')
         return
-      } else {
-        // 선호도가 있으면 완료 플래그 저장
-        localStorage.setItem('preferences_completed', 'true')
-        // console.log('사용자 선호도 설정 완료 확인')
       }
+
+      // 4. localStorage 플래그도 없고 API에서도 preferences가 없으면 설정 페이지로 이동
+      console.log('사용자 선호도 설정 필요, 설정 페이지로 이동')
+      router.push('/preferences')
     } catch (error) {
       console.warn('선호도 체크 오류:', error instanceof Error ? error.message : String(error))
       // 에러 시에도 메인 페이지는 정상 작동
