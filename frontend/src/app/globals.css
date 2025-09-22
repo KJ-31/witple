@@ -37,6 +37,7 @@ body {
   height: 0 !important;
 }
 
+
 /* 텍스트 2줄 제한 */
 .line-clamp-2 {
   display: -webkit-box;
