@@ -268,7 +268,7 @@ async def get_nearby_attractions(db: Session, selected_places: List[dict], radiu
         logger.error(f"Error in get_nearby_attractions: {str(e)}")
         return []
 
-async def get_db_fallback_places(db: Session, region: str, category: str = None, limit: int = 20, exclude_ids: set = None):
+async def get_db_fallback_places(db: Session, region: str, category: str = None, limit: int = 20, page: int = 0, exclude_ids: set = None):
     """추천 엔진 실패시 DB에서 직접 가져오는 fallback"""
     places = []
     exclude_ids = exclude_ids or set()
@@ -287,13 +287,17 @@ async def get_db_fallback_places(db: Session, region: str, category: str = None,
             break
             
         # 지역으로 필터링
-        query = db.query(table_model).filter(
-            or_(
-                table_model.region.ilike(f"%{region}%"),
-                table_model.region == region,
-                table_model.city.ilike(f"%{region}%")
-            )
-        ).limit(limit - len(places))
+        if region == "전국":
+            # 전국일 때는 모든 데이터 가져오기
+            query = db.query(table_model).offset(page * limit).limit(limit - len(places))
+        else:
+            query = db.query(table_model).filter(
+                or_(
+                    table_model.region.ilike(f"%{region}%"),
+                    table_model.region == region,
+                    table_model.city.ilike(f"%{region}%")
+                )
+            ).offset(page * limit).limit(limit - len(places))
         
         attractions = query.all()
         table_category = get_category_from_table(table_name)
@@ -1171,6 +1175,13 @@ async def get_filtered_attractions(
                     "recommendationType": "similarity"
                 }
                 results.append(formatted_attraction)
+        
+        # v2 추천 엔진이 0개를 반환하면 DB fallback 사용
+        if len(results) == 0:
+            logger.info("v2 추천 엔진이 0개 반환 - DB fallback 사용")
+            fallback_places = await get_db_fallback_places(db, region, category, limit, page)
+            results.extend(fallback_places)
+            logger.info(f"DB fallback에서 {len(fallback_places)}개 장소 반환")
         
         # 전체 결과 수 계산 (페이지네이션 없이)
         total_available = 0
