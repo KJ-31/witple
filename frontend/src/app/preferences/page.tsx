@@ -74,9 +74,10 @@ export default function PreferencesPage() {
         throw new Error('선호도 저장에 실패했습니다.')
       }
 
-      // 선호도 설정 완료 플래그 저장
+      // 백엔드 저장 성공 후에만 완료 플래그 저장
       localStorage.setItem('preferences_completed', 'true')
-      
+      console.log('취향설정 완료 - localStorage 플래그 설정됨')
+
       // 메인 페이지로 이동
       router.push('/')
     } catch (err: any) {

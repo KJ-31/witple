@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, FormEvent } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { fetchPersonalizedRegionCategories, fetchAllRegionsAllCategories, type CitySection } from '../lib/dummyData'
 import { BottomNavigation } from '../components'
@@ -110,8 +110,8 @@ export default function Home() {
 
           setUserInfo(newUserInfo)
 
-          // 사용자 정보 설정 후 바로 선호도 체크 (추가 렌더링 방지)
-          setTimeout(() => checkUserPreferences(preferences), 0)
+          // 사용자 정보 설정 후 바로 선호도 체크 (동기적 호출로 변경)
+          await checkUserPreferences(preferences)
 
           return newUserInfo  // 새로 로드된 사용자 정보 반환
         } catch (jsonError) {
@@ -298,7 +298,7 @@ export default function Home() {
     }
   }, [userInfo])
 
-  // 사용자 선호도 체크 (profile API 데이터 기반)
+  // 사용자 선호도 체크 (profile API 데이터 기반 + localStorage 플래그 확인)
   const checkUserPreferences = useCallback(async (userPreferences?: any) => {
     if (!session || !(session as any).backendToken) {
       return
@@ -310,24 +310,31 @@ export default function Home() {
         localStorage.removeItem('preferences_completed')
       }
 
-      // profile API에서 받은 preferences 데이터로 확인
-      const hasPreferences = userPreferences && (
+      // 1. localStorage에서 취향설정 완료 플래그 확인 (우선순위 높음)
+      const isPreferencesCompleted = typeof window !== 'undefined' &&
+        localStorage.getItem('preferences_completed') === 'true'
+
+      // 2. profile API에서 받은 preferences 데이터로 확인
+      const hasApiPreferences = userPreferences && (
         userPreferences.persona ||
         userPreferences.priority ||
         userPreferences.accommodation ||
         userPreferences.exploration
       )
 
-      if (!hasPreferences) {
-        // 선호도가 없으면 설정 페이지로 이동
-        console.log('사용자 선호도 설정 필요, 설정 페이지로 이동')
-        router.push('/preferences')
+      // 3. localStorage 플래그가 있거나 API에서 preferences가 확인되면 설정 완료로 간주
+      if (isPreferencesCompleted || hasApiPreferences) {
+        // 선호도 설정 완료 상태 - localStorage 플래그 동기화
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('preferences_completed', 'true')
+        }
+        console.log('사용자 선호도 설정 완료 확인 (localStorage:', isPreferencesCompleted, ', API:', !!hasApiPreferences, ')')
         return
-      } else {
-        // 선호도가 있으면 완료 플래그 저장
-        localStorage.setItem('preferences_completed', 'true')
-        // console.log('사용자 선호도 설정 완료 확인')
       }
+
+      // 4. localStorage 플래그도 없고 API에서도 preferences가 없으면 설정 페이지로 이동
+      console.log('사용자 선호도 설정 필요, 설정 페이지로 이동')
+      router.push('/preferences')
     } catch (error) {
       console.warn('선호도 체크 오류:', error instanceof Error ? error.message : String(error))
       // 에러 시에도 메인 페이지는 정상 작동
@@ -600,6 +607,7 @@ export default function Home() {
                 citySections={popularSections}
                 userName={userInfo?.name || (session.user?.name) || '사용자'}
                 userInfo={userInfo}
+                searchQuery={searchQuery}
                 onAttractionClick={(attractionId) => {
                   // 🎯 추천 카드 클릭 추적
                   const attraction = popularSections.flatMap(section =>
@@ -988,22 +996,26 @@ function UnifiedRecommendationSection({
   userName,
   onAttractionClick,
   userInfo,
+  searchQuery,
 }: {
   citySections: CitySection[]
   userName: string
   onAttractionClick: (attractionId: string) => void
   userInfo?: { name: string, preferences: any } | null
+  searchQuery?: string
 }) {
-  // 모든 섹션의 attractions를 하나로 통합
-  const allAttractions = citySections.flatMap(section => {
-    if (section.categorySections && section.categorySections.length > 0) {
-      return section.categorySections.flatMap(cs => cs.attractions || [])
-    }
-    return section.attractions || []
-  })
+  // 모든 섹션의 attractions를 하나로 통합 (useMemo로 최적화)
+  const allAttractions = useMemo(() => {
+    return citySections.flatMap(section => {
+      if (section.categorySections && section.categorySections.length > 0) {
+        return section.categorySections.flatMap(cs => cs.attractions || [])
+      }
+      return section.attractions || []
+    })
+  }, [citySections])
 
-  // 우선순위 태그에 따른 필터링
-  const getFilteredByPriority = (attractions: any[]) => {
+  // 우선순위 태그에 따른 필터링 (useCallback으로 최적화)
+  const getFilteredByPriority = useCallback((attractions: any[]) => {
     if (!userInfo?.preferences?.priority) {
       return attractions
     }
@@ -1028,29 +1040,40 @@ function UnifiedRecommendationSection({
     }
 
     return attractions
-  }
+  }, [userInfo?.preferences?.priority])
 
   // MainCard에서 사용된 첫 번째 attraction 찾기 (popularSections 기준과 동일)
   const mainCardAttraction = citySections[0]?.categorySections?.[0]?.attractions?.[0] ||
                             citySections[0]?.attractions?.[0]
 
-  // MainCard와 중복되지 않는 attractions 필터링
-  const availableAttractions = mainCardAttraction
-    ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
-    : allAttractions
+  // MainCard와 중복되지 않는 attractions 필터링 (useMemo로 최적화)
+  const availableAttractions = useMemo(() => {
+    return mainCardAttraction
+      ? allAttractions.filter(attraction => attraction.id !== mainCardAttraction.id)
+      : allAttractions
+  }, [allAttractions, mainCardAttraction])
 
-  // 우선순위 태그에 따른 필터링 적용
-  const priorityFilteredAttractions = getFilteredByPriority(availableAttractions)
+  // 우선순위 태그에 따른 필터링 적용 (useMemo로 최적화)
+  const priorityFilteredAttractions = useMemo(() => {
+    return getFilteredByPriority(availableAttractions)
+  }, [availableAttractions, userInfo?.preferences?.priority])
 
-  // 지역별 추천 데이터에서 랜덤하게 12개 선택
-  const getRandomAttractions = (attractions: any[], count: number = 12) => {
-    if (attractions.length <= count) return attractions
-
-    const shuffled = [...attractions].sort(() => 0.5 - Math.random())
-    return shuffled.slice(0, count)
-  }
-
-  const filteredAttractions = getRandomAttractions(priorityFilteredAttractions, 12)
+  // 지역별 추천 데이터에서 12개 선택 (검색 중일 때만 고정)
+  const filteredAttractions = useMemo(() => {
+    if (priorityFilteredAttractions.length <= 12) {
+      return priorityFilteredAttractions
+    }
+    
+    // 검색 중일 때는 고정된 순서, 평상시에는 랜덤
+    if (searchQuery && searchQuery.trim()) {
+      // 검색 중일 때는 고정된 순서로 첫 12개 선택
+      return priorityFilteredAttractions.slice(0, 12)
+    } else {
+      // 평상시에는 랜덤하게 12개 선택
+      const shuffled = [...priorityFilteredAttractions].sort(() => 0.5 - Math.random())
+      return shuffled.slice(0, 12)
+    }
+  }, [priorityFilteredAttractions]) // searchQuery 의존성 제거
 
   return (
     <section aria-label={`${userName}님을 위한 추천`} className="w-full">

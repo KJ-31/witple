@@ -1,27 +1,27 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { useChatbot } from './ChatbotProvider'
 
 // 동적 로딩 텍스트 컴포넌트
 function LoadingAnimation() {
   const [textIndex, setTextIndex] = useState(0)
 
-  const loadingTexts = [
+  const loadingTexts = useMemo(() => [
     "여행 정보를 검색중입니다",
     "AI가 최적의 여행 계획을 준비중입니다",
     "맞춤형 추천을 생성중입니다",
     "최신 여행 정보를 수집중입니다",
     "답변을 생성중입니다"
-  ]
+  ], [])
 
   useEffect(() => {
     const interval = setInterval(() => {
       setTextIndex((prev) => (prev + 1) % loadingTexts.length)
-    }, 8000) // 5초마다 텍스트 변경
+    }, 8000) // 8초마다 텍스트 변경
 
     return () => clearInterval(interval)
-  }, [])
+  }, [loadingTexts.length])
 
   return (
     <div className="flex items-center space-x-3 text-sm text-gray-600">
@@ -65,14 +65,75 @@ export function ChatbotModal() {
   }, [showChatbot])
 
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!chatMessage.trim()) return
 
     const messageText = chatMessage
     setChatMessage('')
     await handleChatSubmit(messageText)
-  }
+  }, [chatMessage, setChatMessage, handleChatSubmit])
+
+  const [isComposing, setIsComposing] = useState(false)
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !isComposing) {
+      e.preventDefault()
+      if (!chatMessage.trim()) return
+
+      const messageText = chatMessage
+      setChatMessage('')
+      handleChatSubmit(messageText)
+    }
+  }, [chatMessage, setChatMessage, handleChatSubmit, isComposing])
+
+  const handleCompositionStart = useCallback(() => {
+    setIsComposing(true)
+  }, [])
+
+  const handleCompositionEnd = useCallback(() => {
+    setIsComposing(false)
+  }, [])
+
+  const memoizedChatMessages = useMemo(() =>
+    chatMessages.map((msg) => (
+      <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+        <div className={`max-w-[80%] ${msg.type === 'user'
+          ? 'bg-[#3E68FF] text-white'
+          : 'bg-white border border-gray-200'
+          } rounded-2xl px-4 py-2 shadow-sm`}>
+          {msg.type === 'bot' && (msg.message.includes('생성하고 있습니다') || msg.message.includes('검색하고 있습니다') || msg.message.includes('준비 중입니다') || msg.message.includes('수집하고 있습니다')) ? (
+            // 개선된 로딩 애니메이션
+            <LoadingAnimation />
+          ) : msg.type === 'bot' && msg.isHtml ? (
+            // HTML 형태로 렌더링 (개행이 <br>로 변환됨)
+            <div
+              className="text-sm text-gray-800"
+              dangerouslySetInnerHTML={{ __html: msg.message }}
+            />
+          ) : msg.type === 'bot' && msg.lines && Array.isArray(msg.lines) ? (
+            // 줄별 배열로 렌더링
+            <div className="text-sm text-gray-800">
+              {msg.lines.map((line, index) => (
+                <div key={index}>
+                  {line === '' ? (
+                    <br />
+                  ) : (
+                    <span>{line}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            // 기본 텍스트 렌더링
+            <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
+              {msg.message}
+            </p>
+          )}
+        </div>
+      </div>
+    ))
+  , [chatMessages])
 
   if (!showChatbot) return null
 
@@ -132,43 +193,7 @@ export function ChatbotModal() {
 
         {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-          {chatMessages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] ${msg.type === 'user'
-                ? 'bg-[#3E68FF] text-white'
-                : 'bg-white border border-gray-200'
-                } rounded-2xl px-4 py-2 shadow-sm`}>
-                {msg.type === 'bot' && (msg.message.includes('생성하고 있습니다') || msg.message.includes('검색하고 있습니다') || msg.message.includes('준비 중입니다') || msg.message.includes('수집하고 있습니다')) ? (
-                  // 개선된 로딩 애니메이션
-                  <LoadingAnimation />
-                ) : msg.type === 'bot' && msg.isHtml ? (
-                  // HTML 형태로 렌더링 (개행이 <br>로 변환됨)
-                  <div
-                    className="text-sm text-gray-800"
-                    dangerouslySetInnerHTML={{ __html: msg.message }}
-                  />
-                ) : msg.type === 'bot' && msg.lines && Array.isArray(msg.lines) ? (
-                  // 줄별 배열로 렌더링
-                  <div className="text-sm text-gray-800">
-                    {msg.lines.map((line, index) => (
-                      <div key={index}>
-                        {line === '' ? (
-                          <br />
-                        ) : (
-                          <span>{line}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  // 기본 텍스트 렌더링
-                  <p className={`text-sm ${msg.type === 'user' ? 'text-white' : 'text-gray-800'}`}>
-                    {msg.message}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
+          {memoizedChatMessages}
           <div ref={messagesEndRef} />
         </div>
 
@@ -179,6 +204,9 @@ export function ChatbotModal() {
               type="text"
               value={chatMessage}
               onChange={(e) => setChatMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
               placeholder="메시지를 입력하세요..."
               className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-[#3E68FF] focus:border-transparent text-gray-800"
             />

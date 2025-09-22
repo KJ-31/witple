@@ -1,6 +1,7 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useMemo, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 
 interface ChatMessage {
   id: number
@@ -48,11 +49,20 @@ interface ChatbotProviderProps {
 }
 
 export function ChatbotProvider({ children }: ChatbotProviderProps) {
+  const { data: session } = useSession()
   const [showChatbot, setShowChatbot] = useState(false)
   const [chatMessage, setChatMessage] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isAppLoading, setIsAppLoading] = useState(false)
   const [hasUnreadResponse, setHasUnreadResponse] = useState(false)
+  const [sessionId, setSessionId] = useState<string>(() => {
+    // 초기 session_id 생성 또는 복원
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('chatSessionId')
+      return saved || crypto.randomUUID()
+    }
+    return crypto.randomUUID()
+  })
 
   const [pendingResponseId, setPendingResponseId] = useState<number | null>(null)
   const modalClosedDuringResponseRef = useRef(false)
@@ -120,6 +130,13 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     }
   }, [chatMessages])
 
+  // session_id를 sessionStorage에 저장
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('chatSessionId', sessionId)
+    }
+  }, [sessionId])
+
   // 모달 상태 변화 추적
   useEffect(() => {
     if (showChatbot) {
@@ -134,32 +151,45 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     }
   }, [showChatbot, pendingResponseId])
 
-  const clearNotification = () => {
+  const clearNotification = useCallback(() => {
     setHasUnreadResponse(false)
     setPendingResponseId(null)
     modalClosedDuringResponseRef.current = false
-  }
+  }, [])
 
   // 토스트 메시지 함수
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ show: true, message, type })
     setTimeout(() => {
       setToast({ show: false, message: '', type: 'info' })
     }, 3000) // 3초 후 자동 사라짐
-  }
+  }, [])
 
-  const clearChatHistory = async () => {
+  const clearChatHistory = useCallback(async () => {
     try {
-      // 1. 백엔드 여행 상태 초기화
+      // 1. 새로운 session_id 생성
+      const newSessionId = crypto.randomUUID()
+      setSessionId(newSessionId)
+
+      // 2. 백엔드 여행 상태 초기화
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      }
+
+      // 인증 헤더 추가
+      if (session?.accessToken) {
+        headers['Authorization'] = `Bearer ${session.accessToken}`
+      } else if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
       await fetch(`${API_BASE_URL}/api/v1/chat/clear-state`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        headers
       })
-      
-      // 2. 프론트엔드 채팅 메시지 초기화
+
+      // 3. 프론트엔드 채팅 메시지 초기화
       const initialMessage = {
         id: Date.now(),
         type: 'bot' as const,
@@ -167,22 +197,26 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
         timestamp: new Date()
       }
       setChatMessages([initialMessage])
-      
-      // 3. sessionStorage 초기화
+
+      // 4. sessionStorage 초기화
       sessionStorage.removeItem('chatMessages')
-      
-      // 4. 알림 상태 초기화
+      sessionStorage.setItem('chatSessionId', newSessionId)
+
+      // 5. 알림 상태 초기화
       clearNotification()
-      
-      // 5. 성공 토스트 메시지 표시
+
+      // 6. 성공 토스트 메시지 표시
       showToast('채팅 기록이 초기화되었습니다!', 'success')
-      
+
       console.log('✅ 채팅 기록 및 여행 상태 초기화 완료')
-      
+
     } catch (error) {
       console.error('❌ 채팅 기록 초기화 실패:', error)
-      
+
       // 에러가 발생해도 프론트엔드 상태는 초기화
+      const newSessionId = crypto.randomUUID()
+      setSessionId(newSessionId)
+
       const initialMessage = {
         id: Date.now(),
         type: 'bot' as const,
@@ -191,14 +225,15 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       }
       setChatMessages([initialMessage])
       sessionStorage.removeItem('chatMessages')
+      sessionStorage.setItem('chatSessionId', newSessionId)
       clearNotification()
-      
+
       // 에러 토스트 메시지 표시
       showToast('채팅 기록 초기화 중 오류가 발생했습니다.', 'error')
     }
-  }
+  }, [session, showToast, clearNotification])
 
-  const handleChatSubmit = async (messageText: string) => {
+  const handleChatSubmit = useCallback(async (messageText: string) => {
     if (!messageText.trim()) return
     
     // 중복 요청 방지
@@ -274,13 +309,23 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     try {
       // API 호출
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      }
+
+      // 인증 헤더 추가
+      if (session?.accessToken) {
+        headers['Authorization'] = `Bearer ${session.accessToken}`
+      } else if ((session as any)?.backendToken) {
+        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
-          message: messageText
+          message: messageText,
+          session_id: sessionId
         })
       })
 
@@ -354,9 +399,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       setIsProcessing(false)
 
     }
-  }
+  }, [sessionId, session, isProcessing, setChatMessages, setPendingResponseId, modalClosedDuringResponseRef, setIsProcessing, setHasUnreadResponse])
 
-  const value: ChatbotContextType = {
+  const value: ChatbotContextType = useMemo(() => ({
     showChatbot,
     setShowChatbot,
     chatMessage,
@@ -371,7 +416,22 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
     clearChatHistory,
     toast,
     showToast
-  }
+  }), [
+    showChatbot,
+    setShowChatbot,
+    chatMessage,
+    setChatMessage,
+    chatMessages,
+    setChatMessages,
+    handleChatSubmit,
+    isAppLoading,
+    setIsAppLoading,
+    hasUnreadResponse,
+    clearNotification,
+    clearChatHistory,
+    toast,
+    showToast
+  ])
 
   return (
     <ChatbotContext.Provider value={value}>
