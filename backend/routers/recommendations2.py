@@ -555,6 +555,7 @@ async def get_explore_section(
 
         # 🎯 로그인된 사용자의 경우 우선순위 태그 기반으로 카테고리 결정 (안전한 처리)
         target_category = category
+        user_priority = None  # 기본값 설정
         if current_user and user_id:
             try:
                 engine = await get_engine()

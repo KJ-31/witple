@@ -167,8 +167,8 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           setRelatedAttractions(filtered)
           setCurrentPage(0)
           setNoMoreResults(false)
-          // 추천 API에서 50개 받았으면 더 많은 데이터를 위해 hasMore = true로 설정
-          setHasMore(filtered.length >= 50)
+          // 항상 더 많은 장소가 있다고 가정
+          setHasMore(true)
 
           // 캐시에 저장 (카테고리 + 지역 조합으로 키 생성)
           if (isFirstLoad) {
@@ -185,7 +185,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         } else {
           // 추천 알고리즘에서는 페이지네이션 없이 한 번에 모든 결과 반환
           setNoMoreResults(true)
-          setHasMore(false)
+          setHasMore(true)
         }
       }
     } catch (error) {
@@ -289,11 +289,11 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
         setRelatedAttractions(filtered)
         setCurrentPage(0)
         setNoMoreResults(filtered.length === 0)
-        setHasMore(false) // fallback에서는 추가 로드 없음
+        setHasMore(true) // 항상 더 많은 장소가 있다고 가정
       } else {
         if (filtered.length === 0) {
           setNoMoreResults(true)
-          setHasMore(false)
+          setHasMore(true)
         } else {
           setRelatedAttractions(prev => [...prev, ...filtered])
           setCurrentPage(0)
@@ -369,7 +369,7 @@ export default function ItineraryBuilder({ params }: ItineraryBuilderProps) {
           if (filtered.length === 0) {
             console.log('🔍 필터링된 장소가 0개 - noMoreResults 설정')
             setNoMoreResults(true)
-            setHasMore(false)
+            setHasMore(true)
           } else {
             console.log('🔍 기존 장소에 새 장소 추가')
             setRelatedAttractions(prev => {
