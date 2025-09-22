@@ -96,12 +96,14 @@ def auto_initialize():
             print("✅ 자동 초기화 성공")
         else:
             print("⚠️ 자동 초기화 실패 - 수동 초기화 필요")
+
     except Exception as e:
         print(f"⚠️ 자동 초기화 중 오류: {e}")
 
 
 # 호환성을 위한 기존 함수명 유지
 get_travel_recommendation = get_travel_recommendation_langgraph
+
 
 
 # 스크립트로 직접 실행시
@@ -129,11 +131,10 @@ if __name__ == "__main__":
                 print(f"📄 응답 길이: {len(result.get('content', ''))} 문자")
                 print("---")
 
+
         asyncio.run(test_query())
     else:
         print("❌ 시스템 초기화 실패")
         sys.exit(1)
 
 
-# 모듈 로드시 자동 초기화 실행
-# auto_initialize()  # 필요시 주석 해제
