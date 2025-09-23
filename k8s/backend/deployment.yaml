@@ -64,6 +64,17 @@ spec:
             secretKeyRef:
               name: weather-secret
               key: WEATHER_API_KEY
+        # 🎭 시연 모드 설정
+        - name: DEMO_MODE
+          valueFrom:
+            secretKeyRef:
+              name: demo-secret
+              key: DEMO_MODE
+        - name: DEMO_PLACE_NAMES
+          valueFrom:
+            secretKeyRef:
+              name: demo-secret
+              key: DEMO_PLACE_NAMES
         resources:
           requests:
             memory: "1Gi"
