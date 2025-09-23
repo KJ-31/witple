@@ -120,19 +120,33 @@ const authOptions: NextAuthOptions = {
       }
       return true
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       // 로그인 시 토큰에 백엔드 토큰과 사용자 정보 추가
       if ((user as any)?.backendToken) {
         ;(token as any).backendToken = (user as any).backendToken
         ;(token as any).userId = user.id
+        console.log('✅ JWT 콜백에서 backendToken 저장됨:', !!(user as any).backendToken)
       }
+
+      // 구글 OAuth 계정인 경우에도 토큰 유지
+      if (account?.access_token && account?.provider === 'google') {
+        ;(token as any).accessToken = account.access_token
+      }
+
       return token
     },
     async session({ session, token }) {
       // 세션에 백엔드 토큰과 사용자 ID 추가
       if ((token as any).backendToken) {
         ;(session as any).backendToken = (token as any).backendToken
+        console.log('✅ 세션 콜백에서 backendToken 전달됨:', !!(token as any).backendToken)
       }
+
+      // OAuth access token도 세션에 추가 (fallback용)
+      if ((token as any).accessToken) {
+        ;(session as any).accessToken = (token as any).accessToken
+      }
+
       if ((token as any).userId) {
         if (session.user) {
           ;(session.user as any).id = (token as any).userId

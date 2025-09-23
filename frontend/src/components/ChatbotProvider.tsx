@@ -177,11 +177,12 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
         'Content-Type': 'application/json',
       }
 
-      // 인증 헤더 추가
-      if (session?.accessToken) {
-        headers['Authorization'] = `Bearer ${session.accessToken}`
-      } else if ((session as any)?.backendToken) {
-        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      // 인증 헤더 추가 (배포 환경 호환성 개선)
+      const token = (session as any)?.backendToken || session?.accessToken
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      } else {
+        console.warn('⚠️ 채팅 API 호출 시 인증 토큰이 없습니다. 세션 상태:', !!session)
       }
 
       await fetch(`${API_BASE_URL}/api/v1/chat/clear-state`, {
@@ -313,11 +314,28 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
         'Content-Type': 'application/json',
       }
 
-      // 인증 헤더 추가
-      if (session?.accessToken) {
-        headers['Authorization'] = `Bearer ${session.accessToken}`
-      } else if ((session as any)?.backendToken) {
-        headers['Authorization'] = `Bearer ${(session as any).backendToken}`
+      // 인증 헤더 추가 (배포 환경 호환성 개선)
+      const token = (session as any)?.backendToken || session?.accessToken
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      } else {
+        console.warn('⚠️ 채팅 API 호출 시 인증 토큰이 없습니다. 세션 상태:', !!session)
+
+        // 토큰이 없으면 에러 메시지 표시하고 조기 return
+        setChatMessages(prev => {
+          const filteredMessages = prev.filter(msg => msg.id !== loadingMessage.id)
+          const errorResponse: ChatMessage = {
+            id: Date.now() + 2,
+            type: 'bot',
+            message: '로그인이 필요한 서비스입니다. 다시 로그인해주세요.',
+            timestamp: new Date()
+          }
+          return [...filteredMessages, errorResponse]
+        })
+
+        setIsProcessing(false)
+        setPendingResponseId(null)
+        return
       }
 
       const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
@@ -330,6 +348,9 @@ export function ChatbotProvider({ children }: ChatbotProviderProps) {
       })
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.')
+        }
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
