@@ -217,12 +217,12 @@ class HybridOptimizedRetriever(BaseRetriever):
     def _sql_filter_candidates(self, query: str, regions: List[str], cities: List[str], categories: List[str]) -> List[Document]:
         """SQL 쿼리로 후보 문서들을 먼저 필터링"""
         try:
-            import os
             engine = shared_engine
 
             # 🎭 시연 모드 체크 - 서울 지역에서만 고정된 장소들 반환
-            demo_mode = os.getenv('DEMO_MODE', 'false').lower() == 'true'
-            if demo_mode:
+            from utils.demo_mode import get_demo_manager
+            demo_manager = get_demo_manager()
+            if demo_manager.is_demo_mode():
                 # 서울 관련 질문인지 확인
                 is_seoul_query = (
                     any('서울' in region for region in regions) or
@@ -232,9 +232,8 @@ class HybridOptimizedRetriever(BaseRetriever):
 
                 if is_seoul_query:
                     # 서울 질문일 때만 고정 장소 반환
-                    demo_places = os.getenv('DEMO_PLACE_NAMES',
-                        '달맞이근린공원,한강 다리밑 영화제,응암동돈까스,서울 중앙시장,서대문형무소역사관,켄싱턴호텔 여의도,한강 종이비행기 축제, 한강').split(',')
-                    if demo_places and demo_places[0]:  # 빈 문자열 체크
+                    demo_places = demo_manager.get_demo_places()
+                    if demo_places:  # 빈 문자열 체크
                         print(f"🎭 시연 모드 (서울 지역): {len(demo_places)}개 고정 장소 사용")
                         print(f"🎯 시연용 서울 장소들: {[p.strip() for p in demo_places]}")
 
