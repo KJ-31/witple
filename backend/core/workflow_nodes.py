@@ -253,7 +253,8 @@ def rag_processing_node(state: TravelState) -> TravelState:
 • 09:00-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
 • 12:00-13:00 <strong>식당명</strong> - 음식 종류 점심 <br>
 • XX:XX-XX:XX <strong>장소명</strong> - 간단한 설명 (1줄) <br>
-• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁 <br><br>
+• 18:00-19:00 <strong>식당명</strong> - 음식 종류 저녁 <br>
+<br>
 
 <strong>[2일차]</strong> (기간에 따라 추가)
 ...
@@ -320,9 +321,12 @@ def rag_processing_node(state: TravelState) -> TravelState:
                     except Exception as e:
                         print(f"   ❌ endDate 계산 오류: {e}")
 
-            # duration 정보도 업데이트
-            travel_plan["duration"] = f"{parsed_days_count}일"
-            print(f"   ✅ duration 업데이트: {travel_plan['duration']}")
+        # duration 정보는 파싱 성공 여부와 관계없이 항상 업데이트
+        from utils.travel_planner import parse_duration_to_days
+        original_duration = travel_plan.get("duration", "미정")
+        target_days = parse_duration_to_days(original_duration)
+        travel_plan["duration"] = f"{target_days}일"
+        print(f"✅ duration 업데이트: '{original_duration}' -> '{travel_plan['duration']}' (target_days: {target_days})")
 
         # UI용 구조화된 응답 생성
         formatted_ui_response = create_formatted_ui_response(travel_plan, formatted_response)
@@ -338,8 +342,10 @@ def rag_processing_node(state: TravelState) -> TravelState:
             print(f"   - travel_plan keys: {list(travel_plan.keys())}")
             print(f"   - days 존재: {'days' in travel_plan}")
             print(f"   - days 길이: {len(travel_plan.get('days', []))}")
+            print(f"   - days 내용: {travel_plan.get('days', [])}")
             print(f"   - places 존재: {'places' in travel_plan}")
             print(f"   - places 길이: {len(travel_plan.get('places', []))}")
+
 
         # 여행 계획 DB 저장 (안전한 방식 사용)
         user_id = state.get("user_id", "guest_user")
