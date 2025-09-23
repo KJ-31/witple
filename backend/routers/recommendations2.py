@@ -173,9 +173,9 @@ async def fetch_recommendations_with_fallback(
                 timeout=RECOMMENDATION_TIMEOUT
             )
             
-            # 결과가 있으면 캐시에 저장 (메인페이지는 5분, 일반은 15분) - 복원됨
+            # 결과가 있으면 캐시에 저장 (메인페이지는 1시간, 일반은 15분) - 복원됨
             if result:
-                expire_time = 300 if fast_mode else 900  # 5분 or 15분
+                expire_time = 3600 if fast_mode else 900  # 1시간 or 15분
                 set_recommendations_cache(cache_key, result, expire=expire_time)
             
             return result if result else []
@@ -377,8 +377,8 @@ async def get_main_personalized_feed(
             "total_count": len(processed_recommendations)
         }
         
-        # 결과를 캐시에 저장 (5분 캐싱) - 복원됨
-        cache.set(response_cache_key, response_data, expire=300)
+        # 결과를 캐시에 저장 (1시간 캐싱) - 복원됨
+        cache.set(response_cache_key, response_data, expire=3600)
         logger.info(f"🚀 Main personalized feed cached: {response_cache_key}")
         
         return response_data
@@ -502,8 +502,8 @@ async def get_main_explore_feed(
             }
         }
 
-        # 🚀 응답을 새로운 캐시 키로 저장 (8분 TTL - 메인페이지용 최적화) - 복원됨
-        cache.set(explore_cache_key, result, expire=480)
+        # 🚀 응답을 새로운 캐시 키로 저장 (1시간 TTL - 메인페이지용 최적화) - 복원됨
+        cache.set(explore_cache_key, result, expire=3600)
         logger.info(f"🚀 Main explore feed cached: {explore_cache_key}")
 
         return result
