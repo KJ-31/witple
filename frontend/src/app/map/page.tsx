@@ -3469,20 +3469,20 @@ export default function MapPage() {
                       
                       {/* 경로 버튼들 (2개 이상일 때만 표시) */}
                       {groupedPlaces[day] && groupedPlaces[day].length >= 2 && (
-                        <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setHighlightedDay(day);
                               renderBasicRoute(day);
                             }}
-                            className="flex items-center space-x-1 px-2 py-1 bg-[#34A853]/10 hover:bg-[#34A853]/20 border border-[#34A853]/30 hover:border-[#34A853]/50 rounded-lg transition-all duration-200 group"
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#34A853]/10 hover:bg-[#34A853]/20 border border-[#34A853]/30 hover:border-[#34A853]/50 rounded-lg transition-all duration-200 group w-full sm:w-auto"
                             title="순서대로 기본 동선 보기"
                           >
-                            <svg className="w-3 h-3 text-[#34A853] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-3 h-3 text-[#34A853] group-hover:scale-110 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                             </svg>
-                            <span className="text-[#34A853] group-hover:text-[#4CAF50] text-xs font-medium transition-colors">기본 동선</span>
+                            <span className="text-[#34A853] group-hover:text-[#4CAF50] text-xs font-medium transition-colors whitespace-nowrap">기본 동선</span>
                           </button>
                           <button
                             onClick={(e) => {
@@ -3490,13 +3490,13 @@ export default function MapPage() {
                               setHighlightedDay(day);
                               openOptimizeConfirm(day);
                             }}
-                            className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group"
+                            className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group w-full sm:w-auto"
                             title="최적화된 경로 보기"
                           >
-                            <svg className="w-3 h-3 text-[#FF9800] group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-3 h-3 text-[#FF9800] group-hover:scale-110 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                             </svg>
-                            <span className="text-[#FF9800] group-hover:text-[#FFA726] text-xs font-medium transition-colors">최적화 경로</span>
+                            <span className="text-[#FF9800] group-hover:text-[#FFA726] text-xs font-medium transition-colors whitespace-nowrap">최적화 경로</span>
                           </button>
                         </div>
                       )}
