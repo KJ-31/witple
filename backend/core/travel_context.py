@@ -19,8 +19,8 @@ class TravelContext:
     vectorstore: Any = None
 
     # 설정
-    aws_region: str = "us-east-1"
-    model_name: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    aws_region: str = None
+    model_name: str = None
 
     # 캐시 및 상태
     current_travel_state: Dict[str, Any] = None

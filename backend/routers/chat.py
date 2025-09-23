@@ -173,6 +173,38 @@ async def chat_with_llm(
         
         print(f"🔍 Processing travel query: {chat_message.message}")
 
+        # 데모 모드 토글 명령 확인
+        from utils.demo_mode import get_demo_manager
+        demo_manager = get_demo_manager()
+
+        message_lower = chat_message.message.strip().lower()
+        if message_lower.startswith('demo:'):
+            demo_command = message_lower.split('demo:')[1].strip()
+
+            if demo_command == 'true':
+                response_text = demo_manager.enable_demo_mode()
+            elif demo_command == 'false':
+                response_text = demo_manager.disable_demo_mode()
+            elif demo_command == 'status':
+                status = demo_manager.get_status()
+                response_text = f"📊 **데모 모드 상태**\n\n"
+                response_text += f"• 현재 상태: {'🎭 활성화' if status['demo_mode'] else '✅ 비활성화'}\n"
+                response_text += f"• 데모용 장소 수: {status['demo_places_count']}개\n"
+                if status['demo_mode']:
+                    response_text += f"• 데모용 장소들: {', '.join(status['demo_places'][:5])}{'...' if len(status['demo_places']) > 5 else ''}"
+            else:
+                response_text = f"❌ 잘못된 데모 명령입니다.\n\n사용법:\n• `DEMO:true` - 데모 모드 활성화\n• `DEMO:false` - 데모 모드 비활성화\n• `DEMO:status` - 현재 상태 확인"
+
+            response_html, response_lines = process_response_for_frontend(response_text)
+
+            return ChatResponse(
+                response=response_text,
+                success=True,
+                response_html=response_html,
+                response_lines=response_lines,
+                session_id=session_id
+            )
+
         # Redis 캐싱 제거됨 - 항상 새로운 응답 생성
 
         # LangGraph 사용
