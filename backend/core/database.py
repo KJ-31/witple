@@ -219,6 +219,60 @@ class HybridOptimizedRetriever(BaseRetriever):
         try:
             engine = shared_engine
 
+            # 🎭 시연 모드 체크 - 서울 지역에서만 고정된 장소들 반환
+            from utils.demo_mode import get_demo_manager
+            demo_manager = get_demo_manager()
+            if demo_manager.is_demo_mode():
+                # 서울 관련 질문인지 확인
+                is_seoul_query = (
+                    any('서울' in region for region in regions) or
+                    any('서울' in city for city in cities) or
+                    (not regions and not cities)  # 지역 미지정시도 서울로 간주
+                )
+
+                if is_seoul_query:
+                    # 서울 질문일 때만 고정 장소 반환
+                    demo_places = demo_manager.get_demo_places()
+                    if demo_places:  # 빈 문자열 체크
+                        print(f"🎭 시연 모드 (서울 지역): {len(demo_places)}개 고정 장소 사용")
+                        print(f"🎯 시연용 서울 장소들: {[p.strip() for p in demo_places]}")
+
+                        # 고정된 장소명들로만 검색
+                        place_conditions = []
+                        params = {}
+
+                        for i, place in enumerate(demo_places):
+                            place = place.strip()
+                            if place:  # 빈 문자열이 아닌 경우만
+                                param_name = f"demo_place_{i}"
+                                place_conditions.append(f"cmetadata->>'name' = :{param_name}")
+                                params[param_name] = place
+
+                        if place_conditions:
+                            sql_query = f"""
+                                SELECT document, cmetadata, embedding
+                                FROM langchain_pg_embedding
+                                WHERE collection_id = (SELECT uuid FROM langchain_pg_collection WHERE name = 'place_recommendations')
+                                AND ({' OR '.join(place_conditions)})
+                                ORDER BY RANDOM()
+                                LIMIT 20
+                            """
+
+                            with engine.connect() as conn:
+                                results = conn.execute(text(sql_query), params).fetchall()
+                                docs = []
+                                for row in results:
+                                    metadata = row.cmetadata or {}
+                                    metadata['search_method'] = 'demo_fixed_places'
+                                    if row.embedding:
+                                        metadata['_embedding'] = row.embedding
+                                    docs.append(Document(page_content=row.document, metadata=metadata))
+
+                                print(f"🎭 시연용 서울 고정 장소: {len(docs)}개 반환")
+                                return docs
+                else:
+                    print(f"🎭 시연 모드이지만 서울이 아닌 지역({regions}, {cities}) 질문 → 정상 검색 진행")
+
             # 조건이 없으면 전체 검색 실행
             if not regions and not cities and not categories:
                 print("🔍 지역/카테고리 정보 없음, 전체 텍스트 검색 실행")

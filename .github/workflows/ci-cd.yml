@@ -356,6 +356,13 @@ jobs:
           --namespace=${{ env.EKS_NAMESPACE }} \
           --from-literal=WEATHER_API_KEY="${{ secrets.WEATHER_API_KEY }}"
         
+        # 🎭 시연 모드 시크릿 생성
+        kubectl delete secret demo-secret -n ${{ env.EKS_NAMESPACE }} --ignore-not-found=true
+        kubectl create secret generic demo-secret \
+          --namespace=${{ env.EKS_NAMESPACE }} \
+          --from-literal=DEMO_MODE="${{ secrets.DEMO_MODE }}" \
+          --from-literal=DEMO_PLACE_NAMES="${{ secrets.DEMO_PLACE_NAMES }}"
+        
         echo "Secrets created successfully"
         
         # ECR Pull Secret 생성 (이미지 Pull을 위해)

@@ -2,7 +2,6 @@
 여행 계획 관련 기능들
 """
 import re
-import json
 from datetime import datetime
 
 
@@ -128,20 +127,33 @@ def parse_enhanced_travel_plan(response: str, user_query: str, structured_places
             for i, section in enumerate(day_sections):
                 print(f"   섹션 {i}: '{section[:100]}{'...' if len(section) > 100 else ''}'")
 
-            for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 일차 번호, 짝수가 내용
+            # re.split 결과 분석: [텍스트, 그룹1, 텍스트, 그룹2, 텍스트, ...]
+            # 매칭된 그룹들과 그 다음 텍스트를 올바르게 매핑
+            for i in range(1, len(day_sections), 2):  # 홀수 인덱스가 매칭된 일차 번호
                 if i + 1 < len(day_sections):
-                    day_num_str = day_sections[i]
-                    day_content = day_sections[i + 1]
+                    day_num_str = day_sections[i].strip()
+                    day_content = day_sections[i + 1].strip()
 
                     print(f"🔍 처리 중: 섹션 {i} (일차번호) = '{day_num_str}', 섹션 {i+1} (내용) = '{day_content[:200]}{'...' if len(day_content) > 200 else ''}'")
 
+                    # 일차 번호 추출 (숫자만)
+                    day_num_match = re.search(r'(\d+)', day_num_str)
+                    if not day_num_match:
+                        print(f"   ❌ 일차 번호 추출 실패: '{day_num_str}'")
+                        continue
+
                     try:
-                        day_num = int(day_num_str)
+                        day_num = int(day_num_match.group(1))
                     except ValueError:
                         print(f"   ❌ 일차 번호 변환 실패: '{day_num_str}'")
                         continue
 
-                    print(f"📅 {day_num}일차 파싱 중...")
+                    print(f"📅 {day_num}일차 파싱 중... (내용 길이: {len(day_content)})")
+
+                    # 내용이 비어있으면 스킵
+                    if not day_content or len(day_content.strip()) < 10:
+                        print(f"   ⚠️ {day_num}일차: 내용이 비어있어서 스킵")
+                        continue
 
                     # 해당 일차의 일정 파싱
                     day_schedule = parse_day_schedule(day_content, structured_places)
@@ -326,6 +338,33 @@ def extract_duration(query: str) -> str:
             return match.group(0)
 
     return "미정"
+
+
+def parse_duration_to_days(duration: str) -> int:
+    """기간 문자열을 실제 일수로 변환"""
+    if not duration or duration == "미정":
+        return 1
+
+    # "1박2일" -> 2일, "2박3일" -> 3일
+    night_day_match = re.search(r'(\d+)박\s*(\d+)일', duration)
+    if night_day_match:
+        return int(night_day_match.group(2))  # 일수 반환
+
+    # "2일1박" -> 2일
+    day_night_match = re.search(r'(\d+)일\s*(\d+)박', duration)
+    if day_night_match:
+        return int(day_night_match.group(1))  # 일수 반환
+
+    # "3일" -> 3일
+    day_match = re.search(r'(\d+)일', duration)
+    if day_match:
+        return int(day_match.group(1))
+
+    # "당일" 또는 "하루" -> 1일
+    if "당일" in duration or "하루" in duration:
+        return 1
+
+    return 1  # 기본값
 
 
 def generate_plan_id() -> str:
