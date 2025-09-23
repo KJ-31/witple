@@ -1,31 +1,60 @@
 """
-실시간 데모 모드 관리 모듈
+DB 기반 데모 모드 관리 모듈
 """
 import os
-from typing import Optional
+from typing import Optional, List
+from sqlalchemy import text
+from database import engine as shared_engine
 
 class DemoModeManager:
-    """데모 모드 실시간 관리 클래스"""
+    """데모 모드 DB 기반 관리 클래스"""
 
     def __init__(self):
-        # 환경변수에서 초기값 로드
-        initial_mode = os.getenv('DEMO_MODE', 'false').lower() == 'true'
-        self._demo_mode = initial_mode
-        self._demo_places = os.getenv('DEMO_PLACE_NAMES',
-            '달맞이근린공원,한강 다리밑 영화제,응암동돈까스,서울 중앙시장,서대문형무소역사관,켄싱턴호텔 여의도,한강 종이비행기 축제,한강').split(',')
+        # DB에서 초기값 로드
+        self._load_from_db()
+
+    def _load_from_db(self):
+        """DB에서 설정값 로드"""
+        with shared_engine.connect() as conn:
+            # 데모 모드 상태 로드
+            demo_mode_query = text("SELECT setting_value FROM app_settings WHERE setting_key = 'demo_mode'")
+            result = conn.execute(demo_mode_query).fetchone()
+            self._demo_mode = result.setting_value.lower() == 'true' if result else False
+
+            # 데모 장소 목록 로드
+            demo_places_query = text("SELECT setting_value FROM app_settings WHERE setting_key = 'demo_place_names'")
+            result = conn.execute(demo_places_query).fetchone()
+            if result:
+                self._demo_places = [place.strip() for place in result.setting_value.split(',')]
+            else:
+                self._demo_places = []
+
+    def _save_demo_mode_to_db(self, value: bool):
+        """데모 모드 상태를 DB에 저장"""
+        with shared_engine.connect() as conn:
+            query = text("""
+                INSERT INTO app_settings (setting_key, setting_value, description)
+                VALUES ('demo_mode', :value, '데모 모드 활성화 여부 (true/false)')
+                ON CONFLICT (setting_key)
+                DO UPDATE SET setting_value = :value
+            """)
+            conn.execute(query, {"value": str(value).lower()})
+            conn.commit()
+            self._demo_mode = value
 
     def is_demo_mode(self) -> bool:
-        """현재 데모 모드 상태 반환"""
+        """현재 데모 모드 상태 반환 (DB에서 실시간 조회)"""
+        self._load_from_db()
         return self._demo_mode
 
     def enable_demo_mode(self) -> str:
         """데모 모드 활성화"""
-        self._demo_mode = True
+        self._save_demo_mode_to_db(True)
         return "🎭 데모 모드가 활성화되었습니다. 서울 지역 질문 시 고정된 장소들이 반환됩니다."
 
     def disable_demo_mode(self) -> str:
         """데모 모드 비활성화"""
-        self._demo_mode = False
+        self._save_demo_mode_to_db(False)
         return "✅ 데모 모드가 비활성화되었습니다. 일반 검색 모드로 동작합니다."
 
     def toggle_demo_mode(self) -> str:
@@ -36,11 +65,13 @@ class DemoModeManager:
             return self.enable_demo_mode()
 
     def get_demo_places(self) -> list:
-        """데모용 고정 장소 목록 반환"""
+        """데모용 고정 장소 목록 반환 (DB에서 실시간 조회)"""
+        self._load_from_db()
         return [place.strip() for place in self._demo_places if place.strip()]
 
     def get_status(self) -> dict:
         """현재 데모 모드 상태 정보 반환"""
+        self._load_from_db()
         return {
             "demo_mode": self._demo_mode,
             "demo_places_count": len(self.get_demo_places()),

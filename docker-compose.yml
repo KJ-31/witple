@@ -70,9 +70,6 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - WEATHER_API_KEY=${WEATHER_API_KEY}
-      # 🎭 시연 모드 설정
-      - DEMO_MODE=${DEMO_MODE:-false}
-      - DEMO_PLACE_NAMES=${DEMO_PLACE_NAMES:-}
     depends_on:
       - redis
     volumes:
