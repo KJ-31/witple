@@ -2165,6 +2165,42 @@ export default function MapPage() {
     }
   }, [showItinerary, selectedCategory]);
 
+  // 첫 페이지 진입 시 1일차 자동 선택 및 기본 동선 렌더
+  useEffect(() => {
+    if (selectedItineraryPlaces.length > 0 && !loading && mapInstance && showItinerary) {
+      // 1일차에 장소가 2개 이상 있으면 자동으로 1일차 선택하고 기본 동선 렌더
+      const day1Places = selectedItineraryPlaces.filter(place => place.dayNumber === 1)
+      if (day1Places.length >= 2 && !highlightedDay && (window as any).google?.maps?.DirectionsService) {
+        setTimeout(() => {
+          console.log('첫 페이지 진입 - 1일차 자동 선택 및 기본 동선 렌더링')
+          setHighlightedDay(1)
+          // renderBasicRoute는 highlightedDay useEffect에서 자동으로 호출됨
+        }, 2000) // 지도와 API 완전 로드 후 2초 대기
+      }
+    }
+  }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary])
+
+  // highlightedDay 상태 변경 시 경로 관리 (일차 선택 시 기본 동선으로 렌더)
+  useEffect(() => {
+    if (!mapInstance || !selectedItineraryPlaces.length || !showItinerary) return
+
+    console.log(`일차 선택 변경: ${highlightedDay}일차`)
+
+    if (highlightedDay) {
+      // 일차 선택 시: 해당 일차의 기본 동선 렌더링
+      const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === highlightedDay)
+      if (dayPlaces.length >= 2 && (window as any).google?.maps?.DirectionsService) {
+        console.log(`${highlightedDay}일차 선택 - 기본 동선 렌더링`)
+        setTimeout(() => {
+          renderBasicRoute(highlightedDay)
+        }, 100)
+      }
+    } else {
+      // 일차 비선택 시: 경로 숨김 (다른 곳에서 이미 처리되는 것 같음)
+      console.log('일차 비선택')
+    }
+  }, [highlightedDay, mapInstance, selectedItineraryPlaces, showItinerary])
+
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
@@ -3470,20 +3506,6 @@ export default function MapPage() {
                       {/* 경로 버튼들 (2개 이상일 때만 표시) */}
                       {groupedPlaces[day] && groupedPlaces[day].length >= 2 && (
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-2" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setHighlightedDay(day);
-                              renderBasicRoute(day);
-                            }}
-                            className="flex items-center space-x-1 px-2 py-1 bg-[#34A853]/10 hover:bg-[#34A853]/20 border border-[#34A853]/30 hover:border-[#34A853]/50 rounded-lg transition-all duration-200 group w-full sm:w-auto"
-                            title="순서대로 기본 동선 보기"
-                          >
-                            <svg className="w-3 h-3 text-[#34A853] group-hover:scale-110 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                            </svg>
-                            <span className="text-[#34A853] group-hover:text-[#4CAF50] text-xs font-medium transition-colors whitespace-nowrap">기본 동선</span>
-                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
