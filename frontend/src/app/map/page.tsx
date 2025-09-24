@@ -105,6 +105,21 @@ export default function MapPage() {
     : ''
   )
   const [isUpdatingTrip, setIsUpdatingTrip] = useState(false)
+
+  // 일차별 그라데이션 색상 계산 함수
+  const getDayColor = (dayNumber: number, totalDays: number) => {
+    // 1일차가 가장 진한 색, 마지막 일차가 가장 연한 색
+    const ratio = totalDays === 1 ? 0 : (dayNumber - 1) / (totalDays - 1);
+
+    // HSL로 그라데이션 계산 (진한 파랑 → 연한 파랑)
+    const hue = 227; // 파란색 계열
+    const saturation = 100;
+    const startLightness = 50; // 1일차: 더 진한 색상
+    const endLightness = 75;   // 마지막일차: 더 연한 색상
+
+    const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+  }
   
   const [selectedItineraryPlaces, setSelectedItineraryPlaces] = useState<SelectedPlace[]>([])
   const [categoryPlaces, setCategoryPlaces] = useState<AttractionData[]>([])
@@ -1234,6 +1249,10 @@ export default function MapPage() {
   // 지도 마커 데이터 생성 - 일정 마커는 항상 유지
   const mapMarkers = useMemo(() => {
     const markers = []
+
+    // 총 일차 수 계산
+    const totalDays = selectedItineraryPlaces.length > 0 ?
+      Math.max(...selectedItineraryPlaces.map(p => p.dayNumber || 1)) : 1
     
     // 선택된 일정 장소들은 항상 표시 (모든 모드에서)
     if (selectedItineraryPlaces.length > 0) {
@@ -1243,7 +1262,9 @@ export default function MapPage() {
           position: { lat: place.latitude!, lng: place.longitude! },
           title: place.name,
           id: place.id,
-          type: 'itinerary' as const // 일정 마커 구분
+          type: 'itinerary' as const, // 일정 마커 구분
+          dayNumber: place.dayNumber, // 일차 정보 추가
+          totalDays: totalDays // 총 일차 수 추가
         }))
       markers.push(...itineraryMarkers)
     }
@@ -2875,7 +2896,7 @@ export default function MapPage() {
               }}
               className={`flex-shrink-0 px-3 py-2 rounded-full text-xs font-medium transition-all duration-200 flex items-center space-x-1 backdrop-blur-sm ${
                 selectedCategory === category.key
-                  ? 'bg-[#3E68FF] text-white shadow-lg'
+                  ? 'bg-[#EA580C] text-white shadow-lg'
                   : 'bg-black/30 text-gray-300 hover:text-white hover:bg-black/50'
               }`}
             >
@@ -3369,6 +3390,8 @@ export default function MapPage() {
                   allDays = Object.keys(groupedPlaces).map(Number).sort((a, b) => a - b);
                 }
 
+                const totalDays = Math.max(...allDays);
+
                 return allDays.map(day => (
                   <div key={day} className={`mb-6 rounded-2xl transition-all duration-300 ${
                     highlightedDay === day ? 'bg-[#3E68FF]/10 border-2 border-[#3E68FF]/30 p-4' : 'p-2'
@@ -3385,9 +3408,14 @@ export default function MapPage() {
                       }}
                     >
                       <div className="flex items-center">
-                        <div className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
-                          highlightedDay === day ? 'bg-[#3E68FF] shadow-lg scale-110' : 'bg-[#3E68FF]'
-                        }`}>
+                        <div
+                          className={`rounded-full w-8 h-8 flex items-center justify-center mr-3 transition-all duration-200 ${
+                            highlightedDay === day ? 'shadow-lg scale-110' : ''
+                          }`}
+                          style={{
+                            backgroundColor: getDayColor(day, totalDays)
+                          }}
+                        >
                           <span className="text-white text-sm font-bold">{day}</span>
                         </div>
                         <h3 className={`text-lg font-semibold transition-colors duration-200 ${

@@ -13,6 +13,8 @@ interface GoogleMapProps {
     id?: string
     type?: 'itinerary' | 'category'
     category?: string
+    dayNumber?: number
+    totalDays?: number
   }>
   onMapLoad?: (map: any) => void
   onMarkerClick?: (markerId: string, markerType: string, position?: { lat: number; lng: number }) => void
@@ -33,6 +35,21 @@ const getCategoryIcon = (category?: string): string => {
   return iconMap[category || ''] || '📍'
 }
 
+// 일차별 그라데이션 색상 계산 함수
+const getDayColor = (dayNumber: number, totalDays: number) => {
+  // 1일차가 가장 진한 색, 마지막 일차가 가장 연한 색
+  const ratio = totalDays === 1 ? 0 : (dayNumber - 1) / (totalDays - 1);
+
+  // HSL로 그라데이션 계산 (진한 파랑 → 연한 파랑)
+  const hue = 227; // 파란색 계열
+  const saturation = 100;
+  const startLightness = 50; // 1일차: 더 진한 색상
+  const endLightness = 75;   // 마지막일차: 더 연한 색상
+
+  const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+}
+
 // 마커 아이콘 생성 함수
 const createMarkerIcon = (categoryIcon: string, isSelected: boolean = false) => {
   const size = isSelected ? 30 : 20 // 선택된 마커는 1.5배 크기
@@ -41,7 +58,7 @@ const createMarkerIcon = (categoryIcon: string, isSelected: boolean = false) => 
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
       <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="20" cy="20" r="18" fill="#3E68FF" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="20" cy="20" r="18" fill="#EA580C" stroke="#ffffff" stroke-width="2"/>
         <text x="20" y="27" font-family="Arial" font-size="16" text-anchor="middle" fill="white">${categoryIcon}</text>
       </svg>
     `)}`,
@@ -66,7 +83,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
   const itineraryMarkersRef = useRef<any[]>([])
   const categoryMarkersRef = useRef<any[]>([])
-  const markerInstancesRef = useRef<Map<string, { marker: any, category: string }>>(new Map())
+  const markerInstancesRef = useRef<Map<string, { marker: any, category: string, dayNumber?: number, totalDays?: number }>>(new Map())
 
   // 마커를 타입별로 분리 (메모이제이션으로 최적화)
   const itineraryMarkers = useMemo(() => {
@@ -143,6 +160,10 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         const isSelected = selectedMarkerId === markerData.id
         const scale = isSelected ? 12 : 8 // 선택된 마커는 1.5배 크기
 
+        // 일차별 그라데이션 색상 계산
+        const dayColor = markerData.dayNumber && markerData.totalDays ?
+          getDayColor(markerData.dayNumber, markerData.totalDays) : '#3E68FF';
+
         const marker = new (window as any).google.maps.Marker({
           position: markerData.position,
           map,
@@ -150,7 +171,7 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
           icon: {
             path: (window as any).google.maps.SymbolPath.CIRCLE,
             scale: scale,
-            fillColor: '#FF6B6B', // 일정 마커는 빨간색
+            fillColor: dayColor, // 일차별 그라데이션 색상
             fillOpacity: 1,
             strokeColor: '#ffffff',
             strokeWeight: 2
@@ -161,7 +182,9 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         if (markerData.id) {
           markerInstancesRef.current.set(markerData.id, {
             marker: marker,
-            category: 'itinerary' // 일정 마커 표시
+            category: 'itinerary', // 일정 마커 표시
+            dayNumber: markerData.dayNumber,
+            totalDays: markerData.totalDays
           })
         }
 
@@ -236,11 +259,14 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         const prevMarkerInfo = markerInstancesRef.current.get(selectedMarkerId)
         if (prevMarkerInfo) {
           if (prevMarkerInfo.category === 'itinerary') {
-            // 일정 마커인 경우 (빨간색 원)
+            // 일정 마커인 경우 - 일차별 색상 적용
+            const dayColor = prevMarkerInfo.dayNumber && prevMarkerInfo.totalDays ?
+              getDayColor(prevMarkerInfo.dayNumber, prevMarkerInfo.totalDays) : '#3E68FF';
+
             prevMarkerInfo.marker.setIcon({
               path: (window as any).google.maps.SymbolPath.CIRCLE,
               scale: 8,
-              fillColor: '#FF6B6B',
+              fillColor: dayColor,
               fillOpacity: 1,
               strokeColor: '#ffffff',
               strokeWeight: 2
@@ -258,11 +284,14 @@ const GoogleMapComponent: React.FC<GoogleMapProps> = memo(({
         const newMarkerInfo = markerInstancesRef.current.get(selectedMarkerIdFromParent)
         if (newMarkerInfo) {
           if (newMarkerInfo.category === 'itinerary') {
-            // 일정 마커인 경우 (빨간색 원)
+            // 일정 마커인 경우 - 일차별 색상 적용
+            const dayColor = newMarkerInfo.dayNumber && newMarkerInfo.totalDays ?
+              getDayColor(newMarkerInfo.dayNumber, newMarkerInfo.totalDays) : '#3E68FF';
+
             newMarkerInfo.marker.setIcon({
               path: (window as any).google.maps.SymbolPath.CIRCLE,
               scale: 12, // 1.5배 크기
-              fillColor: '#FF6B6B',
+              fillColor: dayColor,
               fillOpacity: 1,
               strokeColor: '#ffffff',
               strokeWeight: 2
