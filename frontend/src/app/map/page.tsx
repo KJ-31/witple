@@ -3279,13 +3279,14 @@ export default function MapPage() {
                   {(!isFromProfile || isEditMode) && (
                     <button
                       onClick={() => {
+                        setSelectedCategory(null)
                         setShowItinerary(false)
                         // 기존 경로 렌더링 지우기
                         clearRoute()
                         // 기존 카테고리 장소와 마커를 먼저 초기화
                         setCategoryPlaces([])
-                        // 현재 지도 bounds 기준으로 선택된 카테고리 검색
-                        fetchPlacesInBounds(selectedCategory)
+                        // 일정 장소 주변 5km, 모든 카테고리 검색 (카테고리 버튼과 동일한 방식)
+                        fetchNearbyPlaces(null)
                       }}
                       className="px-3 py-1.5 bg-[#1F3C7A]/30 hover:bg-[#3E68FF]/30 rounded-full text-sm text-[#6FA0E6] hover:text-white transition-colors"
                     >
