@@ -128,6 +128,7 @@ export default function MapPage() {
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
   const [userClearedRoute, setUserClearedRoute] = useState(false)
   const [isOptimizing, setIsOptimizing] = useState(false)
+  const [mapFullyLoaded, setMapFullyLoaded] = useState(false)
   const [routeSegments, setRouteSegments] = useState<{
     origin: {lat: number, lng: number, name: string},
     destination: {lat: number, lng: number, name: string},
@@ -2170,20 +2171,39 @@ export default function MapPage() {
     }
   }, [showItinerary, selectedCategory]);
 
+  // 지도 완전 로드 감지
+  useEffect(() => {
+    if (mapInstance && (window as any).google?.maps?.DirectionsService && !loading) {
+      // 지도가 완전히 준비되었는지 추가 확인
+      const checkMapReady = () => {
+        try {
+          // DirectionsService 인스턴스 생성 테스트
+          const testDirectionsService = new (window as any).google.maps.DirectionsService();
+          console.log('지도 및 Google Maps API 완전히 로드됨');
+          setMapFullyLoaded(true);
+        } catch (error) {
+          console.log('Google Maps API 아직 준비되지 않음, 재시도...');
+          setTimeout(checkMapReady, 100);
+        }
+      };
+
+      // 작은 지연 후 체크 (DOM 준비 대기)
+      setTimeout(checkMapReady, 100);
+    }
+  }, [mapInstance, loading]);
+
   // 첫 페이지 진입 시 1일차 자동 선택 및 기본 동선 렌더
   useEffect(() => {
-    if (selectedItineraryPlaces.length > 0 && !loading && mapInstance && showItinerary) {
+    if (selectedItineraryPlaces.length > 0 && !loading && mapInstance && showItinerary && mapFullyLoaded) {
       // 1일차에 장소가 2개 이상 있으면 자동으로 1일차 선택하고 기본 동선 렌더
       const day1Places = selectedItineraryPlaces.filter(place => place.dayNumber === 1)
-      if (day1Places.length >= 2 && !highlightedDay && (window as any).google?.maps?.DirectionsService && !userClearedRoute) {
-        setTimeout(() => {
-          console.log('첫 페이지 진입 - 1일차 자동 선택 및 기본 동선 렌더링')
-          setHighlightedDay(1)
-          // renderBasicRoute는 highlightedDay useEffect에서 자동으로 호출됨
-        }, 2000) // 지도와 API 완전 로드 후 2초 대기
+      if (day1Places.length >= 2 && !highlightedDay && !userClearedRoute) {
+        console.log('지도 로드 완료 - 1일차 자동 선택 및 기본 동선 렌더링')
+        setHighlightedDay(1)
+        // renderBasicRoute는 highlightedDay useEffect에서 자동으로 호출됨
       }
     }
-  }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary, userClearedRoute])
+  }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary, userClearedRoute, mapFullyLoaded])
 
   // highlightedDay 상태 변경 시 경로 관리 (일차 선택 시 기본 동선으로 렌더)
   useEffect(() => {
