@@ -1593,6 +1593,9 @@ export default function MapPage() {
     // 캐싱된 경로 결과 초기화
     setCachedRouteResults([]);
 
+    // 최적화 상태 리셋
+    setIsOptimizedRoute(false);
+
     console.log('모든 경로, 마커, 정보창이 제거되었습니다');
   };
 
@@ -2186,9 +2189,9 @@ export default function MapPage() {
   useEffect(() => {
     if (!mapInstance || !selectedItineraryPlaces.length || !showItinerary) return
 
-    // 최적화 모달이 열려있거나 최적화 중이거나 이미 최적화된 경로가 있을 때는 기본 동선 렌더링하지 않음
-    if (optimizeConfirmModal.isOpen || isOptimizing || isOptimizedRoute) {
-      console.log('최적화 모달이 열려있거나 최적화 중이거나 최적화된 경로가 있으므로 기본 동선 렌더링 건너뜀')
+    // 최적화 모달이 열려있거나 최적화 중일 때는 기본 동선 렌더링하지 않음
+    if (optimizeConfirmModal.isOpen || isOptimizing) {
+      console.log('최적화 모달이 열려있거나 최적화 중이므로 기본 동선 렌더링 건너뜀')
       return
     }
 
@@ -2197,11 +2200,6 @@ export default function MapPage() {
     if (highlightedDay) {
       // 일차가 선택되면 사용자가 경로를 지운 상태를 리셋
       setUserClearedRoute(false)
-
-      // 최적화 중이 아닐 때만 최적화 상태 리셋
-      if (!isOptimizing) {
-        setIsOptimizedRoute(false)
-      }
 
       // 일차 선택 시: 해당 일차의 기본 동선 렌더링
       const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === highlightedDay)
