@@ -126,6 +126,8 @@ export default function MapPage() {
   const [currentSegments, setCurrentSegments] = useState<any[]>([])
   const [isOptimizedRoute, setIsOptimizedRoute] = useState(false)
   const [routeStatus, setRouteStatus] = useState<{message: string, type: 'loading' | 'success' | 'error'} | null>(null)
+  const [userClearedRoute, setUserClearedRoute] = useState(false)
+  const [isOptimizing, setIsOptimizing] = useState(false)
   const [routeSegments, setRouteSegments] = useState<{
     origin: {lat: number, lng: number, name: string},
     destination: {lat: number, lng: number, name: string},
@@ -2170,7 +2172,7 @@ export default function MapPage() {
     if (selectedItineraryPlaces.length > 0 && !loading && mapInstance && showItinerary) {
       // 1일차에 장소가 2개 이상 있으면 자동으로 1일차 선택하고 기본 동선 렌더
       const day1Places = selectedItineraryPlaces.filter(place => place.dayNumber === 1)
-      if (day1Places.length >= 2 && !highlightedDay && (window as any).google?.maps?.DirectionsService) {
+      if (day1Places.length >= 2 && !highlightedDay && (window as any).google?.maps?.DirectionsService && !userClearedRoute) {
         setTimeout(() => {
           console.log('첫 페이지 진입 - 1일차 자동 선택 및 기본 동선 렌더링')
           setHighlightedDay(1)
@@ -2178,21 +2180,24 @@ export default function MapPage() {
         }, 2000) // 지도와 API 완전 로드 후 2초 대기
       }
     }
-  }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary])
+  }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary, userClearedRoute])
 
   // highlightedDay 상태 변경 시 경로 관리 (일차 선택 시 기본 동선으로 렌더)
   useEffect(() => {
     if (!mapInstance || !selectedItineraryPlaces.length || !showItinerary) return
 
-    // 최적화 모달이 열려있을 때는 기본 동선 렌더링하지 않음
-    if (optimizeConfirmModal.isOpen) {
-      console.log('최적화 모달이 열려있으므로 기본 동선 렌더링 건너뜀')
+    // 최적화 모달이 열려있거나 최적화 중일 때는 기본 동선 렌더링하지 않음
+    if (optimizeConfirmModal.isOpen || isOptimizing) {
+      console.log('최적화 모달이 열려있거나 최적화 중이므로 기본 동선 렌더링 건너뜀')
       return
     }
 
     console.log(`일차 선택 변경: ${highlightedDay}일차`)
 
     if (highlightedDay) {
+      // 일차가 선택되면 사용자가 경로를 지운 상태를 리셋
+      setUserClearedRoute(false)
+
       // 일차 선택 시: 해당 일차의 기본 동선 렌더링
       const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === highlightedDay)
       if (dayPlaces.length >= 2 && (window as any).google?.maps?.DirectionsService) {
@@ -2202,10 +2207,11 @@ export default function MapPage() {
         }, 100)
       }
     } else {
-      // 일차 비선택 시: 경로 숨김 (다른 곳에서 이미 처리되는 것 같음)
-      console.log('일차 비선택')
+      // 일차 비선택 시: 경로 지우기
+      console.log('일차 비선택 - 경로 지우기')
+      clearRoute()
     }
-  }, [highlightedDay, mapInstance, selectedItineraryPlaces, showItinerary])
+  }, [highlightedDay, mapInstance, selectedItineraryPlaces, showItinerary, isOptimizing])
 
   // 순서 마커 생성 (START, 1, 2, 3, END)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
@@ -2758,13 +2764,16 @@ export default function MapPage() {
   // 일차별 경로 최적화 실행 (제약 조건 포함)
   const optimizeRouteForDay = async (dayNumber: number) => {
     const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === dayNumber);
-    
+
     if (dayPlaces.length < 2) {
       updateStatus(`${dayNumber}일차에 경로를 계획할 장소가 충분하지 않습니다 (최소 2개 필요)`, 'error');
       return;
     }
 
     try {
+      // 최적화 시작
+      setIsOptimizing(true);
+
       // 활성화된 마커 상태 초기화 (전체 동선 렌더링용)
       setActiveMarkerIndex(null);
       // 먼저 모든 기존 경로와 마커 완전히 제거
@@ -2849,9 +2858,12 @@ export default function MapPage() {
     } catch (error) {
       console.error(`${dayNumber}일차 Route optimization error:`, error);
       updateStatus(
-        `${dayNumber}일차 경로 최적화 중 오류가 발생했습니다.`, 
+        `${dayNumber}일차 경로 최적화 중 오류가 발생했습니다.`,
         'error'
       );
+    } finally {
+      // 최적화 완료
+      setIsOptimizing(false);
     }
   };
 
@@ -3376,7 +3388,11 @@ export default function MapPage() {
                   )}
                   {(directionsRenderers.length > 0 || sequenceMarkers.length > 0) && (
                     <button
-                      onClick={clearRoute}
+                      onClick={() => {
+                        clearRoute();
+                        setHighlightedDay(null);
+                        setUserClearedRoute(true);
+                      }}
                       className="px-3 py-1.5 bg-red-900/30 hover:bg-red-900/50 rounded-full text-sm text-red-400 hover:text-red-300 transition-colors flex items-center space-x-1"
                       title="경로 지우기"
                     >
@@ -3485,7 +3501,12 @@ export default function MapPage() {
                     <div 
                       className="flex items-center justify-between mb-3 cursor-pointer hover:bg-[#1F3C7A]/20 rounded-xl p-2 transition-colors"
                       onClick={() => {
-                        setHighlightedDay(highlightedDay === day ? null : day);
+                        const newHighlightedDay = highlightedDay === day ? null : day;
+                        // 일차를 비활성화할 때 자동 재활성화 방지
+                        if (highlightedDay === day) {
+                          setUserClearedRoute(true);
+                        }
+                        setHighlightedDay(newHighlightedDay);
                       }}
                     >
                       <div className="flex items-center">
@@ -3515,7 +3536,6 @@ export default function MapPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setHighlightedDay(day);
                               openOptimizeConfirm(day);
                             }}
                             className="flex items-center space-x-1 px-2 py-1 bg-[#FF9800]/10 hover:bg-[#FF9800]/20 border border-[#FF9800]/30 hover:border-[#FF9800]/50 rounded-lg transition-all duration-200 group w-full sm:w-auto"
@@ -4179,8 +4199,10 @@ export default function MapPage() {
                 </button>
                 <button
                   onClick={() => {
+                    const dayNumber = optimizeConfirmModal.dayNumber;
                     closeOptimizeConfirm();
-                    optimizeRouteForDay(optimizeConfirmModal.dayNumber);
+                    setHighlightedDay(dayNumber);
+                    optimizeRouteForDay(dayNumber);
                   }}
                   className="flex-1 py-2.5 px-4 bg-[#FF9800]/20 hover:bg-[#FF9800]/30 border border-[#FF9800]/50 hover:border-[#FF9800]/70 rounded-xl text-[#FF9800] hover:text-[#FFA726] transition-all duration-200 font-medium"
                 >
