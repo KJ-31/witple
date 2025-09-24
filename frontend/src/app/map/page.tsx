@@ -2184,6 +2184,12 @@ export default function MapPage() {
   useEffect(() => {
     if (!mapInstance || !selectedItineraryPlaces.length || !showItinerary) return
 
+    // 최적화 모달이 열려있을 때는 기본 동선 렌더링하지 않음
+    if (optimizeConfirmModal.isOpen) {
+      console.log('최적화 모달이 열려있으므로 기본 동선 렌더링 건너뜀')
+      return
+    }
+
     console.log(`일차 선택 변경: ${highlightedDay}일차`)
 
     if (highlightedDay) {
