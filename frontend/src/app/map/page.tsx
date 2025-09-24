@@ -273,7 +273,6 @@ export default function MapPage() {
   // 장소를 일정에 추가/제거하는 함수
   const addPlaceToItinerary = (place: any) => {
     if (!place || !place.latitude || !place.longitude) {
-      console.error('유효하지 않은 장소 데이터:', place)
       return
     }
     
@@ -296,9 +295,6 @@ export default function MapPage() {
       return
     }
     
-    // 디버깅: 원본 데이터 구조 확인
-    console.log('추가할 장소 데이터:', place)
-
     // 현재 일정들을 일차별로 그룹핑
     const currentGroupedPlaces = selectedItineraryPlaces.reduce<{[key: number]: SelectedPlace[]}>((acc, p) => {
       const day = p.dayNumber || 1
@@ -421,8 +417,6 @@ export default function MapPage() {
   // activeMarkerIndex 변경 시 경로와 마커들 완전히 다시 렌더링
   useEffect(() => {
     if (currentSegments.length > 0 && mapInstance) {
-      console.log('activeMarkerIndex 변경됨, 경로와 마커들 완전히 다시 렌더링:', activeMarkerIndex);
-      
       // 기존 경로들 완전히 제거
       directionsRenderers.forEach(renderer => {
         if (renderer) {
@@ -516,11 +510,9 @@ export default function MapPage() {
         const placeIds = placesParam.split(',')
         const dayNumbers = dayNumbersParam.split(',').map(Number)
         const sourceTables = sourceTablesParam ? sourceTablesParam.split(',') : []
-        
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
         const places: SelectedPlace[] = []
         
-
         for (let i = 0; i < placeIds.length; i++) {
           try {
             let apiUrl
@@ -550,6 +542,7 @@ export default function MapPage() {
             } else {
             }
           } catch (error) {
+            console.error('장소 상세정보 로드 실패:', error);
           }
         }
         
@@ -583,7 +576,6 @@ export default function MapPage() {
       // places 데이터를 백엔드 형식에 맞게 변환
       // 일차별로 order를 1부터 시작하도록 계산
       const dayOrderMap: { [key: number]: number } = {}
-      
       const placesForBackend = selectedItineraryPlaces.map((place) => {
         let tableName = 'general'
         let placeId = place.id || ''
@@ -614,8 +606,6 @@ export default function MapPage() {
           placeId = place.id || ''
         }
 
-        console.log(`Place parsing: ${place.id} -> table_name: ${tableName}, id: ${placeId}`)
-
         // 잠금 상태 확인
         const lockKey = `${place.id}_${dayNumber}`;
         const isLocked = lockedPlaces[lockKey] || false;
@@ -639,20 +629,11 @@ export default function MapPage() {
         days: daysParam ? parseInt(daysParam) : undefined
       }
       
-      console.log('Original selectedItineraryPlaces:', JSON.stringify(selectedItineraryPlaces, null, 2))
-      console.log('Transformed placesForBackend:', JSON.stringify(placesForBackend, null, 2))
-      
       await updateTrip(parseInt(tripIdParam), tripData)
-      
-      // 성공 메시지 표시
-      console.log('여행 일정이 성공적으로 업데이트되었습니다!')
-      
       // 편집 모드 종료
       setIsEditMode(false)
       
     } catch (error: any) {
-      console.error('Trip 업데이트 오류:', error)
-      console.error('에러 응답 데이터:', error.response?.data)
       
       let errorMessage = error.message
       if (error.response?.data?.detail) {
@@ -664,8 +645,6 @@ export default function MapPage() {
           errorMessage = error.response.data.detail
         }
       }
-      
-      console.error(`여행 일정 업데이트에 실패했습니다: ${errorMessage}`)
     } finally {
       setIsUpdatingTrip(false)
     }
@@ -675,10 +654,8 @@ export default function MapPage() {
   const fetchNearbyPlaces = useCallback(async (categoryFilter?: string | null) => {
     try {
       setCategoryLoading(true)
-      console.log('fetchNearbyPlaces 호출됨:', { categoryFilter, selectedItineraryPlacesCount: selectedItineraryPlaces.length })
       
       if (selectedItineraryPlaces.length === 0) {
-        console.log('주변 장소 검색: 선택된 일정 장소가 없습니다.')
         setCategoryPlaces([])
         return
       }
@@ -697,15 +674,7 @@ export default function MapPage() {
           longitude: place.longitude
         }))
       
-      console.log('주변 장소 검색 요청:', {
-        url,
-        categoryFilter,
-        selectedPlacesCount: selectedPlacesData.length,
-        selectedPlaces: selectedPlacesData.slice(0, 2) // 첫 2개만 로그
-      })
-      
       if (selectedPlacesData.length === 0) {
-        console.log('주변 장소 검색: 좌표가 있는 일정 장소가 없습니다.')
         setCategoryPlaces([])
         return
       }
@@ -720,11 +689,6 @@ export default function MapPage() {
       
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('API 응답 상세:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorText: errorText
-        })
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
@@ -734,11 +698,6 @@ export default function MapPage() {
       // 백엔드에서 이미 카테고리 필터링된 결과가 옴
       setCategoryPlaces(places)
     } catch (error: any) {
-      console.error('주변 장소 검색 실패:', error)
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
@@ -802,11 +761,6 @@ export default function MapPage() {
 
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('API 응답 상세:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorText: errorText
-        })
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
@@ -819,19 +773,9 @@ export default function MapPage() {
       }
 
       // 검색 결과 로그
-      console.log('검색 결과:', {
-        totalPlaces: places.length,
-        searchRadius: searchRadius.toFixed(2),
-        categoryFilter: categoryFilter || '전체'
-      })
 
       setCategoryPlaces(places)
     } catch (error: any) {
-      console.error('지도 중심점 기준 주변 장소 검색 실패:', error)
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
@@ -866,8 +810,6 @@ export default function MapPage() {
         max_lng: ne.lng()
       }
 
-      console.log('지도 Bounds:', boundsData)
-
       // bounds를 중심점과 반경으로 변환
       const centerLat = (boundsData.min_lat + boundsData.max_lat) / 2
       const centerLng = (boundsData.min_lng + boundsData.max_lng) / 2
@@ -884,9 +826,6 @@ export default function MapPage() {
       // 모바일에서는 더 작은 반경 사용 (실제 보이는 영역에 맞춤)
       const radiusMultiplier = isMobile ? 0.5 : 0.7
       const searchRadius = Math.min(Math.max(diagonalDistance * radiusMultiplier, 1.0), 10.0) // 최소 1km, 최대 10km
-
-      console.log('계산된 검색 반경:', searchRadius.toFixed(2), 'km', isMobile ? '(모바일)' : '(PC)')
-
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api/proxy'
       const categoryParam = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : ''
       const url = `${API_BASE_URL}/api/v1/attractions/nearby?radius_km=${searchRadius.toFixed(2)}&limit=500${categoryParam}`
@@ -908,31 +847,13 @@ export default function MapPage() {
 
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('API 응답 상세:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorText: errorText
-        })
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
       const data = await response.json()
       let places = data.attractions || []
-
-      // 백엔드에서 이미 카테고리 필터링된 결과가 옴
-      console.log('Bounds 검색 결과:', {
-        totalPlaces: places.length,
-        bounds: boundsData,
-        categoryFilter: categoryFilter || '전체'
-      })
-
       setCategoryPlaces(places)
     } catch (error: any) {
-      console.error('지도 bounds 기준 장소 검색 실패:', error)
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
       setCategoryPlaces([])
     } finally {
       setCategoryLoading(false)
@@ -1028,7 +949,6 @@ export default function MapPage() {
 
   // 드래그 앤 드롭 핸들러들
   const handleDragStart = (e: React.DragEvent, place: SelectedPlace, dayNumber: number, index: number) => {
-    console.log('드래그 시작:', place.name, 'day:', dayNumber, 'index:', index);
     setDraggedItem({ placeId: place.id, dayNumber, index });
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', place.id);
@@ -1172,7 +1092,6 @@ export default function MapPage() {
     
     // 드래그가 진행되었다면 드롭 처리
     if (longPressData.isDragging && dragOverIndex && draggedItem) {
-      console.log('Long press 드롭:', dragOverIndex, draggedItem);
       const fakeEvent = {
         preventDefault: () => {},
         dataTransfer: { dropEffect: 'move' }
@@ -1216,20 +1135,15 @@ export default function MapPage() {
 
   const handleDrop = (e: React.DragEvent, targetIndex: number, targetDayNumber: number) => {
     e.preventDefault();
-    console.log('드롭 이벤트:', targetIndex, targetDayNumber, draggedItem);
     
     if (!draggedItem) {
-      console.log('draggedItem이 없음');
       return;
     }
     
     // 같은 위치로 이동하는 경우 무시
     if (draggedItem.dayNumber === targetDayNumber && draggedItem.index === targetIndex) {
-      console.log('같은 위치로 이동, 무시');
       return;
     }
-
-    console.log('장소 이동 실행:', `day${draggedItem.dayNumber}[${draggedItem.index}] -> day${targetDayNumber}[${targetIndex}]`);
 
     // 드래그한 장소를 새 위치로 이동
     setSelectedItineraryPlaces(prev => {
@@ -1241,7 +1155,6 @@ export default function MapPage() {
       
       // 드래그한 아이템 제거
       const [movedItem] = result.splice(draggedItemIndex, 1);
-      console.log('이동할 아이템:', movedItem?.name);
       
       // 날짜 변경
       movedItem.dayNumber = targetDayNumber;
@@ -1252,10 +1165,7 @@ export default function MapPage() {
       
       // 새 위치에 삽입 (목적지 날짜의 인덱스 기준)
       targetDayPlaces.splice(targetIndex, 0, movedItem);
-      
       const finalResult = [...otherDayPlaces, ...targetDayPlaces];
-      console.log('최종 결과:', finalResult.map(p => `${p.name}(day:${p.dayNumber})`));
-      
       return finalResult;
     });
 
@@ -1519,13 +1429,6 @@ export default function MapPage() {
       }
     }
 
-    console.log('제약 조건 최적화 결과:', {
-      finalOrder,
-      finalNames,
-      constraints,
-      totalDistance
-    });
-
     return { 
       order: finalOrder.filter(index => index !== -1), 
       totalDistance, 
@@ -1578,26 +1481,19 @@ export default function MapPage() {
     });
     setTransitInfoWindows([]);
     transitInfoWindowsRef.current = [];
-    
     // 가시성 상태 초기화
     setVisibleSegments(new Set());
     setActiveMarkerIndex(null);
     setCurrentSegments([]);
     setIsOptimizedRoute(false);
-    
     // 상태 메시지 제거
     setRouteStatus(null);
-    
     // 경로 구간 정보 초기화
     setRouteSegments([]);
-    
     // 캐싱된 경로 결과 초기화
     setCachedRouteResults([]);
-
     // 최적화 상태 리셋
     setIsOptimizedRoute(false);
-
-    console.log('모든 경로, 마커, 정보창이 제거되었습니다');
   };
 
   // 특정 일차와 구간에 해당하는 경로 정보 가져오기
@@ -1844,12 +1740,7 @@ export default function MapPage() {
 
   // 커스텀 교통수단 정보창 생성 (초기에는 숨김, 클릭시 표시)
   const createCustomTransitInfoWindows = async (allResults: any[], segmentDetails: any[]) => {
-    console.log('createCustomTransitInfoWindows 시작');
-    console.log('allResults.length:', allResults.length);
-    console.log('segmentDetails.length:', segmentDetails.length);
-    
     if (!mapInstance) {
-      console.log('mapInstance가 없음');
       return;
     }
     
@@ -1859,10 +1750,7 @@ export default function MapPage() {
       const result = allResults[i];
       const segment = segmentDetails[i];
       
-      console.log(`구간 ${i} 처리 중:`, segment);
-      
       if (!segment || !segment.transitDetails) {
-        console.log(`구간 ${i}: 교통수단 정보 없음`);
         continue;
       }
       
@@ -1962,25 +1850,17 @@ export default function MapPage() {
               segmentIndex: i
             };
             newInfoWindows.push(infoWindowData);
-            console.log(`구간 ${i}에 정보창 추가됨:`, infoWindowData);
           }
         }
       });
     }
-    
-    console.log('생성된 총 정보창 수:', newInfoWindows.length);
-    console.log('newInfoWindows:', newInfoWindows);
+
     setTransitInfoWindows(newInfoWindows);
     transitInfoWindowsRef.current = newInfoWindows;
   };
   
   // 특정 구간의 교통수단 정보 표시
   const showSegmentTransit = (segmentIndex: number) => {
-    console.log('showSegmentTransit 호출됨:', segmentIndex);
-    console.log('transitInfoWindowsRef.current:', transitInfoWindowsRef.current);
-    console.log('transitInfoWindows state:', transitInfoWindows);
-    console.log('mapInstance:', mapInstance);
-    
     setVisibleSegments(prev => {
       const newSet = new Set(prev);
       newSet.add(segmentIndex);
@@ -1991,20 +1871,16 @@ export default function MapPage() {
     let foundCount = 0;
     transitInfoWindowsRef.current.forEach(item => {
       if (item.segmentIndex === segmentIndex) {
-        console.log('해당 구간의 정보창 발견:', item);
         if (item.infoWindow && mapInstance) {
           item.infoWindow.open(mapInstance);
           foundCount++;
         }
       }
     });
-    console.log(`구간 ${segmentIndex}에서 ${foundCount}개의 정보창을 표시했습니다.`);
   };
 
   // 특정 구간의 교통수단 정보 숨기기
   const hideSegmentTransit = (segmentIndex: number) => {
-    console.log('hideSegmentTransit 호출됨:', segmentIndex);
-    
     setVisibleSegments(prev => {
       const newSet = new Set(prev);
       newSet.delete(segmentIndex);
@@ -2021,7 +1897,6 @@ export default function MapPage() {
         }
       }
     });
-    console.log(`구간 ${segmentIndex}에서 ${hiddenCount}개의 정보창을 숨겼습니다.`);
   };
 
   // 특정 구간의 경로에 지도 포커스
@@ -2040,8 +1915,6 @@ export default function MapPage() {
     mapInstance.fitBounds(bounds, {
       padding: 100 // 구간 주변에 여백 추가
     });
-    
-    console.log(`구간 ${segmentIndex}에 지도 포커스:`, segment);
   };
 
   // 전체 경로로 지도 포커스
@@ -2179,10 +2052,8 @@ export default function MapPage() {
         try {
           // DirectionsService 인스턴스 생성 테스트
           const testDirectionsService = new (window as any).google.maps.DirectionsService();
-          console.log('지도 및 Google Maps API 완전히 로드됨');
           setMapFullyLoaded(true);
         } catch (error) {
-          console.log('Google Maps API 아직 준비되지 않음, 재시도...');
           setTimeout(checkMapReady, 100);
         }
       };
@@ -2198,24 +2069,18 @@ export default function MapPage() {
       // 1일차에 장소가 2개 이상 있으면 자동으로 1일차 선택하고 기본 동선 렌더
       const day1Places = selectedItineraryPlaces.filter(place => place.dayNumber === 1)
       if (day1Places.length >= 2 && !highlightedDay && !userClearedRoute) {
-        console.log('지도 로드 완료 - 1일차 자동 선택 및 기본 동선 렌더링')
         setHighlightedDay(1)
-        // renderBasicRoute는 highlightedDay useEffect에서 자동으로 호출됨
       }
     }
   }, [selectedItineraryPlaces, loading, highlightedDay, mapInstance, showItinerary, userClearedRoute, mapFullyLoaded])
 
-  // highlightedDay 상태 변경 시 경로 관리 (일차 선택 시 기본 동선으로 렌더)
   useEffect(() => {
     if (!mapInstance || !selectedItineraryPlaces.length || !showItinerary) return
 
     // 최적화 모달이 열려있거나 최적화 중일 때는 기본 동선 렌더링하지 않음
     if (optimizeConfirmModal.isOpen || isOptimizing) {
-      console.log('최적화 모달이 열려있거나 최적화 중이므로 기본 동선 렌더링 건너뜀')
       return
     }
-
-    console.log(`일차 선택 변경: ${highlightedDay}일차`)
 
     if (highlightedDay) {
       // 일차가 선택되면 사용자가 경로를 지운 상태를 리셋
@@ -2224,14 +2089,12 @@ export default function MapPage() {
       // 일차 선택 시: 해당 일차의 기본 동선 렌더링
       const dayPlaces = selectedItineraryPlaces.filter(place => place.dayNumber === highlightedDay)
       if (dayPlaces.length >= 2 && (window as any).google?.maps?.DirectionsService) {
-        console.log(`${highlightedDay}일차 선택 - 기본 동선 렌더링`)
         setTimeout(() => {
           renderBasicRoute(highlightedDay)
         }, 100)
       }
     } else {
       // 일차 비선택 시: 경로 지우기
-      console.log('일차 비선택 - 경로 지우기')
       clearRoute()
     }
   }, [highlightedDay, mapInstance, selectedItineraryPlaces, showItinerary])
@@ -2300,11 +2163,8 @@ export default function MapPage() {
         });
 
         marker.addListener('click', () => {
-          console.log(`마커 ${i} 클릭됨, 현재 activeMarkerIndex:`, activeMarkerIndex);
-          
           // END 마커는 비활성 처리 (클릭해도 상태 변경 없음)
           if (i === allPoints.length - 1) {
-            console.log('END 마커 클릭 - 비활성 처리로 아무 동작 없음');
             return;
           }
 
@@ -2322,16 +2182,13 @@ export default function MapPage() {
 
           // START 마커 또는 숫자 마커의 구간 정보 표시
           if (i === 0) {
-            console.log('START 마커 클릭 - 구간 0 표시');
             showSegmentTransit(0);
             focusOnSegment(0, segments);
           } else if (i > 0 && i < allPoints.length - 1) {
             if (i < segments.length) {
-              console.log(`숫자 마커 ${i} 클릭 - 구간 ${i} 표시`);
               showSegmentTransit(i);
               focusOnSegment(i, segments);
             } else {
-              console.log(`구간 ${i}는 segments 범위를 벗어남`);
             }
           }
         });
@@ -2393,9 +2250,7 @@ export default function MapPage() {
         return;
       }
 
-      console.log(`${dayNumber}일차 기본 동선:`, segments);
       await renderRoute(segments, false, true); // 기본 동선 - 활성 구간 무시하고 전체 렌더
-
     } catch (error) {
       console.error(`${dayNumber}일차 Basic route error:`, error);
       updateStatus(`${dayNumber}일차 기본 동선 표시 중 오류가 발생했습니다.`, 'error');
@@ -2409,7 +2264,6 @@ export default function MapPage() {
     ignoreActive: boolean = false
   ) => {
     if (!(window as any).google?.maps?.DirectionsService) {
-      console.error('Google Maps DirectionsService not available');
       return;
     }
 
@@ -2435,7 +2289,6 @@ export default function MapPage() {
 
         const result = await new Promise<any>((resolve, reject) => {
           directionsService.route(request, (result: any, status: any) => {
-            console.log(`${segment.origin.name} -> ${segment.destination.name}:`, status);
             if (status === 'OK' && result) {
               resolve(result);
             } else {
@@ -2642,7 +2495,6 @@ export default function MapPage() {
         
         // 렌더러 배열에 추가 (정리를 위해)
         renderers.push(polyline);
-        console.log(`스텝 ${stepIndex}: ${step.travel_mode || '알 수 없음'} - ${stepColor} 폴리라인 생성`);
       }
     }
   };
@@ -2650,7 +2502,6 @@ export default function MapPage() {
   // activeMarkerIndex에 따라 캐싱된 경로 결과로 다시 렌더링하는 함수
   const renderRouteWithActiveSegment = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     if (cachedRouteResults.length === 0 || cachedRouteResults.length !== segments.length) {
-      console.log('캐싱된 경로 결과가 없거나 일치하지 않습니다.');
       return;
     }
 
@@ -4417,8 +4268,6 @@ export default function MapPage() {
                           }
                         }
                       });
-                      
-                      console.log('저장할 placesWithLockStatus:', placesWithLockStatus)
 
                       // API로 DB에 저장
                       const tripData = {
