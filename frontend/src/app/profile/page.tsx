@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
+import BottomNavigation from '../../components/BottomNavigation'
 
 // 여행 상태를 날짜 기준으로 계산하는 함수
 const getTripStatus = (startDate: string, endDate: string): 'planned' | 'active' | 'completed' => {
@@ -1899,7 +1900,7 @@ export default function ProfilePage() {
       )}
 
       {/* Logout Button at Bottom */}
-      <div className="px-4 pb-8">
+      <div className="px-4 pb-24">
         <button
           onClick={handleLogout}
           className="w-full bg-red-500 text-white py-4 rounded-2xl font-medium hover:bg-red-600 transition-colors"
@@ -1907,6 +1908,9 @@ export default function ProfilePage() {
           로그아웃
         </button>
       </div>
+
+      {/* Bottom Navigation */}
+      <BottomNavigation />
     </div>
   )
 }
