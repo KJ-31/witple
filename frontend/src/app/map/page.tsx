@@ -2120,7 +2120,7 @@ export default function MapPage() {
     }
   }, [highlightedDay, mapInstance, selectedItineraryPlaces, showItinerary])
 
-  // 순서 마커 생성 (START, 1, 2, 3, END)
+  // 순서 마커 생성 (1, 2, 3, 4, 5...)
   const createSequenceMarkers = async (segments: {origin: {lat: number, lng: number, name: string}, destination: {lat: number, lng: number, name: string}}[], isOptimized: boolean = false) => {
     sequenceMarkers.forEach(marker => marker.setMap(null));
     
@@ -2135,21 +2135,19 @@ export default function MapPage() {
       try {
         const coords = { lat: allPoints[i].lat, lng: allPoints[i].lng };
         
-        const markerLabel = i === 0 ? 'START' : 
-                           i === allPoints.length - 1 ? 'END' : 
-                           i.toString();
+        const markerLabel = (i + 1).toString();
         
         // 그라데이션 색상 계산 함수 (START에서 진하게 시작해서 END로 갈수록 옅어짐)
         const getGradientColor = (index: number, total: number, isOptimized: boolean) => {
-          // 모든 핀에 그라데이션 적용 (START, 1, 2, 3, 4, ..., END)
+          // 모든 핀에 그라데이션 적용 (1, 2, 3, 4, 5, ...)
           const ratio = index / Math.max(1, total - 1);
           
           // #3E68FF (시작 - 진한 파랑): HSL(227, 100%, 62%)
           // #3eb2ff (끝 - 연한 파랑): HSL(227, 100%, 80%)
           const hue = 227;
           const saturation = 100;
-          const startLightness = 62; // 진한 색상 (START)
-          const endLightness = 80;   // 연한 색상 (END)
+          const startLightness = 62; // 진한 색상 (첫 번째)
+          const endLightness = 80;   // 연한 색상 (마지막)
           
           // ratio가 0일때 가장 어둡고(62%), ratio가 1일때 가장 밝음(80%)
           const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
@@ -2385,8 +2383,8 @@ export default function MapPage() {
           
           const hue = 227;
           const saturation = 100;
-          const startLightness = 62; // 진한 색상 (START)
-          const endLightness = 80;   // 연한 색상 (END)
+          const startLightness = 62; // 진한 색상 (첫 번째)
+          const endLightness = 80;   // 연한 색상 (마지막)
           
           const lightness = Math.round(startLightness + ratio * (endLightness - startLightness));
           segmentColor = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
