@@ -85,6 +85,10 @@ app.include_router(trips.router, prefix="/api/v1/trips", tags=["trips"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(batch_processing.router, prefix="/api/v1", tags=["batch-processing"])
 
+# 🚀 성능 테스트 라우터 추가
+from routers import performance_test
+app.include_router(performance_test.router, prefix="/api/v1", tags=["performance-test"])
+
 
 @app.get("/")
 async def root():
