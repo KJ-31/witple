@@ -16,9 +16,6 @@ import logging
 
 from cache_utils import cache
 from routers.recommendations2 import fetch_recommendations_with_fallback
-from routers.users import get_user_profile
-from routers.trips import get_user_trips
-from routers.attractions import get_attraction_by_id
 
 logger = logging.getLogger(__name__)
 
