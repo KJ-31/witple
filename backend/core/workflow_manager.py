@@ -5,6 +5,8 @@ from typing import Literal, Dict, Any, List
 from datetime import datetime, timedelta
 import threading
 import time
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 from core.travel_context import get_travel_context
 from core.workflow_nodes import (
     TravelState, classify_query, rag_processing_node, information_search_node,
@@ -112,14 +114,26 @@ class TravelWorkflowManager:
 
     def __init__(self):
         self.workflow = create_travel_workflow() if LANGGRAPH_AVAILABLE else None
-        # 세션별 상태 관리
+        # 세션별 상태 관리 (스레드 안전성 보장)
         self.session_states = {}  # session_id: state_dict
         self.session_timestamps = {}  # session_id: last_access_time
         self.session_timeout = timedelta(hours=2)  # 2시간 타임아웃
+        self._session_lock = threading.Lock()  # 레이스 컨디션 방지
 
-        # 세션 정리를 위한 백그라운드 스레드
-        self._cleanup_thread = threading.Thread(target=self._cleanup_expired_sessions, daemon=True)
-        self._cleanup_thread.start()
+        # 안전한 세션 정리를 위한 스케줄러
+        self._scheduler = BackgroundScheduler()
+        self._scheduler.add_job(
+            func=self._cleanup_expired_sessions,
+            trigger='interval',
+            minutes=10,
+            max_instances=1,  # 중복 실행 방지
+            coalesce=True,    # 지연된 작업 합치기
+            id='session_cleanup'
+        )
+        self._scheduler.start()
+
+        # 앱 종료시 안전한 정리
+        atexit.register(self._safe_shutdown)
 
         # 호환성을 위한 기본 상태 (기존 코드와의 호환성)
         self.current_travel_state = {
@@ -135,32 +149,34 @@ class TravelWorkflowManager:
         return self.current_travel_state
 
     def get_session_state(self, session_id: str) -> Dict[str, Any]:
-        """세션별 여행 상태 조회"""
-        if session_id not in self.session_states:
-            self.session_states[session_id] = {
-                "last_query": "",
-                "travel_plan": {},
-                "places": [],
-                "context": "",
-                "timestamp": None
-            }
+        """세션별 여행 상태 조회 (스레드 안전)"""
+        with self._session_lock:
+            if session_id not in self.session_states:
+                self.session_states[session_id] = {
+                    "last_query": "",
+                    "travel_plan": {},
+                    "places": [],
+                    "context": "",
+                    "timestamp": None
+                }
 
-        # 세션 접근 시간 업데이트
-        self.session_timestamps[session_id] = datetime.now()
-        return self.session_states[session_id]
+            # 세션 접근 시간 업데이트
+            self.session_timestamps[session_id] = datetime.now()
+            return self.session_states[session_id].copy()  # 깊은 복사로 반환
 
     def reset_travel_state(self, session_id: str = None):
-        """여행 상태 초기화"""
+        """여행 상태 초기화 (스레드 안전)"""
         if session_id:
             # 특정 세션 초기화
-            self.session_states[session_id] = {
-                "last_query": "",
-                "travel_plan": {},
-                "places": [],
-                "context": "",
-                "timestamp": None
-            }
-            self.session_timestamps[session_id] = datetime.now()
+            with self._session_lock:
+                self.session_states[session_id] = {
+                    "last_query": "",
+                    "travel_plan": {},
+                    "places": [],
+                    "context": "",
+                    "timestamp": None
+                }
+                self.session_timestamps[session_id] = datetime.now()
         else:
             # 기본 상태 초기화 (호환성)
             self.current_travel_state.clear()
@@ -173,41 +189,63 @@ class TravelWorkflowManager:
             })
 
     def update_travel_state(self, new_state: Dict[str, Any], session_id: str = None):
-        """여행 상태 업데이트"""
+        """여행 상태 업데이트 (스레드 안전)"""
         if session_id:
-            if session_id not in self.session_states:
-                self.get_session_state(session_id)  # 상태 초기화
-            self.session_states[session_id].update(new_state)
-            self.session_timestamps[session_id] = datetime.now()
+            with self._session_lock:
+                if session_id not in self.session_states:
+                    # 상태 초기화 (락 내부에서)
+                    self.session_states[session_id] = {
+                        "last_query": "",
+                        "travel_plan": {},
+                        "places": [],
+                        "context": "",
+                        "timestamp": None
+                    }
+                self.session_states[session_id].update(new_state)
+                self.session_timestamps[session_id] = datetime.now()
         else:
             # 기본 상태 업데이트 (호환성)
             self.current_travel_state.update(new_state)
 
     def _cleanup_expired_sessions(self):
-        """만료된 세션 정리 (백그라운드 스레드)"""
-        while True:
-            try:
-                current_time = datetime.now()
-                expired_sessions = []
+        """만료된 세션 정리 (스케줄러 기반 - 스레드 안전)"""
+        try:
+            current_time = datetime.now()
+            expired_sessions = []
 
-                for session_id, last_access in self.session_timestamps.items():
+            # 만료된 세션 식별 (락으로 보호)
+            with self._session_lock:
+                for session_id, last_access in list(self.session_timestamps.items()):
                     if current_time - last_access > self.session_timeout:
                         expired_sessions.append(session_id)
 
+                # 만료된 세션 정리
                 for session_id in expired_sessions:
                     print(f"🧹 만료된 세션 정리: {session_id}")
                     self.session_states.pop(session_id, None)
                     self.session_timestamps.pop(session_id, None)
 
-                # 10분마다 정리
-                time.sleep(600)
-            except Exception as e:
-                print(f"❌ 세션 정리 중 오류: {e}")
-                time.sleep(600)  # 오류 발생 시에도 계속 실행
+            if expired_sessions:
+                print(f"✅ {len(expired_sessions)}개 만료 세션 정리 완료")
+
+        except Exception as e:
+            print(f"❌ 세션 정리 중 오류: {e}")
+            # 예외 발생해도 스케줄러는 계속 작동
+
+    def _safe_shutdown(self):
+        """안전한 종료 처리"""
+        try:
+            if hasattr(self, '_scheduler') and self._scheduler.running:
+                print("🛑 워크플로우 매니저 스케줄러 종료 중...")
+                self._scheduler.shutdown(wait=False)
+                print("✅ 워크플로우 매니저 안전하게 종료됨")
+        except Exception as e:
+            print(f"❌ 워크플로우 매니저 종료 중 오류: {e}")
 
     def get_session_count(self) -> int:
-        """현재 활성 세션 수 조회"""
-        return len(self.session_states)
+        """현재 활성 세션 수 조회 (스레드 안전)"""
+        with self._session_lock:
+            return len(self.session_states)
 
     def process_simple_fallback(self, query: str, conversation_history: List[str] = None) -> Dict[str, Any]:
         """LangGraph 없이 단순 처리"""
